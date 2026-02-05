@@ -34,9 +34,11 @@ jobs:
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             os_name: linux
+            bundles: deb,rpm,appimage
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
             os_name: windows
+            bundles: msi,nsis
 
     runs-on: ${{ matrix.platform }}
 
@@ -125,7 +127,7 @@ jobs:
           releaseDraft: true
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
           includeDebug: false
-          args: --target ${{ matrix.target }} --bundles deb,rpm,appimage,msi,nsis
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
