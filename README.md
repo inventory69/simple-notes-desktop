@@ -34,20 +34,24 @@ Download the latest release for your platform:
 | **Windows** | [Download](https://github.com/inventory69/simple-notes-desktop/releases/latest) | `.msi` / `.exe` |
 | **Linux (Debian/Ubuntu)** | [Download](https://github.com/inventory69/simple-notes-desktop/releases/latest) | `.deb` |
 | **Linux (Fedora/RHEL)** | [Download](https://github.com/inventory69/simple-notes-desktop/releases/latest) | `.rpm` |
-| **Linux (Universal)** | [Download](https://github.com/inventory69/simple-notes-desktop/releases/latest) | `.AppImage` |
+| **Arch Linux** | [See installation guide](docs/ARCH_INSTALL.md) | AUR / AppImage |
 
 ---
 
 ## 📱 Screenshots
 
 <p align="center">
-  <img src="screenshots/editor-dark.png" width="400" alt="Editor Dark Mode">
-  <img src="screenshots/editor-light.png" width="400" alt="Editor Light Mode">
+  <img src="screenshots/note_with_preview.png" width="700" alt="Note Editor with Markdown Preview">
+</p>
+
+<p align="center">
+  <img src="screenshots/checklist.png" width="400" alt="Checklist View">
+  <img src="screenshots/settings.png" width="400" alt="Settings Dialog">
 </p>
 
 <div align="center">
 
-📝 Markdown Editor &nbsp;•&nbsp; ✅ Checklists &nbsp;•&nbsp; 🔄 WebDAV Sync &nbsp;•&nbsp; 🌓 Dark/Light Mode
+📝 Markdown Editor &nbsp;•&nbsp; ✅ Checklists &nbsp;•&nbsp; 🔄 WebDAV Sync &nbsp;•&nbsp; 🔽 System Tray &nbsp;•&nbsp; ⚙️ Settings
 
 </div>
 
@@ -184,6 +188,6 @@ MIT License — see [LICENSE](LICENSE)
 
 <div align="center">
 
-**v0.1.0** · Built with ❤️ using [Tauri](https://tauri.app/) + [CodeMirror](https://codemirror.net/)
+**v0.2.0** · Built with ❤️ using [Tauri](https://tauri.app/) + [CodeMirror](https://codemirror.net/)
 
 </div>

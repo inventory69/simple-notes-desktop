@@ -1,7 +1,7 @@
 {
   "name": "simple-notes-desktop",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "tauri": "tauri",
@@ -29,6 +29,7 @@
     "@codemirror/state": "^6.5.4",
     "@codemirror/view": "^6.39.12",
     "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-autostart": "^2.5.1",
     "@tauri-apps/plugin-opener": "^2",
     "codemirror": "^6.0.2",
     "dompurify": "^3.3.1",

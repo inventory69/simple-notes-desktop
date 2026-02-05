@@ -82,10 +82,17 @@ jobs:
         if: matrix.os_name == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libfuse2
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Run frontend tests
+        run: pnpm test
+
+      - name: Run Rust tests
+        working-directory: src-tauri
+        run: cargo test --lib
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
@@ -104,23 +111,21 @@ jobs:
             | Windows | `.msi` / `.exe` | Installer |
             | Linux (Debian/Ubuntu) | `.deb` | apt install |
             | Linux (Fedora/RHEL) | `.rpm` | dnf install |
-            | Linux (Universal) | `.AppImage` | Portable |
+            | Linux (All) | `.AppImage` | Portable, needs libfuse2 |
+            | Arch Linux | AUR | `yay -S simple-notes-desktop-bin` |
 
-            ## What's Changed
+            ## What's New
+
+            - 🔽 System tray support (minimize to background)
+            - 🚀 Autostart on boot
+            - 🎨 New app icon
+            - 🖼️ Improved dialog styling
 
             See [CHANGELOG.md](https://github.com/inventory69/simple-notes-desktop/blob/main/CHANGELOG.md)
-
-            ## Installation Notes
-
-            **Linux AppImage**: Requires fuse2:
-            ```bash
-            sudo apt install libfuse2  # Debian/Ubuntu
-            sudo pacman -S fuse2       # Arch
-            ```
           releaseDraft: true
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
           includeDebug: false
-          args: --target ${{ matrix.target }}
+          args: --target ${{ matrix.target }} --bundles deb,rpm,appimage,msi,nsis
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4

@@ -113,3 +113,11 @@ export async function getAppVersion() {
 export async function getDesktopEnvironment() {
   return await invoke('get_desktop_environment');
 }
+
+/**
+ * Update the minimize-to-tray runtime setting
+ * @param {boolean} enabled - Whether minimize-to-tray is enabled
+ */
+export async function updateTraySetting(enabled) {
+  return await invoke('update_tray_setting', { enabled });
+}

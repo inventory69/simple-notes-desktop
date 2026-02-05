@@ -10,6 +10,8 @@ export class SettingsDialog {
     this.dialog = document.getElementById('settings-dialog');
     this.themeSelect = document.getElementById('theme-select');
     this.autosaveCheckbox = document.getElementById('autosave-checkbox');
+    this.trayCheckbox = document.getElementById('tray-checkbox');
+    this.autostartCheckbox = document.getElementById('autostart-checkbox');
     this.deviceIdInput = document.getElementById('device-id');
     this.saveBtn = document.getElementById('save-settings-btn');
     this.cancelBtn = document.getElementById('cancel-settings-btn');
@@ -65,6 +67,8 @@ export class SettingsDialog {
       
       this.themeSelect.value = settings.theme;
       this.autosaveCheckbox.checked = settings.autosave;
+      this.trayCheckbox.checked = settings.minimize_to_tray || false;
+      this.autostartCheckbox.checked = settings.autostart || false;
       this.deviceIdInput.value = deviceId;
       
       this.dialog.classList.remove('hidden');
@@ -89,10 +93,14 @@ export class SettingsDialog {
     try {
       const settings = {
         theme: this.themeSelect.value,
-        autosave: this.autosaveCheckbox.checked
+        autosave: this.autosaveCheckbox.checked,
+        minimize_to_tray: this.trayCheckbox.checked,
+        autostart: this.autostartCheckbox.checked,
       };
       
       await tauri.saveSettings(settings);
+      // Update tray runtime state immediately (no restart needed)
+      await tauri.updateTraySetting(settings.minimize_to_tray);
       this.applyTheme(settings.theme);
       
       if (this.onSaveCallback) {

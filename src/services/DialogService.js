@@ -158,8 +158,7 @@ class DialogService {
       this.messageEl.innerHTML = `
         ${message}
         <input type="text" id="dialog-input" class="dialog-input" 
-               placeholder="${placeholder}" value="${defaultValue}" 
-               style="margin-top: 12px; width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-color); color: var(--text-color);">
+               placeholder="${placeholder}" value="${defaultValue}">
       `;
       this.confirmBtn.textContent = confirmText;
       this.cancelBtn.textContent = cancelText;

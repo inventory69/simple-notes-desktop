@@ -8,8 +8,13 @@ use error::{AppError, Result};
 use models::{Note, NoteMetadata};
 use storage::{Credentials, Settings};
 use std::sync::Mutex;
-use tauri::{AppHandle, State};
+use tauri::{
+    AppHandle, Manager, State,
+    menu::{MenuBuilder, MenuItemBuilder},
+    tray::TrayIconBuilder,
+};
 use tauri_plugin_store::StoreExt;
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use uuid::Uuid;
 use webdav::WebDavClient;
 
@@ -229,7 +234,17 @@ async fn get_settings(app: AppHandle) -> Result<Settings> {
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
     
-    Ok(Settings { theme, autosave })
+    let minimize_to_tray = store
+        .get("minimize_to_tray")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    
+    let autostart = store
+        .get("autostart")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    
+    Ok(Settings { theme, autosave, minimize_to_tray, autostart })
 }
 
 #[tauri::command]
@@ -240,6 +255,15 @@ async fn save_settings(settings: Settings, app: AppHandle) -> Result<()> {
     
     store.set("theme", serde_json::json!(settings.theme));
     store.set("autosave", serde_json::json!(settings.autosave));
+    store.set("minimize_to_tray", serde_json::json!(settings.minimize_to_tray));
+    store.set("autostart", serde_json::json!(settings.autostart));
+    
+    // Handle autostart toggle
+    if settings.autostart {
+        let _ = app.autolaunch().enable();
+    } else {
+        let _ = app.autolaunch().disable();
+    }
     
     store
         .save()
@@ -271,13 +295,127 @@ fn get_desktop_environment() -> Option<String> {
     None
 }
 
+/// Update the minimize-to-tray runtime setting without restarting
+#[tauri::command]
+async fn update_tray_setting(
+    enabled: bool,
+    state: State<'_, TraySettings>,
+) -> Result<()> {
+    let mut lock = state.0.lock().unwrap();
+    *lock = enabled;
+    Ok(())
+}
+
+/// State to track minimize-to-tray setting at runtime
+struct TraySettings(Mutex<bool>);
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            Some(vec!["--minimized"]),
+        ))
         .manage(WebDavState(Mutex::new(None)))
         .manage(DeviceIdState(Mutex::new(None)))
+        .manage(TraySettings(Mutex::new(false)))
+        .setup(|app| {
+            // Load minimize_to_tray setting
+            if let Ok(store) = app.store("settings.json") {
+                let minimize = store
+                    .get("minimize_to_tray")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let state = app.state::<TraySettings>();
+                *state.0.lock().unwrap() = minimize;
+                
+                // Sync autostart state
+                let autostart = store
+                    .get("autostart")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                if autostart {
+                    let _ = app.autolaunch().enable();
+                }
+            }
+            
+            // Build tray menu
+            let show_item = MenuItemBuilder::with_id("show", "Show Window")
+                .build(app)?;
+            let quit_item = MenuItemBuilder::with_id("quit", "Quit")
+                .build(app)?;
+            
+            let tray_menu = MenuBuilder::new(app)
+                .item(&show_item)
+                .separator()
+                .item(&quit_item)
+                .build()?;
+            
+            // Load tray icon embedded at compile time
+            let icon_bytes = include_bytes!("../icons/32x32.png");
+            let icon = tauri::image::Image::from_bytes(icon_bytes)
+                .expect("failed to load tray icon")
+                .to_owned();
+            
+            // Create tray icon
+            let _tray = TrayIconBuilder::new()
+                .icon(icon)
+                .menu(&tray_menu)
+                .tooltip("Simple Notes Desktop")
+                .on_menu_event(|app, event| {
+                    match event.id().as_ref() {
+                        "show" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.unminimize();
+                                let _ = window.set_focus();
+                            }
+                        }
+                        "quit" => {
+                            app.exit(0);
+                        }
+                        _ => {}
+                    }
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let tauri::tray::TrayIconEvent::Click { button: tauri::tray::MouseButton::Left, .. } = event {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.unminimize();
+                            let _ = window.set_focus();
+                        }
+                    }
+                })
+                .build(app)?;
+            
+            // Set window icon for taskbar (KDE Plasma, etc.)
+            let window_icon_bytes = include_bytes!("../icons/128x128.png");
+            let window_icon = tauri::image::Image::from_bytes(window_icon_bytes)
+                .expect("failed to load window icon")
+                .to_owned();
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_icon(window_icon);
+            }
+            
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let app = window.app_handle();
+                let tray_settings = app.state::<TraySettings>();
+                let minimize = *tray_settings.0.lock().unwrap();
+                
+                if minimize {
+                    // Prevent window from closing, hide instead
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+                // If minimize_to_tray is false, window closes normally (app quits)
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             connect,
             list_notes,
@@ -293,6 +431,7 @@ pub fn run() {
             save_settings,
             get_app_version,
             get_desktop_environment,
+            update_tray_setting,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

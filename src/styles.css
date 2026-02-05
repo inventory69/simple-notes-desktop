@@ -211,6 +211,15 @@ body {
   user-select: none;
 }
 
+.form-hint {
+  display: block;
+  margin-top: 0.25rem;
+  margin-left: 1.75rem;
+  font-size: 0.8rem;
+  color: var(--color-fg);
+  opacity: 0.6;
+}
+
 /* Settings Sections */
 .settings-section {
   margin-top: 2rem;
@@ -274,25 +283,30 @@ body {
 /* Button Styles */
 .btn-primary,
 .btn-secondary,
-.btn-danger-small {
-  padding: 0.75rem 1.25rem;
+.btn-danger,
+.btn-danger-small,
+.btn-warning,
+.btn-success {
+  padding: 0.75rem 1.5rem;
   border: none;
   border-radius: 8px;
   cursor: pointer;
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 500;
   transition: all 0.2s ease;
+  letter-spacing: 0.01em;
 }
 
 .btn-primary {
   background-color: var(--color-primary);
   color: white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
 .btn-primary:hover {
   background-color: var(--color-primary-hover);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 102, 204, 0.3);
+  box-shadow: 0 4px 12px rgba(0, 102, 204, 0.25);
 }
 
 .btn-primary:active {
@@ -300,18 +314,21 @@ body {
 }
 
 .btn-secondary {
-  background-color: var(--color-hover);
+  background-color: transparent;
   color: var(--color-fg);
   border: 1px solid var(--color-border);
 }
 
 .btn-secondary:hover {
-  background-color: var(--color-border);
+  background-color: var(--color-hover);
+  border-color: var(--color-fg);
+  transform: translateY(-1px);
 }
 
 .btn-danger-small {
-  background-color: var(--color-danger);
-  color: white;
+  background-color: transparent;
+  color: var(--color-danger);
+  border: 1px solid var(--color-danger);
   padding: 0.5rem 1rem;
   font-size: 0.875rem;
   font-weight: 500;
@@ -327,7 +344,8 @@ body {
 }
 
 .btn-danger-small:hover {
-  background-color: #c82333;
+  background-color: var(--color-danger);
+  color: white;
   transform: translateY(-1px);
 }
 
@@ -842,8 +860,9 @@ body {
 
 /* Universal Dialog Styles */
 .universal-dialog-content {
-  max-width: 420px;
+  max-width: 440px;
   text-align: center;
+  padding: 2.5rem;
 }
 
 .dialog-header {
@@ -926,28 +945,60 @@ body {
   display: flex;
   gap: 0.75rem;
   justify-content: center;
+  margin-top: 0.5rem;
+}
+
+.dialog-actions button {
+  min-width: 100px;
+}
+
+.dialog-input {
+  margin-top: 0.75rem;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background-color: var(--color-bg);
+  color: var(--color-fg);
+  font-size: 1rem;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.dialog-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(77, 159, 255, 0.2);
+}
+
+[data-theme="dark"] .dialog-input {
+  background-color: #2a2a2a;
+  border-color: #444;
 }
 
 .btn-warning {
   background-color: #ffc107;
   color: #212529;
   font-weight: 500;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
 .btn-warning:hover {
   background-color: #e0a800;
   transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(255, 193, 7, 0.3);
 }
 
 .btn-success {
   background-color: var(--color-success);
   color: white;
   font-weight: 500;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
 .btn-success:hover {
   background-color: #218838;
   transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
 }
 
 /* Ensure btn-danger is defined */
@@ -955,9 +1006,11 @@ body {
   background-color: var(--color-danger);
   color: white;
   font-weight: 500;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
 .btn-danger:hover {
   background-color: #c82333;
   transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3);
 }

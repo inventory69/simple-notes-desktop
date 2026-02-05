@@ -1,0 +1,7 @@
+[build]
+# Parallel Compilation für schnellere Builds
+jobs = 4
+
+# Größenoptimierungen für Linux
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-Wl,--gc-sections"]

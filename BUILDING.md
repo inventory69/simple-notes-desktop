@@ -60,18 +60,18 @@ Das erstellt alle verfügbaren Pakete für deine Plattform:
 
 | Plattform | Ausgabe |
 |-----------|---------|
-| Linux | `.deb`, `.rpm`, `.AppImage` |
+| Linux | `.deb`, `.rpm` |
 | Windows | `.msi`, `.exe` |
 
 Die Dateien findest du unter:
 ```
 src-tauri/target/release/bundle/
-├── appimage/
-│   └── Simple Notes Desktop_0.1.0_amd64.AppImage
 ├── deb/
 │   └── Simple Notes Desktop_0.1.0_amd64.deb
-└── rpm/
-    └── Simple Notes Desktop-0.1.0-1.x86_64.rpm
+├── rpm/
+│   └── Simple Notes Desktop-0.1.0-1.x86_64.rpm
+└── msi/ / nsis/
+    └── Simple Notes Desktop_0.1.0_x64-setup.exe
 ```
 
 ### Raw Build (ohne Wrapper)
@@ -94,34 +94,35 @@ pnpm tauri build
 # Nur DEB
 pnpm tauri build --bundles deb
 
-# Nur AppImage
-pnpm tauri build --bundles appimage
-
 # Nur RPM
 pnpm tauri build --bundles rpm
 ```
 
 ---
 
-## AppImage manuell erstellen
+## Linux Installation (lokal gebaut)
 
-Falls `linuxdeploy` auf deinem System nicht funktioniert (z.B. strip-Inkompatibilität auf Arch Linux):
+Nach dem Build kannst du die Pakete direkt installieren:
 
 ```bash
-# 1. Build starten (AppImage wird evtl. fehlschlagen)
-pnpm build
+# Debian/Ubuntu
+sudo apt install ./src-tauri/target/release/bundle/deb/*.deb
 
-# 2. Icon-Naming fixen
-cd src-tauri/target/release/bundle/appimage
-cp "Simple Notes Desktop.AppDir/Simple Notes Desktop.png" \
-   "Simple Notes Desktop.AppDir/simple-notes-desktop.png"
-
-# 3. AppImage manuell erstellen
-ARCH=x86_64 appimagetool "Simple Notes Desktop.AppDir" \
-  "Simple Notes Desktop_0.1.0_amd64.AppImage"
+# Fedora/RHEL/CentOS
+sudo dnf install ./src-tauri/target/release/bundle/rpm/*.rpm
 ```
 
-Der `pnpm build` Wrapper versucht dies automatisch als Fallback.
+Alle Abhängigkeiten werden automatisch durch den Package Manager aufgelöst.
+
+---
+
+## Warum kein AppImage?
+
+AppImage ist auf vielen Systemen (besonders Arch Linux) problematisch wegen `linuxdeploy` Inkompatibilität mit dem `strip`-Tool. Die DEB/RPM Pakete sind:
+- ✅ Kleiner (~4 MB statt 96 MB)
+- ✅ Saubere Dependency-Auflösung
+- ✅ Native Integration in den Package Manager
+- ✅ Einfacher zu warten
 
 ---
 

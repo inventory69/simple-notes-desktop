@@ -1,6 +1,6 @@
 [package]
 name = "simple-notes-desktop"
-version = "0.1.0"
+version = "0.2.0"
 description = "Desktop app for Simple Notes with WebDAV sync"
 authors = ["inventory69"]
 license = "MIT"
@@ -20,9 +20,10 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-opener = "2"
 tauri-plugin-store = "2"
+tauri-plugin-autostart = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", features = ["json"] }
@@ -33,4 +34,12 @@ tokio = { version = "1", features = ["full"] }
 base64 = "0.22"
 regex = "1"
 urlencoding = "2.1.3"
+
+# Release Profil Optimierungen
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
 
