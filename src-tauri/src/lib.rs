@@ -1,0 +1,300 @@
+mod error;
+mod markdown;
+mod models;
+mod storage;
+mod webdav;
+
+use error::{AppError, Result};
+use models::{Note, NoteMetadata};
+use storage::{Credentials, Settings};
+use std::sync::Mutex;
+use tauri::{AppHandle, State};
+use tauri_plugin_store::StoreExt;
+use uuid::Uuid;
+use webdav::WebDavClient;
+
+/// Global WebDAV Client State
+struct WebDavState(Mutex<Option<WebDavClient>>);
+
+/// Global Device ID
+struct DeviceIdState(Mutex<Option<String>>);
+
+/// Generiert oder lädt Device ID
+fn get_or_create_device_id(app: &AppHandle, state: &State<DeviceIdState>) -> Result<String> {
+    let mut device_id_lock = state.0.lock().unwrap();
+    
+    if let Some(id) = &*device_id_lock {
+        return Ok(id.clone());
+    }
+    
+    // Versuche aus Store zu laden
+    let store = app
+        .store("settings.json")
+        .map_err(|e| AppError::StorageError(e.to_string()))?;
+    
+    if let Some(stored_id) = store.get("device_id") {
+        if let Some(id_str) = stored_id.as_str() {
+            *device_id_lock = Some(id_str.to_string());
+            return Ok(id_str.to_string());
+        }
+    }
+    
+    // Neu generieren
+    let uuid = Uuid::new_v4().simple().to_string();
+    let new_id = format!("tauri-{}", &uuid[..16]);
+    
+    store.set("device_id", serde_json::json!(new_id.clone()));
+    let _ = store.save();
+    
+    *device_id_lock = Some(new_id.clone());
+    Ok(new_id)
+}
+
+// ============ TAURI COMMANDS ============
+
+#[tauri::command]
+async fn connect(
+    url: String,
+    username: String,
+    password: String,
+    state: State<'_, WebDavState>,
+) -> Result<bool> {
+    let client = WebDavClient::new(&url, &username, &password)?;
+    let success = client.test_connection().await?;
+    
+    if success {
+        let mut client_lock = state.0.lock().unwrap();
+        *client_lock = Some(client);
+    }
+    
+    Ok(success)
+}
+
+#[tauri::command]
+async fn list_notes(state: State<'_, WebDavState>) -> Result<Vec<NoteMetadata>> {
+    let client = {
+        let client_lock = state.0.lock().unwrap();
+        client_lock.clone()
+    };
+    
+    let client = client.ok_or(AppError::NotConnected)?;
+    let ids = client.list_json_files().await?;
+    
+    let mut notes = Vec::new();
+    for id in ids {
+        if let Ok(note) = client.get_note(&id).await {
+            notes.push(NoteMetadata::from(&note));
+        }
+    }
+    
+    notes.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    Ok(notes)
+}
+
+#[tauri::command]
+async fn get_note(id: String, state: State<'_, WebDavState>) -> Result<Note> {
+    let client = {
+        let client_lock = state.0.lock().unwrap();
+        client_lock.clone()
+    };
+    
+    let client = client.ok_or(AppError::NotConnected)?;
+    client.get_note(&id).await
+}
+
+#[tauri::command]
+async fn save_note(mut note: Note, state: State<'_, WebDavState>) -> Result<Note> {
+    // Update timestamp to NOW before saving
+    note.updated_at = chrono::Utc::now().timestamp_millis();
+    
+    println!("[Save] Saving note '{}' (ID: {})", note.title, note.id);
+    println!("[Save] Updated timestamp: {}", note.updated_at);
+    
+    let client = {
+        let client_lock = state.0.lock().unwrap();
+        client_lock.clone()
+    };
+    
+    let client = client.ok_or(AppError::NotConnected)?;
+    client.save_note(&note).await?;
+    
+    println!("[Save] Note saved successfully to WebDAV");
+    
+    // Return the updated note with new timestamp
+    Ok(note)
+}
+
+#[tauri::command]
+async fn create_note(
+    title: String,
+    note_type: String,
+    app: AppHandle,
+    device_id_state: State<'_, DeviceIdState>,
+) -> Result<Note> {
+    let device_id = get_or_create_device_id(&app, &device_id_state)?;
+    
+    let note = match note_type.as_str() {
+        "CHECKLIST" => Note::new_checklist(title, device_id),
+        _ => Note::new(title, device_id),
+    };
+    
+    Ok(note)
+}
+
+#[tauri::command]
+async fn delete_note(id: String, state: State<'_, WebDavState>) -> Result<()> {
+    let client = {
+        let client_lock = state.0.lock().unwrap();
+        client_lock.clone()
+    };
+    
+    let client = client.ok_or(AppError::NotConnected)?;
+    let note = client.get_note(&id).await?;
+    client.delete_note(&note).await
+}
+
+#[tauri::command]
+async fn get_credentials(app: AppHandle) -> Result<Option<Credentials>> {
+    let store = app
+        .store("settings.json")
+        .map_err(|e| AppError::StorageError(e.to_string()))?;
+    
+    let url = store.get("server_url").and_then(|v| v.as_str().map(String::from));
+    let username = store.get("username").and_then(|v| v.as_str().map(String::from));
+    let password = store.get("password").and_then(|v| v.as_str().map(String::from));
+    
+    match (url, username, password) {
+        (Some(url), Some(username), Some(password)) => {
+            Ok(Some(Credentials { url, username, password }))
+        }
+        _ => Ok(None),
+    }
+}
+
+#[tauri::command]
+async fn save_credentials(credentials: Credentials, app: AppHandle) -> Result<()> {
+    let store = app
+        .store("settings.json")
+        .map_err(|e| AppError::StorageError(e.to_string()))?;
+    
+    store.set("server_url", serde_json::json!(credentials.url));
+    store.set("username", serde_json::json!(credentials.username));
+    store.set("password", serde_json::json!(credentials.password));
+    
+    store
+        .save()
+        .map_err(|e| AppError::StorageError(e.to_string()))?;
+    
+    Ok(())
+}
+
+#[tauri::command]
+async fn clear_credentials(app: AppHandle) -> Result<()> {
+    let store = app
+        .store("settings.json")
+        .map_err(|e| AppError::StorageError(e.to_string()))?;
+    
+    store.delete("server_url");
+    store.delete("username");
+    store.delete("password");
+    
+    store
+        .save()
+        .map_err(|e| AppError::StorageError(e.to_string()))?;
+    
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_device_id(
+    app: AppHandle,
+    state: State<'_, DeviceIdState>,
+) -> Result<String> {
+    get_or_create_device_id(&app, &state)
+}
+
+#[tauri::command]
+async fn get_settings(app: AppHandle) -> Result<Settings> {
+    let store = app
+        .store("settings.json")
+        .map_err(|e| AppError::StorageError(e.to_string()))?;
+    
+    let theme = store
+        .get("theme")
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_else(|| "system".to_string());
+    
+    let autosave = store
+        .get("autosave")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    
+    Ok(Settings { theme, autosave })
+}
+
+#[tauri::command]
+async fn save_settings(settings: Settings, app: AppHandle) -> Result<()> {
+    let store = app
+        .store("settings.json")
+        .map_err(|e| AppError::StorageError(e.to_string()))?;
+    
+    store.set("theme", serde_json::json!(settings.theme));
+    store.set("autosave", serde_json::json!(settings.autosave));
+    
+    store
+        .save()
+        .map_err(|e| AppError::StorageError(e.to_string()))?;
+    
+    Ok(())
+}
+
+#[tauri::command]
+fn get_app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+#[tauri::command]
+fn get_desktop_environment() -> Option<String> {
+    // Try to detect desktop environment from environment variables
+    if let Ok(session) = std::env::var("XDG_CURRENT_DESKTOP") {
+        return Some(session.to_lowercase());
+    }
+    if let Ok(session) = std::env::var("DESKTOP_SESSION") {
+        return Some(session.to_lowercase());
+    }
+    if std::env::var("KDE_FULL_SESSION").is_ok() {
+        return Some("kde".to_string());
+    }
+    if std::env::var("GNOME_DESKTOP_SESSION_ID").is_ok() {
+        return Some("gnome".to_string());
+    }
+    None
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_store::Builder::new().build())
+        .manage(WebDavState(Mutex::new(None)))
+        .manage(DeviceIdState(Mutex::new(None)))
+        .invoke_handler(tauri::generate_handler![
+            connect,
+            list_notes,
+            get_note,
+            save_note,
+            create_note,
+            delete_note,
+            get_credentials,
+            save_credentials,
+            clear_credentials,
+            get_device_id,
+            get_settings,
+            save_settings,
+            get_app_version,
+            get_desktop_environment,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
+
