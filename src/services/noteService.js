@@ -125,6 +125,35 @@ class NoteService {
   }
 
   /**
+   * F6: Delete multiple notes
+   * @param {string[]} ids - Array of note IDs
+   * @returns {Object} - {success: string[], failed: string[]}
+   */
+  async deleteNotes(ids) {
+    const results = { success: [], failed: [] };
+
+    for (const id of ids) {
+      try {
+        await tauri.deleteNote(id);
+        results.success.push(id);
+      } catch (error) {
+        console.error(`Failed to delete note ${id}:`, error);
+        results.failed.push(id);
+      }
+    }
+
+    // Update local state for successful deletions
+    this.notes = this.notes.filter(n => !results.success.includes(n.id));
+
+    if (this.currentNote && results.success.includes(this.currentNote.id)) {
+      this.currentNote = null;
+    }
+
+    this.notify();
+    return results;
+  }
+
+  /**
    * Search notes by query
    * @param {string} query - Search query
    */
@@ -134,10 +163,20 @@ class NoteService {
     }
     
     const lowerQuery = query.toLowerCase();
-    return this.notes.filter(note => 
-      note.title.toLowerCase().includes(lowerQuery) ||
-      note.content?.toLowerCase().includes(lowerQuery)
-    );
+    return this.notes.filter(note => {
+      // Title match
+      if (note.title.toLowerCase().includes(lowerQuery)) return true;
+
+      // Content match (TEXT notes)
+      if (note.content?.toLowerCase().includes(lowerQuery)) return true;
+
+      // F1: Checklist items match
+      if (note.checklistItems?.some(item =>
+        item.text.toLowerCase().includes(lowerQuery)
+      )) return true;
+
+      return false;
+    });
   }
 
   /**

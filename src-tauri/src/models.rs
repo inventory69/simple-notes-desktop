@@ -15,6 +15,12 @@ pub enum SyncStatus {
     Conflict,
 }
 
+impl Default for SyncStatus {
+    fn default() -> Self {
+        SyncStatus::Synced
+    }
+}
+
 /// Typ der Notiz
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -23,6 +29,12 @@ pub enum NoteType {
     Text,
     /// Checkliste
     Checklist,
+}
+
+impl Default for NoteType {
+    fn default() -> Self {
+        NoteType::Text
+    }
 }
 
 /// Ein Item in einer Checkliste
@@ -76,14 +88,21 @@ pub struct Note {
     pub device_id: String,
     
     /// Sync-Status
+    #[serde(default)]
     pub sync_status: SyncStatus,
     
     /// Typ der Notiz
+    #[serde(default)]
     pub note_type: NoteType,
     
     /// Checklist-Items (nur für CHECKLIST)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checklist_items: Option<Vec<ChecklistItem>>,
+
+    /// Checklist Sort-Option (nur für CHECKLIST)
+    /// Werte: "MANUAL", "ALPHABETICAL_ASC", "ALPHABETICAL_DESC", "UNCHECKED_FIRST", "CHECKED_FIRST"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checklist_sort_option: Option<String>,
 }
 
 impl Note {
@@ -100,6 +119,7 @@ impl Note {
             sync_status: SyncStatus::Synced,
             note_type: NoteType::Text,
             checklist_items: None,
+            checklist_sort_option: None,
         }
     }
     
@@ -108,6 +128,7 @@ impl Note {
         let mut note = Self::new(title, device_id);
         note.note_type = NoteType::Checklist;
         note.checklist_items = Some(Vec::new());
+        note.checklist_sort_option = Some("UNCHECKED_FIRST".to_string());
         note
     }
     
@@ -136,6 +157,19 @@ impl Note {
             None => String::new(),
         }
     }
+    
+    /// Korrigiert den noteType basierend auf vorhandenen checklistItems
+    /// Wird nach dem Deserialisieren aufgerufen um alte Notizen ohne noteType-Feld zu fixen
+    pub fn fix_note_type(&mut self) {
+        // Wenn checklistItems vorhanden sind, muss es eine CHECKLIST sein
+        if self.checklist_items.is_some() && !self.checklist_items.as_ref().unwrap().is_empty() {
+            self.note_type = NoteType::Checklist;
+        }
+        // Wenn noteType CHECKLIST ist, aber keine Items vorhanden → initialisiere leere Liste
+        else if self.note_type == NoteType::Checklist && self.checklist_items.is_none() {
+            self.checklist_items = Some(Vec::new());
+        }
+    }
 }
 
 /// Metadaten für die Notizen-Liste (mit Preview)
@@ -147,7 +181,10 @@ pub struct NoteMetadata {
     pub content: String,
     pub updated_at: i64,
     pub note_type: NoteType,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub checklist_items: Option<Vec<ChecklistItem>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checklist_sort_option: Option<String>,
 }
 
 impl From<&Note> for NoteMetadata {
@@ -159,6 +196,7 @@ impl From<&Note> for NoteMetadata {
             updated_at: note.updated_at,
             note_type: note.note_type,
             checklist_items: note.checklist_items.clone(),
+            checklist_sort_option: note.checklist_sort_option.clone(),
         }
     }
 }

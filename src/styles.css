@@ -122,6 +122,94 @@ body {
   font-weight: 600;
 }
 
+/* F7: Settings-Dialog Responsive Layout */
+#settings-dialog .dialog-content {
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 0;
+  overflow: hidden;
+}
+
+/* F7: Scrollable body - only the content scrolls, not the buttons */
+#settings-dialog .dialog-scroll-body {
+  flex: 1;
+  overflow-y: auto;
+  padding-bottom: 0.5rem;
+  min-height: 0;
+}
+
+/* F7: Form-Actions fixed at bottom, outside the scroll area */
+#settings-dialog .form-actions {
+  flex-shrink: 0;
+  background-color: var(--color-bg);
+  padding-top: 1rem;
+  padding-bottom: 1rem;
+  border-top: 1px solid var(--color-border);
+  box-shadow: 0 -4px 8px rgba(0, 0, 0, 0.05);
+}
+
+/* F7: Responsiv - bei sehr kleinen Fenstern weniger Padding */
+@media (max-height: 500px) {
+  #settings-dialog .dialog-content {
+    padding: 1rem;
+    padding-bottom: 0;
+    max-height: 95vh;
+    border-radius: 8px;
+  }
+
+  #settings-dialog .dialog-content h2 {
+    font-size: 1.25rem;
+    margin-bottom: 1rem;
+  }
+
+  #settings-dialog .form-group {
+    margin-bottom: 0.75rem;
+  }
+
+  #settings-dialog .settings-section {
+    margin-top: 1rem;
+    padding-top: 0.75rem;
+    margin-bottom: 0.5rem;
+  }
+}
+
+@media (max-width: 450px) {
+  #settings-dialog .dialog-content {
+    width: 98%;
+    padding: 1rem;
+    padding-bottom: 0;
+    border-radius: 8px;
+  }
+
+  #settings-dialog .form-actions {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  #settings-dialog .form-actions button {
+    width: 100%;
+  }
+}
+
+/* F7: Settings-Dialog Scrollbar */
+#settings-dialog .dialog-scroll-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+#settings-dialog .dialog-scroll-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#settings-dialog .dialog-scroll-body::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+#settings-dialog .dialog-scroll-body::-webkit-scrollbar-thumb:hover {
+  background: #999;
+}
+
 /* Form Styles */
 .form-group {
   margin-bottom: 1.25rem;
@@ -225,6 +313,7 @@ body {
   margin-top: 2rem;
   padding-top: 1.5rem;
   border-top: 1px solid var(--border-color);
+  margin-bottom: 1rem;
 }
 
 .settings-section h3 {
@@ -417,6 +506,12 @@ body {
   display: none;
 }
 
+.btn-icon-small:disabled {
+  opacity: 0.3;
+  cursor: default;
+  pointer-events: none;
+}
+
 /* Error Message */
 .error {
   color: var(--color-danger);
@@ -453,6 +548,48 @@ body {
 
 .toolbar .spacer {
   flex: 1;
+}
+
+/* F6: Batch Actions Bar - compact design inside sidebar */
+.batch-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  background-color: var(--color-sidebar-bg);
+  border-bottom: 1px solid var(--color-border);
+  border-top: 2px solid var(--color-primary);
+}
+
+.selection-count {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  flex: 1;
+}
+
+.batch-actions-buttons {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.batch-actions-buttons .btn-icon {
+  padding: 0.3rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+.batch-actions-buttons .btn-cancel {
+  padding: 0.3rem 0.5rem;
+  font-size: 0.8rem;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-fg);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.batch-actions-buttons .btn-cancel:hover {
+  background-color: var(--color-hover);
 }
 
 /* Main Layout */
@@ -495,6 +632,8 @@ body {
   border-bottom: 1px solid var(--color-border);
   cursor: pointer;
   transition: background-color 0.2s;
+  display: flex;
+  align-items: flex-start;
 }
 
 .note-item:hover {
@@ -503,6 +642,32 @@ body {
 
 .note-item.selected {
   background-color: var(--color-selected);
+}
+
+/* F6: Multi-Select State */
+.note-item.multi-selected {
+  background-color: var(--color-selected);
+  border-left: 3px solid var(--color-primary);
+}
+
+.note-item-checkbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-right: 0.5rem;
+  flex-shrink: 0;
+  color: var(--color-border);
+}
+
+.note-item.multi-selected .note-item-checkbox {
+  color: var(--color-primary);
+}
+
+.note-item-content {
+  flex: 1;
+  min-width: 0;
 }
 
 .note-item-title {
@@ -522,6 +687,24 @@ body {
   font-size: 0.75rem;
   color: #999;
   margin-top: 0.25rem;
+}
+
+/* F1: Note Type Icon in List */
+.note-item-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.note-type-icon {
+  flex-shrink: 0;
+  color: #999;
+  opacity: 0.7;
+}
+
+.note-item.selected .note-type-icon {
+  color: var(--color-primary);
+  opacity: 1;
 }
 
 /* Editor Area */
@@ -837,6 +1020,93 @@ body {
 
 .checklist-add-btn:hover {
   background-color: var(--color-primary-hover);
+}
+
+/* F2: Checklist Separator */
+.checklist-separator {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 0.5rem;
+  user-select: none;
+}
+
+.checklist-separator-line {
+  flex: 1;
+  height: 1px;
+  background-color: var(--color-border);
+}
+
+.checklist-separator-text {
+  font-size: 0.75rem;
+  color: #999;
+  white-space: nowrap;
+}
+
+/* F2: Drag Handle */
+.checklist-drag-handle {
+  cursor: grab;
+  color: #999;
+  font-size: 1.1rem;
+  padding: 0 0.25rem;
+  user-select: none;
+  letter-spacing: 1px;
+  line-height: 1;
+}
+
+.checklist-drag-handle:hover {
+  color: var(--color-primary);
+}
+
+.checklist-item.dragging {
+  opacity: 0.7;
+  background-color: var(--color-selected);
+  box-shadow: var(--shadow-md);
+  border-radius: 4px;
+  position: relative;
+}
+
+/* F2: Sort Menu */
+.sort-menu {
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-md);
+  padding: 0.5rem 0;
+  z-index: 1001;
+  min-width: 200px;
+}
+
+.sort-menu-item {
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--color-fg);
+  transition: background-color 0.15s;
+}
+
+.sort-menu-item:hover {
+  background-color: var(--color-hover);
+}
+
+.sort-menu-item.active {
+  color: var(--color-primary);
+  font-weight: 500;
+}
+
+/* F3: Leere Checklist-Items visuell kennzeichnen */
+.checklist-item-empty {
+  opacity: 0.5;
+  border: 1px dashed var(--color-border);
+  border-radius: 4px;
+}
+
+.checklist-item-unsaved-hint {
+  font-size: 0.7rem;
+  color: var(--color-danger);
+  opacity: 0.7;
+  white-space: nowrap;
+  margin-left: 0.5rem;
 }
 
 /* Scrollbar Styles */

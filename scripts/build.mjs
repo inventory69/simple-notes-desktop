@@ -44,7 +44,7 @@ const child = spawn('pnpm', tauriArgs, {
 function createAppImageFallback() {
   const appDir = join(process.cwd(), 'src-tauri/target/release/bundle/appimage/Simple Notes Desktop.AppDir');
   const bundleDir = join(process.cwd(), 'src-tauri/target/release/bundle/appimage');
-  const appImageName = 'simple-notes-desktop_0.1.0_amd64.AppImage';
+  const appImageName = 'Simple_Notes_Desktop-0.2.0_amd64.AppImage';
   const appImagePath = join(bundleDir, appImageName);
   
   if (!existsSync(appDir)) {
@@ -57,55 +57,43 @@ function createAppImageFallback() {
     return true;
   }
   
-  console.log('[Build] Creating AppImage via fallback (non-ext4 filesystem detected)...');
+  console.log('[Build] Creating AppImage via fallback...');
   
-  // Use /tmp for AppImage creation to avoid NTFS issues
-  const tmpDir = '/tmp/tauri-appimage-build';
-  try {
-    execSync(`rm -rf "${tmpDir}" && mkdir -p "${tmpDir}"`);
-    
-    // Copy AppDir to tmp
-    execSync(`cp -a "${appDir}" "${tmpDir}/app.AppDir"`, { stdio: 'inherit' });
-    
-    // Create AppImage from tmp using appimagetool or linuxdeploy
-    const linuxdeployPath = join(process.env.HOME, '.cache/tauri/linuxdeploy-x86_64.AppImage');
-    const tmpAppImage = join(tmpDir, appImageName);
-    
-    if (existsSync(linuxdeployPath)) {
-      execSync(
-        `cd "${tmpDir}" && NO_STRIP=true ARCH=x86_64 "${linuxdeployPath}" --appimage-extract-and-run --appdir app.AppDir --plugin gtk --output appimage`,
-        { stdio: 'inherit', env: { ...process.env, OUTPUT: tmpAppImage, NO_STRIP: 'true', ARCH: 'x86_64' } }
-      );
-    } else {
-      // Fallback to appimagetool if available
-      execSync(
-        `cd "${tmpDir}" && ARCH=x86_64 appimagetool app.AppDir "${tmpAppImage}"`,
-        { stdio: 'inherit', env: { ...process.env, ARCH: 'x86_64' } }
-      );
+  // Fix desktop file placeholders
+  const desktopFile = join(appDir, 'usr/share/applications/Simple Notes Desktop.desktop');
+  if (existsSync(desktopFile)) {
+    console.log('[Build] Fixing desktop file placeholders...');
+    try {
+      execSync(`sed -i 's/{exec}/simple-notes-desktop/g; s/{icon}/simple-notes-desktop/g; s/{productName}/Simple Notes Desktop/g' "${desktopFile}"`);
+    } catch (e) {
+      console.warn('[Build] Failed to fix desktop file:', e.message);
     }
+  }
+  
+  // Create AppImage with linuxdeploy and NO_STRIP
+  const linuxdeployPath = join(process.env.HOME, '.cache/tauri/linuxdeploy-x86_64.AppImage');
+  
+  if (!existsSync(linuxdeployPath)) {
+    console.error('[Build] linuxdeploy not found in cache');
+    return false;
+  }
+  
+  try {
+    console.log('[Build] Running linuxdeploy with NO_STRIP=1...');
+    execSync(
+      `cd "${bundleDir}" && NO_STRIP=1 OUTPUT="${appImageName}" "${linuxdeployPath}" --appdir="Simple Notes Desktop.AppDir" --output appimage`,
+      { stdio: 'inherit', env: { ...process.env, NO_STRIP: '1', OUTPUT: appImageName } }
+    );
     
-    // Copy result back
-    if (existsSync(tmpAppImage)) {
-      execSync(`cp "${tmpAppImage}" "${appImagePath}"`);
+    if (existsSync(appImagePath)) {
       console.log(`[Build] AppImage created: ${appImagePath}`);
       const size = statSync(appImagePath).size;
       console.log(`[Build] Size: ${(size / 1024 / 1024).toFixed(1)} MB`);
       return true;
     }
     
-    // linuxdeploy might have output with different name, find any .AppImage
-    const findResult = execSync(`find "${tmpDir}" -name "*.AppImage" -type f 2>/dev/null`).toString().trim();
-    if (findResult) {
-      const firstResult = findResult.split('\n')[0];
-      execSync(`cp "${firstResult}" "${appImagePath}"`);
-      console.log(`[Build] AppImage created: ${appImagePath}`);
-      return true;
-    }
-    
   } catch (e) {
-    console.error('[Build] AppImage fallback failed:', e.message);
-  } finally {
-    execSync(`rm -rf "${tmpDir}" 2>/dev/null || true`);
+    console.error('[Build] AppImage creation failed:', e.message);
   }
   
   return false;

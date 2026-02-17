@@ -138,6 +138,31 @@ class DialogService {
   }
 
   /**
+   * F4/F6: Gemeinsamer Server-Deletion-Warnungsdialog.
+   * Wird sowohl für Einzel-Delete (F4) als auch Batch-Delete (F6) verwendet.
+   *
+   * @param {number} noteCount - Anzahl der zu löschenden Notizen
+   * @returns {Promise<boolean>} true wenn Nutzer bestätigt
+   */
+  confirmDeletion(noteCount = 1) {
+    const title = noteCount === 1
+      ? 'Delete Note'
+      : `Delete ${noteCount} Notes`;
+
+    const message = noteCount === 1
+      ? 'This note will be immediately deleted from the server. On your Android device, it will remain with the status "Deleted on Server" until you remove it there as well.'
+      : `These ${noteCount} notes will be immediately deleted from the server. On your Android devices, they will remain with the status "Deleted on Server" until you remove them there as well.`;
+
+    return this.confirm({
+      title,
+      message,
+      confirmText: 'Delete from Server',
+      cancelText: 'Cancel',
+      type: 'danger'
+    });
+  }
+
+  /**
    * Show prompt dialog with text input
    * @returns {Promise<string|null>} input value if confirmed, null if cancelled
    */

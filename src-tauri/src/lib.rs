@@ -318,6 +318,17 @@ pub fn run() {
             MacosLauncher::LaunchAgent,
             Some(vec!["--minimized"]),
         ))
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // F8: Callback wird aufgerufen wenn eine zweite Instanz gestartet wird.
+            // Die zweite Instanz beendet sich automatisch.
+            // Hier bringen wir das Fenster der ersten Instanz in den Vordergrund.
+            println!("[SingleInstance] Second instance detected with args: {:?}", args);
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
         .manage(WebDavState(Mutex::new(None)))
         .manage(DeviceIdState(Mutex::new(None)))
         .manage(TraySettings(Mutex::new(false)))

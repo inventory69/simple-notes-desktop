@@ -20,8 +20,15 @@ class App {
     this.newNoteBtn = document.getElementById('new-note-btn');
     this.newChecklistBtn = document.getElementById('new-checklist-btn');
     this.syncBtn = document.getElementById('sync-btn');
+    this.selectModeBtn = document.getElementById('select-mode-btn');
     this.settingsBtn = document.getElementById('settings-btn');
     this.disconnectBtn = document.getElementById('disconnect-btn');
+
+    // F6: Batch Actions
+    this.batchActionsBar = document.getElementById('batch-actions');
+    this.batchDeleteBtn = document.getElementById('batch-delete-btn');
+    this.batchCancelBtn = document.getElementById('batch-cancel-btn');
+    this.selectionCount = this.batchActionsBar?.querySelector('.selection-count');
     
     this.init();
   }
@@ -63,6 +70,16 @@ class App {
     
     // Notes list selection
     this.notesList.onSelect((note) => this.noteEditor.loadNote(note));
+
+    // F6: Notes list selection mode changes
+    this.notesList.onSelectionChange((state) => {
+      if (state.selectionMode) {
+        this.batchActionsBar.style.display = 'flex';
+        this.selectionCount.textContent = `${state.count} selected`;
+      } else {
+        this.batchActionsBar.style.display = 'none';
+      }
+    });
     
     // Note editor delete
     this.noteEditor.onDelete(() => this.notesList.refresh());
@@ -76,8 +93,72 @@ class App {
     this.newNoteBtn.addEventListener('click', () => this.handleNewNote());
     this.newChecklistBtn.addEventListener('click', () => this.handleNewChecklist());
     this.syncBtn.addEventListener('click', () => this.handleSync());
+    this.selectModeBtn.addEventListener('click', () => {
+      if (this.notesList.selectionMode) {
+        this.notesList.exitSelectionMode();
+      } else {
+        this.notesList.enterSelectionMode();
+      }
+    });
     this.settingsBtn.addEventListener('click', () => this.settingsDialog.show());
     this.disconnectBtn.addEventListener('click', () => this.handleDisconnect());
+
+    // F6: Batch action buttons
+    this.batchDeleteBtn?.addEventListener('click', () => {
+      this.notesList.deleteSelected();
+    });
+    this.batchCancelBtn?.addEventListener('click', () => {
+      this.notesList.exitSelectionMode();
+    });
+
+    // F1: Global keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      // Only handle when main container is visible (connected)
+      if (this.mainContainer.classList.contains('hidden')) return;
+
+      // Don't intercept when typing in dialogs
+      if (e.target.closest('.dialog:not(.hidden)')) return;
+
+      // Ctrl+N → New Note
+      if (e.ctrlKey && !e.shiftKey && e.key === 'n') {
+        e.preventDefault();
+        this.handleNewNote();
+        return;
+      }
+
+      // Ctrl+Shift+N → New Checklist
+      if (e.ctrlKey && e.shiftKey && e.key === 'N') {
+        e.preventDefault();
+        this.handleNewChecklist();
+        return;
+      }
+
+      // Ctrl+S → Force save current note
+      if (e.ctrlKey && e.key === 's') {
+        e.preventDefault();
+        if (this.noteEditor.currentNote) {
+          this.noteEditor.save();
+        }
+        return;
+      }
+
+      // Ctrl+F → Focus search input
+      if (e.ctrlKey && e.key === 'f') {
+        e.preventDefault();
+        document.getElementById('search-input')?.focus();
+        return;
+      }
+
+      // Escape → Clear search / deselect
+      if (e.key === 'Escape' && !e.target.closest('.dialog')) {
+        const searchInput = document.getElementById('search-input');
+        if (document.activeElement === searchInput && searchInput.value) {
+          searchInput.value = '';
+          searchInput.dispatchEvent(new Event('input'));
+        }
+        return;
+      }
+    });
   }
 
   async checkAutoConnect() {

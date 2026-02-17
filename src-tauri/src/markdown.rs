@@ -70,19 +70,24 @@ pub fn generate_markdown(note: &Note) -> String {
         NoteType::Text => "text",
         NoteType::Checklist => "checklist",
     };
-    
+
     let mut md = format!(
         "---\n\
          id: {}\n\
          created: {}\n\
          updated: {}\n\
          device: {}\n\
-         type: {}\n\
-         ---\n\n\
-         # {}\n\n",
-        note.id, created_iso, updated_iso, note.device_id, note_type, note.title
+         type: {}",
+        note.id, created_iso, updated_iso, note.device_id, note_type
     );
-    
+
+    // F2: Sort-Option in Frontmatter schreiben
+    if let Some(ref sort_option) = note.checklist_sort_option {
+        md.push_str(&format!("\nsort: {}", sort_option.to_lowercase()));
+    }
+
+    md.push_str(&format!("\n---\n\n# {}\n\n", note.title));
+
     match note.note_type {
         NoteType::Text => {
             md.push_str(&note.content);
@@ -98,7 +103,7 @@ pub fn generate_markdown(note: &Note) -> String {
             }
         }
     }
-    
+
     md
 }
 
@@ -195,6 +200,11 @@ pub fn parse_markdown(md: &str, server_mtime: Option<i64>) -> Result<Note> {
     } else {
         (content_after_title.to_string(), None)
     };
+
+    // F2: Parse checklist sort option from frontmatter
+    let checklist_sort_option = metadata
+        .get("sort")
+        .map(|v| v.to_uppercase().replace('-', "_"));
     
     Ok(Note {
         id: metadata
@@ -212,6 +222,7 @@ pub fn parse_markdown(md: &str, server_mtime: Option<i64>) -> Result<Note> {
         sync_status: crate::models::SyncStatus::Synced,
         note_type,
         checklist_items,
+        checklist_sort_option,
     })
 }
 

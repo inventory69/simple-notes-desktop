@@ -173,10 +173,14 @@ impl WebDavClient {
         
         match response.status() {
             StatusCode::OK => {
-                let note: Note = response
+                let mut note: Note = response
                     .json()
                     .await
                     .map_err(|e| AppError::ParseError(e.to_string()))?;
+                
+                // Fix noteType basierend auf checklistItems (für alte Notizen ohne noteType-Feld)
+                note.fix_note_type();
+                
                 Ok(note)
             }
             StatusCode::NOT_FOUND => Err(AppError::NoteNotFound(id.to_string())),
