@@ -103,6 +103,7 @@ jobs:
           WEBKIT_DISABLE_DMABUF_RENDERER: '1'
           WEBKIT_DISABLE_COMPOSITING_MODE: '1'
           NO_STRIP: '1'
+          APPIMAGE_EXTRACT_AND_RUN: '1'
         with:
           tagName: v__VERSION__
           releaseName: 'Simple Notes Desktop v__VERSION__'
