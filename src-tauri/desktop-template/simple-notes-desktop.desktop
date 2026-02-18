@@ -1,11 +1,11 @@
 [Desktop Entry]
 Categories=Office;Utility;TextEditor;
 Comment=Desktop app for Simple Notes with WebDAV sync
-Exec={exec} %u
-Icon={icon}
-Name={productName}
+Exec=simple-notes-desktop %u
+Icon=simple-notes-desktop
+Name=Simple Notes Desktop
 Terminal=false
 Type=Application
-StartupWMClass={productName}
+StartupWMClass=Simple Notes Desktop
 MimeType=text/plain;text/markdown;
 Keywords=notes;notizen;text;editor;checklist;sync;webdav;
