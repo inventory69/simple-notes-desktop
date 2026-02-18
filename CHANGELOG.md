@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-02-18
+
+### Added
+
+- **Checklist Drag & Drop** reordering
+  - Drag items above/below a separator to mark as done/undone
+  - Visual feedback while dragging across separator
+
+- **Checklist Separator** between open and completed items
+  - Divides checklist into "open" and "done" sections
+  - Draggable separator correctly shifts items during drag
+
+- **Sort Modes** for checklists (5 modes)
+  - Manual order (default)
+  - Alphabetical A→Z / Z→A
+  - Creation date (newest/oldest first)
+
+- **Undo** (Ctrl+Z + toolbar button)
+  - Full undo history for checklist operations (move, sort, check/uncheck, add, delete)
+  - Native CodeMirror undo for text/markdown notes
+  - Pointer-based undo stack, max 50 entries
+
+- **Multi-Select** for notes in the sidebar
+  - Ctrl+Click and Shift+Click to select multiple notes
+  - Long-press (touch/mobile) to activate selection mode
+  - Batch delete with confirmation dialog
+  - Compact selection-count indicator in sidebar
+
+- **Single-Instance Enforcement**
+  - Second launch focuses the existing window instead of opening a duplicate
+  - Uses `tauri-plugin-single-instance`
+
+### Changed
+
+- Settings dialog is now fully scrollable with action buttons always visible (no overflow)
+- Multi-select bar redesigned: compact count badge instead of full-width blue bar
+- Checklist item checkboxes use crisp SVG icons instead of emoji
+- Sidebar correctly shows checklist icon and progress bar after WebDAV sync
+
+### Fixed
+
+- Drag-and-drop separator no longer collides with items during drag
+- Items now visually toggle state while dragging across the separator
+- Settings dialog buttons no longer covered by scrollable content on small windows
+
+### Technical
+
+- Added `UndoStack.js` utility (deep-clone snapshots, pointer-based, max 50 entries)
+- `APPIMAGE_EXTRACT_AND_RUN=1` env var in CI for linuxdeploy without FUSE
+- `NO_STRIP=true` in CI to skip strip step (linuxdeploy + `.relr.dyn` incompatibility on Ubuntu 22.04)
+- Desktop template hardcoded to fix linuxdeploy icon resolution (`{icon}` placeholder was not substituted by AppImage bundler)
+
 ## [0.2.0] - 2026-02-05
 
 ### Added
@@ -97,6 +149,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/inventory69/simple-notes-desktop/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/inventory69/simple-notes-desktop/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/inventory69/simple-notes-desktop/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/inventory69/simple-notes-desktop/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/inventory69/simple-notes-desktop/releases/tag/v0.1.0
