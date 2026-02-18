@@ -102,7 +102,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WEBKIT_DISABLE_DMABUF_RENDERER: '1'
           WEBKIT_DISABLE_COMPOSITING_MODE: '1'
-          NO_STRIP: '1'
+          NO_STRIP: 'true'
           APPIMAGE_EXTRACT_AND_RUN: '1'
         with:
           tagName: v__VERSION__
@@ -132,7 +132,7 @@ jobs:
           releaseDraft: true
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
           includeDebug: false
-          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --verbose
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
