@@ -116,12 +116,15 @@ jobs:
             | Linux (All) | `.AppImage` | Portable, needs libfuse2 |
             | Arch Linux | AUR | `yay -S simple-notes-desktop-bin` |
 
-            ## What's New
+            ## What's New in v0.3.0
 
-            - 🔽 System tray support (minimize to background)
-            - 🚀 Autostart on boot
-            - 🎨 New app icon
-            - 🖼️ Improved dialog styling
+            - ✅ Full checklist support: drag & drop reorder, separator, 5 sort modes
+            - ↺ Undo button + Ctrl+Z for text notes and checklists
+            - ☑️ Multi-select with batch delete (Ctrl+Click, Shift+Click, long-press)
+            - 🪟 Responsive settings dialog (buttons always visible)
+            - 🔒 Single-instance enforcement (second launch focuses existing window)
+            - 🐛 Sidebar now correctly shows checklist icons and progress after sync
+            - 🐛 Drag-and-drop separator no longer collides with items
 
             See [CHANGELOG.md](https://github.com/inventory69/simple-notes-desktop/blob/main/CHANGELOG.md)
           releaseDraft: true
