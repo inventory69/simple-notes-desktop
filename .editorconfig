@@ -1,0 +1,24 @@
+# EditorConfig – universelle Basis-Einstellungen für alle Editoren
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+
+[*.{js,mjs,json,css,html,yml,yaml,md}]
+indent_size = 2
+
+[*.rs]
+indent_size = 4
+
+[*.toml]
+indent_size = 4
+
+[Makefile]
+indent_style = tab
+
+[*.sh]
+indent_size = 2

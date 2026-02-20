@@ -89,12 +89,46 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Lint JavaScript & CSS (Biome)
+        run: pnpm lint
+
+      - name: Check Rust formatting
+        working-directory: src-tauri
+        run: cargo fmt -- --check
+
+      - name: Clippy (Rust linting)
+        working-directory: src-tauri
+        run: cargo clippy --lib -- -D warnings
+
       - name: Run frontend tests
         run: pnpm test
 
       - name: Run Rust tests
         working-directory: src-tauri
         run: cargo test --lib
+
+      - name: Extract changelog for release
+        id: changelog
+        shell: bash
+        run: |
+          VERSION=$(node -e "console.log(require('./package.json').version)")
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          CHANGELOG_SECTION=$(awk "/^## \\[${VERSION}\\]/{found=1; next} /^## \\[/{if(found) exit} found{print}" CHANGELOG.md)
+          {
+            echo 'release_body<<EOF_RELEASE_BODY'
+            printf '## Downloads\n\n'
+            printf '| Platform | Format | Notes |\n'
+            printf '|----------|--------|-------|\n'
+            printf '| Windows | `.msi` / `.exe` | Installer |\n'
+            printf '| Linux (Debian/Ubuntu) | `.deb` | apt install |\n'
+            printf '| Linux (Fedora/RHEL) | `.rpm` | dnf install |\n'
+            printf '| Linux (All) | `.AppImage` | Portable, needs libfuse2 |\n'
+            printf '| Arch Linux | AUR | `yay -S simple-notes-desktop-bin` |\n\n'
+            printf "## What's New in v${VERSION}\n\n"
+            echo "${CHANGELOG_SECTION}"
+            printf '\nSee [CHANGELOG.md](https://github.com/inventory69/simple-notes-desktop/blob/main/CHANGELOG.md)\n'
+            echo 'EOF_RELEASE_BODY'
+          } >> $GITHUB_OUTPUT
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
@@ -107,28 +141,7 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: 'Simple Notes Desktop v__VERSION__'
-          releaseBody: |
-            ## Downloads
-
-            | Platform | Format | Notes |
-            |----------|--------|-------|
-            | Windows | `.msi` / `.exe` | Installer |
-            | Linux (Debian/Ubuntu) | `.deb` | apt install |
-            | Linux (Fedora/RHEL) | `.rpm` | dnf install |
-            | Linux (All) | `.AppImage` | Portable, needs libfuse2 |
-            | Arch Linux | AUR | `yay -S simple-notes-desktop-bin` |
-
-            ## What's New in v0.3.0
-
-            - ✅ Full checklist support: drag & drop reorder, separator, 5 sort modes
-            - ↺ Undo button + Ctrl+Z for text notes and checklists
-            - ☑️ Multi-select with batch delete (Ctrl+Click, Shift+Click, long-press)
-            - 🪟 Responsive settings dialog (buttons always visible)
-            - 🔒 Single-instance enforcement (second launch focuses existing window)
-            - 🐛 Sidebar now correctly shows checklist icons and progress after sync
-            - 🐛 Drag-and-drop separator no longer collides with items
-
-            See [CHANGELOG.md](https://github.com/inventory69/simple-notes-desktop/blob/main/CHANGELOG.md)
+          releaseBody: ${{ steps.changelog.outputs.release_body }}
           releaseDraft: true
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
           includeDebug: false

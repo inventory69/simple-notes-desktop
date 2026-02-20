@@ -12,17 +12,15 @@
 export class UndoStack {
   constructor(maxSize = 50) {
     this.maxSize = maxSize;
-    this._stack = [];   // array of snapshots
-    this._ptr = -1;     // points at the "current" snapshot
+    this._stack = []; // array of snapshots
+    this._ptr = -1; // points at the "current" snapshot
   }
 
   /** Deep-clone a snapshot so mutations don't affect history. */
   static _clone(snapshot) {
     return {
       title: snapshot.title,
-      checklistItems: snapshot.checklistItems
-        ? snapshot.checklistItems.map(item => ({ ...item }))
-        : null,
+      checklistItems: snapshot.checklistItems ? snapshot.checklistItems.map((item) => ({ ...item })) : null,
     };
   }
 

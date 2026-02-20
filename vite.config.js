@@ -1,13 +1,13 @@
-import { defineConfig } from 'vite'
-import { resolve } from 'path'
+import { resolve } from 'path';
+import { defineConfig } from 'vite';
 
 // Tauri expects a fixed port, fail if that port is not available
 export default defineConfig({
   clearScreen: false,
-  
+
   // WICHTIG: Base-URL für Tauri - muss relativ sein!
   base: './',
-  
+
   // Vite-Konfiguration für Dev-Server
   server: {
     port: 5173,
@@ -20,13 +20,11 @@ export default defineConfig({
 
   // Environment Variables für Tauri
   envPrefix: ['VITE_', 'TAURI_ENV_*'],
-  
+
   // Build-Konfiguration
   build: {
     // Tauri unterstützt es2021
-    target: process.env.TAURI_ENV_PLATFORM === 'windows' 
-      ? 'chrome105' 
-      : 'safari14',
+    target: process.env.TAURI_ENV_PLATFORM === 'windows' ? 'chrome105' : 'safari14',
     // Debug builds oder production
     minify: !process.env.TAURI_ENV_DEBUG ? 'esbuild' : false,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
@@ -41,4 +39,4 @@ export default defineConfig({
       '@': resolve(__dirname, 'src'),
     },
   },
-})
+});

@@ -11,10 +11,10 @@ pub struct Credentials {
 /// App Settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
-    pub theme: String,           // "light", "dark", "system"
+    pub theme: String, // "light", "dark", "system"
     pub autosave: bool,
-    pub minimize_to_tray: bool,  // Minimize to system tray instead of closing
-    pub autostart: bool,         // Start with system boot
+    pub minimize_to_tray: bool, // Minimize to system tray instead of closing
+    pub autostart: bool,        // Start with system boot
 }
 
 impl Default for Settings {
@@ -71,12 +71,7 @@ mod tests {
 
     #[test]
     fn test_settings_json_roundtrip_all_combinations() {
-        let combos = vec![
-            (true, true),
-            (true, false),
-            (false, true),
-            (false, false),
-        ];
+        let combos = vec![(true, true), (true, false), (false, true), (false, false)];
 
         for (tray, autostart) in combos {
             let settings = Settings {
@@ -89,8 +84,16 @@ mod tests {
             let json = serde_json::to_string(&settings).unwrap();
             let parsed: Settings = serde_json::from_str(&json).unwrap();
 
-            assert_eq!(parsed.minimize_to_tray, tray, "tray mismatch for ({}, {})", tray, autostart);
-            assert_eq!(parsed.autostart, autostart, "autostart mismatch for ({}, {})", tray, autostart);
+            assert_eq!(
+                parsed.minimize_to_tray, tray,
+                "tray mismatch for ({}, {})",
+                tray, autostart
+            );
+            assert_eq!(
+                parsed.autostart, autostart,
+                "autostart mismatch for ({}, {})",
+                tray, autostart
+            );
         }
     }
 
@@ -118,10 +121,10 @@ mod tests {
             username: "user".to_string(),
             password: "pass".to_string(),
         };
-        
+
         let json = serde_json::to_string(&creds).unwrap();
         let parsed: Credentials = serde_json::from_str(&json).unwrap();
-        
+
         assert_eq!(parsed.url, creds.url);
         assert_eq!(parsed.username, creds.username);
         assert_eq!(parsed.password, creds.password);

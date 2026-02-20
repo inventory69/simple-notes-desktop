@@ -6,10 +6,14 @@ fn main() {
     // These must be set BEFORE Tauri/WebKit initializes
     #[cfg(target_os = "linux")]
     {
-        // Fix for GBM/DMABUF errors on Wayland
-        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
-        // Fix for compositing issues on Wayland
-        std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+        // SAFETY: These env vars must be set before any threads are spawned.
+        // This runs at the very start of main(), before Tauri initializes.
+        unsafe {
+            // Fix for GBM/DMABUF errors on Wayland
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+            // Fix for compositing issues on Wayland
+            std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+        }
     }
 
     simple_notes_desktop_lib::run()

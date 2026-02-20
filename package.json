@@ -1,7 +1,7 @@
 {
   "name": "simple-notes-desktop",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "scripts": {
     "tauri": "tauri",
@@ -13,9 +13,20 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "bump": "bash scripts/bump-version.sh",
+    "update-aur-sha": "bash scripts/update-aur-sha.sh",
+    "lint": "biome check src/ scripts/ index.html vite.config.js vitest.config.js",
+    "lint:fix": "biome check --write src/ scripts/ index.html vite.config.js vitest.config.js",
+    "format": "biome format --write src/ scripts/ index.html vite.config.js vitest.config.js",
+    "lint:rust": "cd src-tauri && cargo clippy --lib -- -D warnings",
+    "format:rust": "cd src-tauri && cargo fmt",
+    "format:rust:check": "cd src-tauri && cargo fmt -- --check",
+    "quality": "pnpm lint && pnpm format:rust:check && pnpm lint:rust",
+    "quality:fix": "pnpm lint:fix && pnpm format:rust"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.3",
     "@tauri-apps/cli": "^2",
     "@testing-library/dom": "^10.4.1",
     "jsdom": "^28.0.0",

@@ -1,6 +1,6 @@
-import * as tauri from '../services/tauri.js';
-import { dialogService } from '../services/DialogService.js';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { dialogService } from '../services/DialogService.js';
+import * as tauri from '../services/tauri.js';
 
 /**
  * Settings Dialog Component
@@ -19,19 +19,19 @@ export class SettingsDialog {
     this.githubLink = document.getElementById('github-link');
     this.onSaveCallback = null;
     this.originalTheme = null; // Store original theme for cancel
-    
+
     this.init();
   }
 
   init() {
     this.saveBtn.addEventListener('click', () => this.handleSave());
     this.cancelBtn.addEventListener('click', () => this.handleCancel());
-    
+
     // Theme change handler - only preview, don't save
     this.themeSelect.addEventListener('change', () => {
       this.applyTheme(this.themeSelect.value);
     });
-    
+
     // GitHub link handler
     this.githubLink.addEventListener('click', async (e) => {
       e.preventDefault();
@@ -41,11 +41,11 @@ export class SettingsDialog {
         console.error('Failed to open link:', error);
       }
     });
-    
+
     // Load app version on init
     this.loadAppVersion();
   }
-  
+
   async loadAppVersion() {
     try {
       const version = await tauri.getAppVersion();
@@ -61,16 +61,16 @@ export class SettingsDialog {
     try {
       const settings = await tauri.getSettings();
       const deviceId = await tauri.getDeviceId();
-      
+
       // Store original theme for cancel
       this.originalTheme = settings.theme;
-      
+
       this.themeSelect.value = settings.theme;
       this.autosaveCheckbox.checked = settings.autosave;
       this.trayCheckbox.checked = settings.minimize_to_tray || false;
       this.autostartCheckbox.checked = settings.autostart || false;
       this.deviceIdInput.value = deviceId;
-      
+
       this.dialog.classList.remove('hidden');
     } catch (error) {
       console.error('Failed to load settings:', error);
@@ -97,29 +97,29 @@ export class SettingsDialog {
         minimize_to_tray: this.trayCheckbox.checked,
         autostart: this.autostartCheckbox.checked,
       };
-      
+
       await tauri.saveSettings(settings);
       // Update tray runtime state immediately (no restart needed)
       await tauri.updateTraySetting(settings.minimize_to_tray);
       this.applyTheme(settings.theme);
-      
+
       if (this.onSaveCallback) {
         this.onSaveCallback(settings);
       }
-      
+
       this.hide();
     } catch (error) {
       console.error('Failed to save settings:', error);
       await dialogService.error({
         title: 'Settings Error',
-        message: 'Failed to save settings. Please try again.'
+        message: 'Failed to save settings. Please try again.',
       });
     }
   }
 
   applyTheme(theme) {
     const root = document.documentElement;
-    
+
     if (theme === 'dark') {
       root.setAttribute('data-theme', 'dark');
     } else if (theme === 'light') {

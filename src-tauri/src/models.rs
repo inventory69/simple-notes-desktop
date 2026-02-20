@@ -2,10 +2,11 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Sync-Status einer Notiz
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum SyncStatus {
     /// Erfolgreich synchronisiert
+    #[default]
     Synced,
     /// Lokale Änderungen warten auf Sync
     Pending,
@@ -15,26 +16,15 @@ pub enum SyncStatus {
     Conflict,
 }
 
-impl Default for SyncStatus {
-    fn default() -> Self {
-        SyncStatus::Synced
-    }
-}
-
 /// Typ der Notiz
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum NoteType {
     /// Normale Text-Notiz
+    #[default]
     Text,
     /// Checkliste
     Checklist,
-}
-
-impl Default for NoteType {
-    fn default() -> Self {
-        NoteType::Text
-    }
 }
 
 /// Ein Item in einer Checkliste
@@ -70,31 +60,31 @@ impl ChecklistItem {
 pub struct Note {
     /// UUID v4, auch Dateiname
     pub id: String,
-    
+
     /// Titel der Notiz
     pub title: String,
-    
+
     /// Inhalt (Text oder Checklist-Fallback)
     pub content: String,
-    
+
     /// Erstellungszeitpunkt (Unix ms)
     pub created_at: i64,
-    
+
     /// Letzte Änderung (Unix ms)
     /// KRITISCH für Sync!
     pub updated_at: i64,
-    
+
     /// Geräte-ID
     pub device_id: String,
-    
+
     /// Sync-Status
     #[serde(default)]
     pub sync_status: SyncStatus,
-    
+
     /// Typ der Notiz
     #[serde(default)]
     pub note_type: NoteType,
-    
+
     /// Checklist-Items (nur für CHECKLIST)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checklist_items: Option<Vec<ChecklistItem>>,
@@ -122,7 +112,7 @@ impl Note {
             checklist_sort_option: None,
         }
     }
-    
+
     /// Erstellt eine neue Checklisten-Notiz
     pub fn new_checklist(title: String, device_id: String) -> Self {
         let mut note = Self::new(title, device_id);
@@ -131,13 +121,13 @@ impl Note {
         note.checklist_sort_option = Some("UNCHECKED_FIRST".to_string());
         note
     }
-    
+
     /// Aktualisiert den Timestamp auf jetzt
     #[allow(dead_code)]
     pub fn touch(&mut self) {
         self.updated_at = chrono::Utc::now().timestamp_millis();
     }
-    
+
     /// Generiert Fallback-Content aus Checklist-Items
     #[allow(dead_code)]
     pub fn generate_checklist_fallback(&self) -> String {
@@ -157,16 +147,19 @@ impl Note {
             None => String::new(),
         }
     }
-    
+
     /// Korrigiert den noteType basierend auf vorhandenen checklistItems
     /// Wird nach dem Deserialisieren aufgerufen um alte Notizen ohne noteType-Feld zu fixen
     pub fn fix_note_type(&mut self) {
         // Wenn checklistItems vorhanden sind, muss es eine CHECKLIST sein
-        if self.checklist_items.is_some() && !self.checklist_items.as_ref().unwrap().is_empty() {
-            self.note_type = NoteType::Checklist;
+        if let Some(items) = &self.checklist_items {
+            if !items.is_empty() {
+                self.note_type = NoteType::Checklist;
+                return;
+            }
         }
         // Wenn noteType CHECKLIST ist, aber keine Items vorhanden → initialisiere leere Liste
-        else if self.note_type == NoteType::Checklist && self.checklist_items.is_none() {
+        if self.note_type == NoteType::Checklist && self.checklist_items.is_none() {
             self.checklist_items = Some(Vec::new());
         }
     }
@@ -208,7 +201,7 @@ mod tests {
     #[test]
     fn test_note_creation() {
         let note = Note::new("Test Title".to_string(), "tauri-abc123".to_string());
-        
+
         assert!(!note.id.is_empty());
         assert_eq!(note.title, "Test Title");
         assert_eq!(note.device_id, "tauri-abc123");
@@ -220,7 +213,7 @@ mod tests {
     #[test]
     fn test_checklist_note_creation() {
         let note = Note::new_checklist("Shopping".to_string(), "tauri-abc123".to_string());
-        
+
         assert_eq!(note.note_type, NoteType::Checklist);
         assert!(note.checklist_items.is_some());
         assert!(note.checklist_items.unwrap().is_empty());
@@ -229,7 +222,7 @@ mod tests {
     #[test]
     fn test_checklist_item_creation() {
         let item = ChecklistItem::new("Buy milk".to_string(), 0);
-        
+
         assert!(!item.id.is_empty());
         assert_eq!(item.text, "Buy milk");
         assert!(!item.is_checked);
@@ -240,10 +233,10 @@ mod tests {
     fn test_note_touch_updates_timestamp() {
         let mut note = Note::new("Test".to_string(), "tauri-abc".to_string());
         let original = note.updated_at;
-        
+
         std::thread::sleep(std::time::Duration::from_millis(10));
         note.touch();
-        
+
         assert!(note.updated_at > original);
     }
 
@@ -251,12 +244,22 @@ mod tests {
     fn test_generate_checklist_fallback() {
         let mut note = Note::new_checklist("List".to_string(), "tauri-abc".to_string());
         note.checklist_items = Some(vec![
-            ChecklistItem { id: "1".to_string(), text: "Item A".to_string(), is_checked: false, order: 0 },
-            ChecklistItem { id: "2".to_string(), text: "Item B".to_string(), is_checked: true, order: 1 },
+            ChecklistItem {
+                id: "1".to_string(),
+                text: "Item A".to_string(),
+                is_checked: false,
+                order: 0,
+            },
+            ChecklistItem {
+                id: "2".to_string(),
+                text: "Item B".to_string(),
+                is_checked: true,
+                order: 1,
+            },
         ]);
-        
+
         let fallback = note.generate_checklist_fallback();
-        
+
         assert!(fallback.contains("[ ] Item A"));
         assert!(fallback.contains("[x] Item B"));
     }
@@ -265,7 +268,7 @@ mod tests {
     fn test_note_metadata_from_note() {
         let note = Note::new("My Note".to_string(), "tauri-abc".to_string());
         let meta: NoteMetadata = (&note).into();
-        
+
         assert_eq!(meta.id, note.id);
         assert_eq!(meta.title, note.title);
         assert_eq!(meta.updated_at, note.updated_at);

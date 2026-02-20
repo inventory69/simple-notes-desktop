@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as tauri from '../services/tauri.js';
 
 vi.mock('../services/tauri.js');
@@ -178,7 +178,7 @@ describe('SettingsDialog', () => {
           autosave: true,
           minimize_to_tray: false,
           autostart: false,
-        })
+        }),
       );
     });
 

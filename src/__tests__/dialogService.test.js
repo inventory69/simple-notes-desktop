@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 describe('DialogService', () => {
   let dialogService;
@@ -6,7 +6,7 @@ describe('DialogService', () => {
   beforeEach(async () => {
     // Clean DOM
     document.body.innerHTML = '';
-    
+
     // Fresh import each time
     vi.resetModules();
     const mod = await import('../services/DialogService.js');

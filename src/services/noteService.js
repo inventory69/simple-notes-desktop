@@ -23,7 +23,9 @@ class NoteService {
    * Notify all listeners
    */
   notify() {
-    this.listeners.forEach(listener => listener());
+    this.listeners.forEach((listener) => {
+      listener();
+    });
   }
 
   /**
@@ -83,18 +85,18 @@ class NoteService {
     try {
       // Backend updates timestamp and returns updated note
       const updatedNote = await tauri.saveNote(note);
-      
+
       // Update local cache with server response
-      const index = this.notes.findIndex(n => n.id === updatedNote.id);
+      const index = this.notes.findIndex((n) => n.id === updatedNote.id);
       if (index >= 0) {
         this.notes[index] = { ...updatedNote };
       } else {
         this.notes.unshift(updatedNote);
       }
-      
+
       this.currentNote = updatedNote;
       this.notify();
-      
+
       return updatedNote;
     } catch (error) {
       console.error('Failed to save note:', error);
@@ -109,14 +111,14 @@ class NoteService {
   async deleteNote(id) {
     try {
       await tauri.deleteNote(id);
-      
+
       // Remove from local cache
-      this.notes = this.notes.filter(n => n.id !== id);
-      
+      this.notes = this.notes.filter((n) => n.id !== id);
+
       if (this.currentNote?.id === id) {
         this.currentNote = null;
       }
-      
+
       this.notify();
     } catch (error) {
       console.error('Failed to delete note:', error);
@@ -143,7 +145,7 @@ class NoteService {
     }
 
     // Update local state for successful deletions
-    this.notes = this.notes.filter(n => !results.success.includes(n.id));
+    this.notes = this.notes.filter((n) => !results.success.includes(n.id));
 
     if (this.currentNote && results.success.includes(this.currentNote.id)) {
       this.currentNote = null;
@@ -161,9 +163,9 @@ class NoteService {
     if (!query.trim()) {
       return this.notes;
     }
-    
+
     const lowerQuery = query.toLowerCase();
-    return this.notes.filter(note => {
+    return this.notes.filter((note) => {
       // Title match
       if (note.title.toLowerCase().includes(lowerQuery)) return true;
 
@@ -171,9 +173,7 @@ class NoteService {
       if (note.content?.toLowerCase().includes(lowerQuery)) return true;
 
       // F1: Checklist items match
-      if (note.checklistItems?.some(item =>
-        item.text.toLowerCase().includes(lowerQuery)
-      )) return true;
+      if (note.checklistItems?.some((item) => item.text.toLowerCase().includes(lowerQuery))) return true;
 
       return false;
     });

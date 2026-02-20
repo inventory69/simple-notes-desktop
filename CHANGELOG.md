@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-02-20
+
+### Added
+
+- Checklist items now support multiline text with word wrap and vertical scrolling
+- Scroll-based gradient indicators on checklist items (matching Android parity)
+
+### Changed
+
+- Checklist `<input type="text">` replaced with `<textarea>` for multiline support
+- Debug `println!` replaced with conditional `eprintln!` (debug builds only, stderr)
+- `fix_note_type()` uses idiomatic `if let` instead of `is_some()` + `unwrap()`
+- UUID regex in WebDAV client compiled once via `LazyLock` instead of per-call
+- `std::env::set_var` wrapped in `unsafe` block with safety documentation
+- AppImage filename in `build.mjs` reads version dynamically from `package.json`
+- Workflow release notes generated automatically from CHANGELOG.md
+
+### Fixed
+
+- Save race condition when quickly switching between notes (pending save now flushes)
+- Removed unused `syncIcon` variable in `main.js`
+- Select-multiple button now uses a distinct list-with-checkboxes icon (no longer identical to the New Checklist button)
+- Select-multiple button highlights blue while selection mode is active
+- Batch delete button is now a clearly visible red "Delete" button (was: invisible icon-only)
+- Added toolbar separator between create-actions and multi-select button
+
+### Technical
+
+- Added `scripts/bump-version.sh` for single-command version updates across 5 files
+- Added `scripts/update-aur-sha.sh` for post-release AUR sha256sum updates
+- Added `pnpm bump` and `pnpm update-aur-sha` convenience scripts
+- Linting: Biome (JS/CSS) + Clippy/rustfmt (Rust) with CI enforcement
+
 ## [0.3.0] - 2026-02-18
 
 ### Added

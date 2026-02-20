@@ -1,5 +1,5 @@
-import * as tauri from '../services/tauri.js';
 import { dialogService } from '../services/DialogService.js';
+import * as tauri from '../services/tauri.js';
 
 /**
  * Connection Dialog Component
@@ -13,7 +13,7 @@ export class ConnectionDialog {
     this.passwordInput = document.getElementById('password');
     this.errorDiv = document.getElementById('connection-error');
     this.onConnectCallback = null;
-    
+
     this.init();
   }
 
@@ -22,7 +22,7 @@ export class ConnectionDialog {
       e.preventDefault();
       await this.handleConnect();
     });
-    
+
     // Load saved credentials if available
     this.loadCredentials();
   }
@@ -48,7 +48,7 @@ export class ConnectionDialog {
     if (!url || !username || !password) {
       await dialogService.warning({
         title: 'Missing Information',
-        message: 'Please fill in all fields'
+        message: 'Please fill in all fields',
       });
       return;
     }
@@ -56,14 +56,14 @@ export class ConnectionDialog {
     try {
       this.hideError();
       const success = await tauri.connect(url, username, password);
-      
+
       if (success) {
         // Save credentials
         await tauri.saveCredentials({ url, username, password });
-        
+
         // Hide dialog
         this.hide();
-        
+
         // Notify callback
         if (this.onConnectCallback) {
           this.onConnectCallback();
@@ -71,14 +71,14 @@ export class ConnectionDialog {
       } else {
         await dialogService.error({
           title: 'Connection Failed',
-          message: 'Connection failed. Please check your credentials.'
+          message: 'Connection failed. Please check your credentials.',
         });
       }
     } catch (error) {
       console.error('Connection error:', error);
       await dialogService.error({
         title: 'Connection Failed',
-        message: error.message || 'Could not connect to server. Please check your credentials and try again.'
+        message: error.message || 'Could not connect to server. Please check your credentials and try again.',
       });
     }
   }

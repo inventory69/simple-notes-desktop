@@ -11,6 +11,8 @@
   --color-selected: #e3f2fd;
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1);
   --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
+  --checklist-fade-strong: rgba(255, 255, 255, 0.95);
+  --checklist-fade-mid: rgba(255, 255, 255, 0.7);
 }
 
 [data-theme="dark"] {
@@ -24,6 +26,8 @@
   --color-sidebar-bg: #242424;
   --color-hover: #2a2a2a;
   --color-selected: #1e3a5f;
+  --checklist-fade-strong: rgba(26, 26, 26, 0.95);
+  --checklist-fade-mid: rgba(26, 26, 26, 0.7);
 }
 
 /* KDE Breeze Theme Support */
@@ -36,6 +40,8 @@
   --color-sidebar-bg: #fcfcfc;
   --color-hover: #e4e4e4;
   --color-selected: #dae8f3;
+  --checklist-fade-strong: rgba(239, 240, 241, 0.95);
+  --checklist-fade-mid: rgba(239, 240, 241, 0.7);
 }
 
 [data-desktop="kde"][data-theme="dark"] {
@@ -47,6 +53,8 @@
   --color-sidebar-bg: #2a2e32;
   --color-hover: #2a2e32;
   --color-selected: #2c4e65;
+  --checklist-fade-strong: rgba(35, 38, 41, 0.95);
+  --checklist-fade-mid: rgba(35, 38, 41, 0.7);
 }
 
 * {
@@ -87,8 +95,12 @@ body {
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .dialog.hidden {
@@ -106,11 +118,11 @@ body {
 }
 
 @keyframes slideUp {
-  from { 
+  from {
     opacity: 0;
     transform: translateY(20px);
   }
-  to { 
+  to {
     opacity: 1;
     transform: translateY(0);
   }
@@ -233,7 +245,9 @@ body {
   background-color: var(--color-bg);
   color: var(--color-fg);
   font-size: 1rem;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
 }
 
 .form-group input:focus,
@@ -343,14 +357,14 @@ body {
 
 .about-value {
   color: var(--text-color);
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-family: "SF Mono", "Monaco", "Consolas", monospace;
   font-size: 0.9rem;
 }
 
 .about-link {
   color: var(--color-primary);
   text-decoration: none;
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-family: "SF Mono", "Monaco", "Consolas", monospace;
   font-size: 0.9rem;
   display: inline-flex;
   align-items: center;
@@ -461,13 +475,26 @@ body {
   background-color: var(--color-hover);
 }
 
+.btn-icon.active {
+  background-color: var(--color-primary);
+  color: white;
+}
+
+.btn-icon.active:hover {
+  background-color: var(--color-primary-hover);
+}
+
 .btn-icon.spinning svg {
   animation: spin 1s linear infinite;
 }
 
 @keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .btn-icon-small {
@@ -550,6 +577,14 @@ body {
   flex: 1;
 }
 
+.toolbar-separator {
+  width: 1px;
+  align-self: stretch;
+  background-color: var(--color-border);
+  margin: 0.25rem 0.1rem;
+  flex-shrink: 0;
+}
+
 /* F6: Batch Actions Bar - compact design inside sidebar */
 .batch-actions {
   display: flex;
@@ -590,6 +625,31 @@ body {
 
 .batch-actions-buttons .btn-cancel:hover {
   background-color: var(--color-hover);
+}
+
+.btn-danger-batch {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  background-color: var(--color-danger);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.btn-danger-batch svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.btn-danger-batch:hover {
+  background-color: color-mix(in srgb, var(--color-danger) 85%, black);
 }
 
 /* Main Layout */
@@ -826,7 +886,7 @@ body {
   background-color: var(--color-hover);
   padding: 0.2rem 0.4rem;
   border-radius: 3px;
-  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
 }
 
 .preview pre {
@@ -890,7 +950,7 @@ body {
 }
 
 .cm-scroller {
-  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
   font-size: 14px;
   padding: 1rem;
 }
@@ -960,7 +1020,7 @@ body {
 
 .checklist-item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.5rem;
   padding: 0.5rem;
   margin-bottom: 0.5rem;
@@ -976,15 +1036,25 @@ body {
   width: 18px;
   height: 18px;
   cursor: pointer;
+  margin-top: 3px;
+  flex-shrink: 0;
 }
 
 .checklist-item-text {
-  flex: 1;
+  width: 100%;
   border: none;
   background-color: transparent;
   color: var(--color-fg);
   font-size: 1rem;
+  font-family: inherit;
+  line-height: 1.6;
   outline: none;
+  resize: none;
+  overflow: hidden;
+  padding: 0;
+  min-height: 1.6em;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 
 .checklist-item.checked .checklist-item-text {
@@ -1001,6 +1071,8 @@ body {
   border-radius: 4px;
   opacity: 0;
   transition: opacity 0.2s;
+  margin-top: 2px;
+  flex-shrink: 0;
 }
 
 .checklist-item:hover .checklist-item-delete {
@@ -1020,6 +1092,66 @@ body {
 
 .checklist-add-btn:hover {
   background-color: var(--color-primary-hover);
+}
+
+/* Checklist Item Text Wrapper & Scroll Gradient */
+.checklist-item-text-wrapper {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.checklist-item-scroll {
+  max-height: 128px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+
+.checklist-item-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.checklist-item-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.checklist-item-scroll::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 2px;
+}
+
+.checklist-gradient-top,
+.checklist-gradient-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 24px;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.checklist-gradient-top {
+  top: 0;
+  background: linear-gradient(to bottom, var(--checklist-fade-strong), var(--checklist-fade-mid), transparent);
+}
+
+.checklist-gradient-bottom {
+  bottom: 0;
+  background: linear-gradient(to top, var(--checklist-fade-strong), var(--checklist-fade-mid), transparent);
+}
+
+.checklist-gradient-top.visible,
+.checklist-gradient-bottom.visible {
+  opacity: 1;
+}
+
+/* Hide gradients during drag-and-drop */
+.checklist-item.dragging .checklist-gradient-top,
+.checklist-item.dragging .checklist-gradient-bottom {
+  opacity: 0 !important;
 }
 
 /* F2: Checklist Separator */
@@ -1052,6 +1184,8 @@ body {
   user-select: none;
   letter-spacing: 1px;
   line-height: 1;
+  margin-top: 2px;
+  flex-shrink: 0;
 }
 
 .checklist-drag-handle:hover {
@@ -1231,7 +1365,9 @@ body {
   background-color: var(--color-bg);
   color: var(--color-fg);
   font-size: 1rem;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
 }
 
 .dialog-input:focus {

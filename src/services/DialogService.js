@@ -1,9 +1,9 @@
 /**
  * Universal Dialog Service
- * 
+ *
  * Replaces native browser dialogs (confirm, alert) with custom styled dialogs.
  * Provides consistent UI across all dialog types.
- * 
+ *
  * @example
  * // Confirm Dialog
  * const confirmed = await dialogService.confirm({
@@ -13,14 +13,14 @@
  *   cancelText: 'Cancel',
  *   type: 'danger'
  * });
- * 
+ *
  * // Alert Dialog
  * await dialogService.alert({
  *   title: 'Error',
  *   message: 'Failed to save settings',
  *   type: 'error'
  * });
- * 
+ *
  * // Shorthand methods
  * await dialogService.error({ message: 'Something went wrong' });
  * await dialogService.success({ message: 'Saved successfully' });
@@ -40,7 +40,7 @@ class DialogService {
     if (!document.getElementById('universal-dialog')) {
       this.createDialogElement();
     }
-    
+
     this.dialog = document.getElementById('universal-dialog');
     this.titleEl = document.getElementById('dialog-title');
     this.messageEl = document.getElementById('dialog-message');
@@ -73,20 +73,14 @@ class DialogService {
    * Show confirm dialog with two buttons (Cancel/Confirm)
    * @returns {Promise<boolean>} true if confirmed, false if cancelled
    */
-  confirm({ 
-    title, 
-    message, 
-    confirmText = 'Confirm', 
-    cancelText = 'Cancel', 
-    type = 'info' 
-  }) {
+  confirm({ title, message, confirmText = 'Confirm', cancelText = 'Cancel', type = 'info' }) {
     return this._show({
       title,
       message,
       confirmText,
       cancelText,
       type,
-      showCancel: true
+      showCancel: true,
     });
   }
 
@@ -94,18 +88,13 @@ class DialogService {
    * Show alert dialog with single OK button
    * @returns {Promise<boolean>} always true
    */
-  alert({ 
-    title, 
-    message, 
-    buttonText = 'OK', 
-    type = 'info' 
-  }) {
+  alert({ title, message, buttonText = 'OK', type = 'info' }) {
     return this._show({
       title,
       message,
       confirmText: buttonText,
       type,
-      showCancel: false
+      showCancel: false,
     });
   }
 
@@ -145,20 +134,19 @@ class DialogService {
    * @returns {Promise<boolean>} true wenn Nutzer bestätigt
    */
   confirmDeletion(noteCount = 1) {
-    const title = noteCount === 1
-      ? 'Delete Note'
-      : `Delete ${noteCount} Notes`;
+    const title = noteCount === 1 ? 'Delete Note' : `Delete ${noteCount} Notes`;
 
-    const message = noteCount === 1
-      ? 'This note will be immediately deleted from the server. On your Android device, it will remain with the status "Deleted on Server" until you remove it there as well.'
-      : `These ${noteCount} notes will be immediately deleted from the server. On your Android devices, they will remain with the status "Deleted on Server" until you remove them there as well.`;
+    const message =
+      noteCount === 1
+        ? 'This note will be immediately deleted from the server. On your Android device, it will remain with the status "Deleted on Server" until you remove it there as well.'
+        : `These ${noteCount} notes will be immediately deleted from the server. On your Android devices, they will remain with the status "Deleted on Server" until you remove them there as well.`;
 
     return this.confirm({
       title,
       message,
       confirmText: 'Delete from Server',
       cancelText: 'Cancel',
-      type: 'danger'
+      type: 'danger',
     });
   }
 
@@ -166,18 +154,18 @@ class DialogService {
    * Show prompt dialog with text input
    * @returns {Promise<string|null>} input value if confirmed, null if cancelled
    */
-  prompt({ 
-    title, 
-    message, 
+  prompt({
+    title,
+    message,
     placeholder = '',
     defaultValue = '',
-    confirmText = 'OK', 
-    cancelText = 'Cancel', 
-    type = 'info' 
+    confirmText = 'OK',
+    cancelText = 'Cancel',
+    type = 'info',
   }) {
     return new Promise((resolve) => {
       this.resolvePromise = resolve;
-      
+
       // Set content
       this.titleEl.textContent = title;
       this.messageEl.innerHTML = `
@@ -187,39 +175,39 @@ class DialogService {
       `;
       this.confirmBtn.textContent = confirmText;
       this.cancelBtn.textContent = cancelText;
-      
+
       // Show cancel button
       this.cancelBtn.style.display = '';
-      
+
       // Button styling
       this.confirmBtn.className = this._getButtonClass(type);
-      
+
       // Icon
       this.iconContainer.innerHTML = this._getIcon(type);
       this.iconContainer.className = `dialog-icon dialog-icon-${type}`;
-      
+
       // Show dialog
       this.dialog.classList.remove('hidden');
-      
+
       // Focus input
       const inputEl = document.getElementById('dialog-input');
       setTimeout(() => {
         inputEl.focus();
         inputEl.select();
       }, 100);
-      
+
       // Event handlers
       const handleConfirm = () => {
         const value = inputEl.value.trim();
         this._cleanup();
         resolve(value || null);
       };
-      
+
       const handleCancel = () => {
         this._cleanup();
         resolve(null);
       };
-      
+
       const handleKeydown = (e) => {
         if (e.key === 'Escape') {
           e.preventDefault();
@@ -229,12 +217,12 @@ class DialogService {
           handleConfirm();
         }
       };
-      
+
       // Attach handlers
       this.confirmBtn.onclick = handleConfirm;
       this.cancelBtn.onclick = handleCancel;
       document.addEventListener('keydown', handleKeydown);
-      
+
       // Store for cleanup
       this.keydownHandler = handleKeydown;
     });
@@ -243,12 +231,12 @@ class DialogService {
   _show({ title, message, confirmText, cancelText, type, showCancel }) {
     return new Promise((resolve) => {
       this.resolvePromise = resolve;
-      
+
       // Set content
       this.titleEl.textContent = title;
       this.messageEl.textContent = message;
       this.confirmBtn.textContent = confirmText;
-      
+
       // Cancel button visibility
       if (showCancel) {
         this.cancelBtn.style.display = '';
@@ -256,31 +244,31 @@ class DialogService {
       } else {
         this.cancelBtn.style.display = 'none';
       }
-      
+
       // Button styling based on type
       this.confirmBtn.className = this._getButtonClass(type);
-      
+
       // Icon based on type
       this.iconContainer.innerHTML = this._getIcon(type);
       this.iconContainer.className = `dialog-icon dialog-icon-${type}`;
-      
+
       // Show dialog
       this.dialog.classList.remove('hidden');
-      
+
       // Focus confirm button for accessibility
       setTimeout(() => this.confirmBtn.focus(), 100);
-      
+
       // Event handlers
       const handleConfirm = () => {
         this._cleanup();
         resolve(true);
       };
-      
+
       const handleCancel = () => {
         this._cleanup();
         resolve(false);
       };
-      
+
       const handleKeydown = (e) => {
         if (e.key === 'Escape' && showCancel) {
           e.preventDefault();
@@ -290,12 +278,12 @@ class DialogService {
           handleConfirm();
         }
       };
-      
+
       // Attach handlers
       this.confirmBtn.onclick = handleConfirm;
       this.cancelBtn.onclick = handleCancel;
       document.addEventListener('keydown', handleKeydown);
-      
+
       // Store for cleanup
       this.keydownHandler = handleKeydown;
     });
@@ -347,7 +335,7 @@ class DialogService {
       danger: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <polyline points="3 6 5 6 21 6"></polyline>
         <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-      </svg>`
+      </svg>`,
     };
     return icons[type] || icons.info;
   }

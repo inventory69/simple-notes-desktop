@@ -1,5 +1,5 @@
-import noteService from '../services/noteService.js';
 import { dialogService } from '../services/DialogService.js';
+import noteService from '../services/noteService.js';
 
 /**
  * Notes List Component with Multi-Select support (F6)
@@ -82,12 +82,10 @@ export class NotesList {
       return;
     }
 
-    const notes = this.searchInput.value
-      ? noteService.searchNotes(this.searchInput.value)
-      : noteService.getNotes();
+    const notes = this.searchInput.value ? noteService.searchNotes(this.searchInput.value) : noteService.getNotes();
 
-    const lastIndex = notes.findIndex(n => n.id === this.lastSelectedId);
-    const targetIndex = notes.findIndex(n => n.id === targetId);
+    const lastIndex = notes.findIndex((n) => n.id === this.lastSelectedId);
+    const targetIndex = notes.findIndex((n) => n.id === targetId);
 
     if (lastIndex === -1 || targetIndex === -1) {
       this.toggleSelection(targetId);
@@ -125,7 +123,7 @@ export class NotesList {
     if (results.failed.length > 0) {
       await dialogService.warning({
         title: 'Partial Deletion',
-        message: `${results.success.length} notes deleted. ${results.failed.length} notes could not be deleted.`
+        message: `${results.success.length} notes deleted. ${results.failed.length} notes could not be deleted.`,
       });
     }
 
@@ -137,25 +135,23 @@ export class NotesList {
     if (this.onSelectionChangeCallback) {
       this.onSelectionChangeCallback({
         selectionMode: this.selectionMode,
-        count: this.selectedIds.size
+        count: this.selectedIds.size,
       });
     }
   }
 
   render(searchQuery = '') {
-    const notes = searchQuery
-      ? noteService.searchNotes(searchQuery)
-      : noteService.getNotes();
+    const notes = searchQuery ? noteService.searchNotes(searchQuery) : noteService.getNotes();
 
     if (notes.length === 0) {
       this.container.innerHTML = '<div style="padding: 1rem; text-align: center; color: #999;">No notes found</div>';
       return;
     }
 
-    this.container.innerHTML = notes.map(note => this.renderNoteItem(note)).join('');
+    this.container.innerHTML = notes.map((note) => this.renderNoteItem(note)).join('');
 
     // Add click handlers
-    this.container.querySelectorAll('.note-item').forEach(item => {
+    this.container.querySelectorAll('.note-item').forEach((item) => {
       item.addEventListener('click', (e) => {
         const id = item.dataset.id;
 
@@ -192,10 +188,16 @@ export class NotesList {
         }, 500);
       });
       item.addEventListener('mouseup', () => {
-        if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+        if (pressTimer) {
+          clearTimeout(pressTimer);
+          pressTimer = null;
+        }
       });
       item.addEventListener('mouseleave', () => {
-        if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+        if (pressTimer) {
+          clearTimeout(pressTimer);
+          pressTimer = null;
+        }
       });
     });
   }
@@ -211,12 +213,13 @@ export class NotesList {
     if (isSelected) classes += ' multi-selected';
 
     // F1: Note Type Icon
-    const typeIcon = note.noteType === 'CHECKLIST'
-      ? `<svg class="note-type-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    const typeIcon =
+      note.noteType === 'CHECKLIST'
+        ? `<svg class="note-type-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
            <polyline points="9 11 12 14 22 4"></polyline>
            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
          </svg>`
-      : `<svg class="note-type-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        : `<svg class="note-type-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
            <polyline points="14 2 14 8 20 8"></polyline>
            <line x1="16" y1="13" x2="8" y2="13"></line>
@@ -226,17 +229,22 @@ export class NotesList {
 
     return `
       <div class="${classes}" data-id="${note.id}">
-        ${this.selectionMode ? `<div class="note-item-checkbox">
-            ${isSelected
-              ? `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        ${
+          this.selectionMode
+            ? `<div class="note-item-checkbox">
+            ${
+              isSelected
+                ? `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                    <rect x="3" y="3" width="18" height="18" rx="3" ry="3" fill="currentColor" stroke="currentColor"/>
                    <polyline points="9 12 11 14 15 10" stroke="white" stroke-width="2.5"/>
                  </svg>`
-              : `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                : `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                    <rect x="3" y="3" width="18" height="18" rx="3" ry="3"/>
                  </svg>`
             }
-          </div>` : ''}
+          </div>`
+            : ''
+        }
         <div class="note-item-content">
           <div class="note-item-header">
             ${typeIcon}
@@ -252,13 +260,11 @@ export class NotesList {
   getPreview(note) {
     if (note.noteType === 'CHECKLIST' && note.checklistItems) {
       const total = note.checklistItems.length;
-      const checked = note.checklistItems.filter(item => item.isChecked).length;
+      const checked = note.checklistItems.filter((item) => item.isChecked).length;
       return `☑ ${checked}/${total} completed`;
     }
 
-    return note.content
-      ? note.content.substring(0, 100).replace(/\n/g, ' ')
-      : 'Empty note';
+    return note.content ? note.content.substring(0, 100).replace(/\n/g, ' ') : 'Empty note';
   }
 
   formatDate(timestamp) {
@@ -279,7 +285,7 @@ export class NotesList {
     return date.toLocaleDateString('en-US', {
       day: '2-digit',
       month: '2-digit',
-      year: 'numeric'
+      year: 'numeric',
     });
   }
 

@@ -1,0 +1,3 @@
+# Clippy Configuration for simple-notes-desktop
+too-many-arguments-threshold = 12
+type-complexity-threshold = 350

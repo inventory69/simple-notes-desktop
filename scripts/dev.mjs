@@ -13,7 +13,7 @@ if (platform() === 'linux') {
   process.env.WEBKIT_DISABLE_DMABUF_RENDERER = '1';
   // Alternativ für ältere WebKit-Versionen - wichtig für Wayland!
   process.env.WEBKIT_DISABLE_COMPOSITING_MODE = '1';
-  
+
   console.log('[Dev] Linux detected - WebKit environment variables set:');
   console.log('  WEBKIT_DISABLE_DMABUF_RENDERER=1');
   console.log('  WEBKIT_DISABLE_COMPOSITING_MODE=1');
@@ -23,7 +23,7 @@ if (platform() === 'linux') {
 const child = spawn('pnpm', ['tauri', 'dev'], {
   stdio: 'inherit',
   shell: false,
-  env: process.env
+  env: process.env,
 });
 
 child.on('close', (code) => {

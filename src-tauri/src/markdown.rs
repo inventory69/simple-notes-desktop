@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 use uuid::Uuid;
 
 /// Konvertiert Unix-Millisekunden zu ISO8601 UTC String
-/// 
+///
 /// Format: "2026-02-04T10:25:29Z" (ohne Millisekunden!)
 pub fn timestamp_to_iso(ts: i64) -> String {
     DateTime::from_timestamp_millis(ts)
@@ -15,7 +15,7 @@ pub fn timestamp_to_iso(ts: i64) -> String {
 }
 
 /// Parst ISO8601 String zu Unix-Millisekunden
-/// 
+///
 /// Unterstützt mehrere Formate:
 /// - "2026-02-04T10:25:29Z"
 /// - "2026-02-04T10:25:29+01:00"
@@ -24,21 +24,21 @@ pub fn timestamp_to_iso(ts: i64) -> String {
 #[allow(dead_code)]
 pub fn iso_to_timestamp(s: &str) -> Result<i64> {
     let normalized = s.trim().replace(' ', "T");
-    
+
     // Versuche mit Timezone-Aware Parsing
     let formats_with_tz = [
         "%Y-%m-%dT%H:%M:%S%:z",    // 2026-02-04T10:25:29+01:00
-        "%Y-%m-%dT%H:%M:%S%z",     // 2026-02-04T10:25:29+0100  
+        "%Y-%m-%dT%H:%M:%S%z",     // 2026-02-04T10:25:29+0100
         "%Y-%m-%dT%H:%M:%S%.f%:z", // 2026-02-04T10:25:29.123+01:00
         "%Y-%m-%dT%H:%M:%S%.f%z",  // 2026-02-04T10:25:29.123+0100
     ];
-    
+
     for fmt in formats_with_tz {
         if let Ok(dt) = DateTime::parse_from_str(&normalized, fmt) {
             return Ok(dt.timestamp_millis());
         }
     }
-    
+
     // Versuche mit "Z" (UTC) - manuell ersetzen da "Z" kein valider Chrono Format-Specifier ist
     let utc_normalized = normalized.replace('Z', "+00:00");
     for fmt in formats_with_tz {
@@ -46,19 +46,16 @@ pub fn iso_to_timestamp(s: &str) -> Result<i64> {
             return Ok(dt.timestamp_millis());
         }
     }
-    
+
     // Fallback: ohne Timezone als UTC interpretieren
-    let formats_naive = [
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S%.f",
-    ];
-    
+    let formats_naive = ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S%.f"];
+
     for fmt in formats_naive {
-        if let Ok(dt) = NaiveDateTime::parse_from_str(&normalized.trim_end_matches('Z'), fmt) {
+        if let Ok(dt) = NaiveDateTime::parse_from_str(normalized.trim_end_matches('Z'), fmt) {
             return Ok(dt.and_utc().timestamp_millis());
         }
     }
-    
+
     Err(AppError::InvalidTimestamp(s.to_string()))
 }
 
@@ -129,21 +126,21 @@ fn checklist_recovery_regex() -> &'static Regex {
 }
 
 /// Parst Markdown mit YAML-Frontmatter zu einer Note
-/// 
+///
 /// # Arguments
 /// * `md` - Markdown-String mit Frontmatter
 /// * `server_mtime` - Optional: Server-Datei mtime für Timestamp-Priorität
 #[allow(dead_code)]
 pub fn parse_markdown(md: &str, server_mtime: Option<i64>) -> Result<Note> {
     let re = frontmatter_regex();
-    
+
     let captures = re
         .captures(md)
         .ok_or_else(|| AppError::ParseError("No frontmatter found".to_string()))?;
-    
+
     let yaml_block = captures.get(1).map(|m| m.as_str()).unwrap_or("");
     let body = captures.get(2).map(|m| m.as_str()).unwrap_or("");
-    
+
     // YAML parsen (einfach per Zeilen-Split)
     let mut metadata: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     for line in yaml_block.lines() {
@@ -151,47 +148,50 @@ pub fn parse_markdown(md: &str, server_mtime: Option<i64>) -> Result<Note> {
             metadata.insert(key.trim().to_string(), value.trim().to_string());
         }
     }
-    
+
     // Titel aus erstem # Heading extrahieren
     let title = body
         .lines()
         .find(|line| line.starts_with("# "))
         .map(|line| line[2..].trim().to_string())
         .unwrap_or_else(|| "Untitled".to_string());
-    
+
     // Content nach dem Titel extrahieren
-    let content_start = body.find("\n# ").map(|i| {
-        body[i + 1..]
-            .find('\n')
-            .map(|j| i + 1 + j + 1)
-            .unwrap_or(body.len())
-    }).unwrap_or(0);
-    
+    let content_start = body
+        .find("\n# ")
+        .map(|i| {
+            body[i + 1..]
+                .find('\n')
+                .map(|j| i + 1 + j + 1)
+                .unwrap_or(body.len())
+        })
+        .unwrap_or(0);
+
     let content_after_title = body[content_start..].trim();
-    
+
     // Note-Typ bestimmen
     let note_type = match metadata.get("type").map(|s| s.as_str()) {
         Some("checklist") => NoteType::Checklist,
         _ => NoteType::Text,
     };
-    
+
     // Timestamps parsen
     let created_at = metadata
         .get("created")
         .and_then(|s| iso_to_timestamp(s).ok())
         .unwrap_or_else(|| Utc::now().timestamp_millis());
-    
+
     let yaml_updated_at = metadata
         .get("updated")
         .and_then(|s| iso_to_timestamp(s).ok())
         .unwrap_or(created_at);
-    
+
     // Server mtime hat Priorität (v1.7.2 IMPL_014)
     let updated_at = match server_mtime {
         Some(mtime) if mtime > yaml_updated_at => mtime,
         _ => yaml_updated_at,
     };
-    
+
     // Checklist-Items parsen
     let (content, checklist_items) = if note_type == NoteType::Checklist {
         let items = parse_checklist_items(content_after_title);
@@ -205,7 +205,7 @@ pub fn parse_markdown(md: &str, server_mtime: Option<i64>) -> Result<Note> {
     let checklist_sort_option = metadata
         .get("sort")
         .map(|v| v.to_uppercase().replace('-', "_"));
-    
+
     Ok(Note {
         id: metadata
             .get("id")
@@ -230,15 +230,21 @@ pub fn parse_markdown(md: &str, server_mtime: Option<i64>) -> Result<Note> {
 #[allow(dead_code)]
 fn parse_checklist_items(content: &str) -> Vec<ChecklistItem> {
     let re = checklist_items_regex();
-    
+
     content
         .lines()
         .filter_map(|line| re.captures(line))
         .enumerate()
         .map(|(order, caps)| {
-            let is_checked = caps.get(1).map(|m| m.as_str().to_lowercase() == "x").unwrap_or(false);
-            let text = caps.get(2).map(|m| m.as_str().trim().to_string()).unwrap_or_default();
-            
+            let is_checked = caps
+                .get(1)
+                .map(|m| m.as_str().to_lowercase() == "x")
+                .unwrap_or(false);
+            let text = caps
+                .get(2)
+                .map(|m| m.as_str().trim().to_string())
+                .unwrap_or_default();
+
             ChecklistItem {
                 id: Uuid::new_v4().to_string(),
                 text,
@@ -268,15 +274,21 @@ fn generate_checklist_fallback(items: &[ChecklistItem]) -> String {
 #[allow(dead_code)]
 pub fn recover_checklist_from_content(content: &str) -> Vec<ChecklistItem> {
     let re = checklist_recovery_regex();
-    
+
     content
         .lines()
         .filter_map(|line| re.captures(line))
         .enumerate()
         .map(|(order, caps)| {
-            let is_checked = caps.get(1).map(|m| m.as_str().to_lowercase() == "x").unwrap_or(false);
-            let text = caps.get(2).map(|m| m.as_str().trim().to_string()).unwrap_or_default();
-            
+            let is_checked = caps
+                .get(1)
+                .map(|m| m.as_str().to_lowercase() == "x")
+                .unwrap_or(false);
+            let text = caps
+                .get(2)
+                .map(|m| m.as_str().trim().to_string())
+                .unwrap_or_default();
+
             ChecklistItem {
                 id: Uuid::new_v4().to_string(),
                 text,

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import noteService from '../services/noteService.js';
 import * as tauri from '../services/tauri.js';
 
@@ -15,7 +15,7 @@ describe('NoteService', () => {
     it('should load notes from server', async () => {
       const mockNotes = [
         { id: '1', title: 'Note 1', content: 'Content 1', updated_at: 1234567890 },
-        { id: '2', title: 'Note 2', content: 'Content 2', updated_at: 1234567891 }
+        { id: '2', title: 'Note 2', content: 'Content 2', updated_at: 1234567891 },
       ];
 
       tauri.listNotes.mockResolvedValue(mockNotes);
@@ -41,7 +41,7 @@ describe('NoteService', () => {
         title: 'New Note',
         content: '',
         note_type: 'TEXT',
-        updated_at: Date.now()
+        updated_at: Date.now(),
       };
 
       tauri.createNote.mockResolvedValue(mockNote);
@@ -61,7 +61,7 @@ describe('NoteService', () => {
         content: '',
         note_type: 'CHECKLIST',
         checklist_items: [],
-        updated_at: Date.now()
+        updated_at: Date.now(),
       };
 
       tauri.createNote.mockResolvedValue(mockNote);
@@ -79,13 +79,13 @@ describe('NoteService', () => {
         id: '1',
         title: 'Updated Note',
         content: 'Updated content',
-        updatedAt: 1000
+        updatedAt: 1000,
       };
-      
+
       // Backend returns note with updated timestamp
       const updatedNote = {
         ...originalNote,
-        updatedAt: 2000
+        updatedAt: 2000,
       };
 
       tauri.saveNote.mockResolvedValue(updatedNote);
@@ -101,7 +101,7 @@ describe('NoteService', () => {
     it('should update existing note in cache', async () => {
       noteService.notes = [
         { id: '1', title: 'Old Title', updatedAt: 1000 },
-        { id: '2', title: 'Other Note', updatedAt: 1000 }
+        { id: '2', title: 'Other Note', updatedAt: 1000 },
       ];
 
       const originalNote = { id: '1', title: 'New Title', updatedAt: 1000 };
@@ -121,7 +121,7 @@ describe('NoteService', () => {
     beforeEach(() => {
       noteService.notes = [
         { id: '1', title: 'Note 1' },
-        { id: '2', title: 'Note 2' }
+        { id: '2', title: 'Note 2' },
       ];
       noteService.currentNote = { id: '1', title: 'Note 1' };
     });
@@ -151,7 +151,7 @@ describe('NoteService', () => {
       noteService.notes = [
         { id: '1', title: 'JavaScript Tutorial', content: 'Learn JS' },
         { id: '2', title: 'Python Guide', content: 'Learn Python' },
-        { id: '3', title: 'Learning Rust', content: 'Systems programming' }
+        { id: '3', title: 'Learning Rust', content: 'Systems programming' },
       ];
     });
 

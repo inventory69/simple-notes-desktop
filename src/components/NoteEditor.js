@@ -1,12 +1,12 @@
-import { EditorView } from '@codemirror/view';
-import { EditorState } from '@codemirror/state';
-import { undo as cmUndo, redo as cmRedo } from '@codemirror/commands';
-import { basicSetup } from 'codemirror';
+import { redo as cmRedo, undo as cmUndo } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
-import { marked } from 'marked';
+import { EditorState } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
+import { basicSetup } from 'codemirror';
 import DOMPurify from 'dompurify';
-import noteService from '../services/noteService.js';
+import { marked } from 'marked';
 import { dialogService } from '../services/DialogService.js';
+import noteService from '../services/noteService.js';
 import { UndoStack } from '../utils/UndoStack.js';
 
 /**
@@ -24,7 +24,7 @@ export class NoteEditor {
     this.sortBtn = document.getElementById('checklist-sort-btn');
     this.checklistContainer = document.getElementById('checklist-container');
     this.placeholderDiv = document.getElementById('no-note-selected');
-    
+
     this.undoBtn = document.getElementById('undo-btn');
 
     this.editorView = null;
@@ -64,10 +64,10 @@ export class NoteEditor {
         }
       }
     });
-    
+
     // Delete button
     this.deleteBtn.addEventListener('click', () => this.handleDelete());
-    
+
     // Preview toggle
     this.previewToggleBtn.addEventListener('click', () => this.togglePreview());
 
@@ -96,7 +96,7 @@ export class NoteEditor {
     if (this.editorView) {
       this.editorView.destroy();
     }
-    
+
     const startState = EditorState.create({
       doc: this.currentNote?.content || '',
       extensions: [
@@ -115,19 +115,19 @@ export class NoteEditor {
           if (update.docChanged || update.selectionSet) {
             this._updateUndoButton();
           }
-        })
-      ]
+        }),
+      ],
     });
-    
+
     this.editorView = new EditorView({
       state: startState,
-      parent: this.editorDiv
+      parent: this.editorDiv,
     });
   }
 
   togglePreview() {
     this.showPreview = !this.showPreview;
-    
+
     if (this.showPreview) {
       this.previewDiv.classList.remove('hidden');
       this.previewToggleBtn.classList.add('active');
@@ -143,7 +143,7 @@ export class NoteEditor {
       this.previewDiv.innerHTML = '<div style="padding: 1rem; color: #999;">No content to preview</div>';
       return;
     }
-    
+
     const html = marked.parse(this.currentNote.content);
     this.previewDiv.innerHTML = DOMPurify.sanitize(html);
   }
@@ -160,18 +160,18 @@ export class NoteEditor {
     // F2: Separator-Position berechnen
     let separatorIndex = -1;
     if (sortOption === 'UNCHECKED_FIRST' || sortOption === 'MANUAL') {
-      const firstCheckedIndex = items.findIndex(item => item.isChecked);
+      const firstCheckedIndex = items.findIndex((item) => item.isChecked);
       if (firstCheckedIndex > 0) {
         separatorIndex = firstCheckedIndex;
       }
     } else if (sortOption === 'CHECKED_FIRST') {
-      const firstUncheckedIndex = items.findIndex(item => !item.isChecked);
+      const firstUncheckedIndex = items.findIndex((item) => !item.isChecked);
       if (firstUncheckedIndex > 0) {
         separatorIndex = firstUncheckedIndex;
       }
     }
 
-    const checkedCount = items.filter(item => item.isChecked).length;
+    const checkedCount = items.filter((item) => item.isChecked).length;
 
     // Render items with separator
     let html = '';
@@ -183,8 +183,7 @@ export class NoteEditor {
     });
 
     // Separator at end if all unchecked and sort is UNCHECKED_FIRST
-    if (separatorIndex === -1 && checkedCount === 0 &&
-        (sortOption === 'UNCHECKED_FIRST' || sortOption === 'MANUAL')) {
+    if (separatorIndex === -1 && checkedCount === 0 && (sortOption === 'UNCHECKED_FIRST' || sortOption === 'MANUAL')) {
       html += this.renderSeparator(0);
     }
 
@@ -230,9 +229,7 @@ export class NoteEditor {
 
   // F2: Render separator between checked/unchecked groups
   renderSeparator(checkedCount) {
-    const label = checkedCount === 1
-      ? '1 completed'
-      : `${checkedCount} completed`;
+    const label = checkedCount === 1 ? '1 completed' : `${checkedCount} completed`;
     return `
       <div class="checklist-separator" data-separator="true">
         <div class="checklist-separator-line"></div>
@@ -251,7 +248,7 @@ export class NoteEditor {
       if (!item) return;
 
       // Find the actual index in the original array
-      const originalIndex = this.currentNote.checklistItems.findIndex(i => i.id === item.id);
+      const originalIndex = this.currentNote.checklistItems.findIndex((i) => i.id === item.id);
       if (originalIndex === -1) return;
 
       const checkbox = el.querySelector('input[type="checkbox"]');
@@ -274,6 +271,14 @@ export class NoteEditor {
         this.currentNote.checklistItems[originalIndex].text = textInput.value;
         this._schedulePushSnapshot();
         this.scheduleSave();
+
+        // v0.3.1: Auto-resize textarea and update scroll gradients
+        this.autoResizeTextarea(textInput);
+        const scrollContainer = textInput.closest('.checklist-item-scroll');
+        if (scrollContainer) {
+          this.updateScrollGradients(scrollContainer);
+        }
+
         // F3: Visuellen Leer-Status aktualisieren
         const itemEl = textInput.closest('.checklist-item');
         if (textInput.value.trim() === '') {
@@ -319,10 +324,10 @@ export class NoteEditor {
             id: crypto.randomUUID(),
             text: '',
             isChecked: false,
-            order: originalIndex + 1
+            order: originalIndex + 1,
           };
           // Shift order of all subsequent items
-          this.currentNote.checklistItems.forEach(item => {
+          this.currentNote.checklistItems.forEach((item) => {
             if (item.order > originalIndex) {
               item.order++;
             }
@@ -374,6 +379,14 @@ export class NoteEditor {
       if (dragHandle) {
         this.setupDragAndDrop(dragHandle, el, displayIndex, sortedItems);
       }
+
+      // v0.3.1: Scroll event for gradient visibility
+      const scrollContainer = el.querySelector('.checklist-item-scroll');
+      if (scrollContainer) {
+        scrollContainer.addEventListener('scroll', () => {
+          this.updateScrollGradients(scrollContainer);
+        });
+      }
     });
 
     // Add new item button
@@ -384,7 +397,7 @@ export class NoteEditor {
           id: crypto.randomUUID(),
           text: '',
           isChecked: false,
-          order: this.currentNote.checklistItems.length
+          order: this.currentNote.checklistItems.length,
         };
         this.currentNote.checklistItems.push(newItem);
         this._pushSnapshot();
@@ -395,6 +408,9 @@ export class NoteEditor {
         items[items.length - 1]?.focus();
       });
     }
+
+    // v0.3.1: Initialize textarea auto-resize and scroll gradients
+    this.initChecklistTextareas();
   }
 
   // F2: Drag-and-Drop setup for a checklist item
@@ -412,7 +428,7 @@ export class NoteEditor {
       const startY = e.clientY;
       const itemHeight = dragItem.getBoundingClientRect().height;
       // Cache initial item center positions for separator-aware calculation
-      const itemCenters = allItems.map(el => {
+      const itemCenters = allItems.map((el) => {
         const rect = el.getBoundingClientRect();
         return rect.top + rect.height / 2;
       });
@@ -443,7 +459,7 @@ export class NoteEditor {
         // Visual cross-boundary feedback: toggle dragged item appearance
         // when it hovers over an item with a different checked state
         const targetItem = sortedItems[clampedTarget];
-        const wouldToggle = targetItem && (targetItem.isChecked !== sourceChecked);
+        const wouldToggle = targetItem && targetItem.isChecked !== sourceChecked;
         if (wouldToggle !== visuallyToggled) {
           visuallyToggled = wouldToggle;
           const checkbox = dragItem.querySelector('input[type="checkbox"]');
@@ -466,7 +482,7 @@ export class NoteEditor {
           // Build a visual slot list (items + separator) in DOM order so the
           // separator moves with the items that surround it.
           const allVisual = Array.from(
-            container.querySelectorAll('.checklist-item, .checklist-separator[data-separator]')
+            container.querySelectorAll('.checklist-item, .checklist-separator[data-separator]'),
           );
           const dragVisualIdx = allVisual.indexOf(dragItem);
           const targetVisualIdx = allVisual.indexOf(allItems[clampedTarget]);
@@ -492,11 +508,10 @@ export class NoteEditor {
         document.removeEventListener('mouseup', onMouseUp);
 
         // Reset visual state (items + separator)
-        container.querySelectorAll('.checklist-item, .checklist-separator[data-separator]')
-          .forEach(el => {
-            el.style.transform = '';
-            el.style.zIndex = '';
-          });
+        container.querySelectorAll('.checklist-item, .checklist-separator[data-separator]').forEach((el) => {
+          el.style.transform = '';
+          el.style.zIndex = '';
+        });
         dragItem.classList.remove('dragging');
 
         if (currentIndex !== dragIndex) {
@@ -505,8 +520,8 @@ export class NoteEditor {
           const targetItem = sortedItems[currentIndex];
 
           if (sourceItem && targetItem) {
-            const sourceOrigIdx = this.currentNote.checklistItems.findIndex(i => i.id === sourceItem.id);
-            const targetOrigIdx = this.currentNote.checklistItems.findIndex(i => i.id === targetItem.id);
+            const sourceOrigIdx = this.currentNote.checklistItems.findIndex((i) => i.id === sourceItem.id);
+            const targetOrigIdx = this.currentNote.checklistItems.findIndex((i) => i.id === targetItem.id);
 
             if (sourceOrigIdx !== -1 && targetOrigIdx !== -1) {
               // Remove from source and insert at target
@@ -518,12 +533,8 @@ export class NoteEditor {
                 moved.isChecked = targetItem.isChecked;
               }
 
-              const insertIdx = this.currentNote.checklistItems.findIndex(i => i.id === targetItem.id);
-              this.currentNote.checklistItems.splice(
-                currentIndex > dragIndex ? insertIdx + 1 : insertIdx,
-                0,
-                moved
-              );
+              const insertIdx = this.currentNote.checklistItems.findIndex((i) => i.id === targetItem.id);
+              this.currentNote.checklistItems.splice(currentIndex > dragIndex ? insertIdx + 1 : insertIdx, 0, moved);
 
               // Recalculate order
               this.currentNote.checklistItems.forEach((item, i) => {
@@ -547,6 +558,7 @@ export class NoteEditor {
   }
 
   // F2: Render checklist item with drag handle
+  // v0.3.1: textarea for word-wrap + scroll gradient container
   renderChecklistItem(item, index) {
     const checked = item.isChecked ? 'checked' : '';
     const isEmpty = item.text.trim() === '';
@@ -555,13 +567,14 @@ export class NoteEditor {
       <div class="checklist-item ${checked} ${emptyClass}" data-item-id="${item.id}">
         <span class="checklist-drag-handle" title="Drag to reorder">⋮</span>
         <input type="checkbox" ${checked} />
-        <input
-          type="text"
-          class="checklist-item-text"
-          value="${this.escapeHtml(item.text)}"
-          placeholder="Item..."
-        />
-        <button class="checklist-item-delete">✕</button>
+        <div class="checklist-item-text-wrapper">
+          <div class="checklist-item-scroll">
+            <textarea class="checklist-item-text" placeholder="Item..." rows="1">${this.escapeHtml(item.text)}</textarea>
+          </div>
+          <div class="checklist-gradient-top"></div>
+          <div class="checklist-gradient-bottom"></div>
+        </div>
+        <button class="checklist-item-delete" type="button">✕</button>
         ${isEmpty ? '<span class="checklist-item-unsaved-hint">not saved</span>' : ''}
       </div>
     `;
@@ -586,11 +599,15 @@ export class NoteEditor {
 
     const menu = document.createElement('div');
     menu.className = 'sort-menu';
-    menu.innerHTML = options.map(opt => `
+    menu.innerHTML = options
+      .map(
+        (opt) => `
       <div class="sort-menu-item ${opt.value === currentSort ? 'active' : ''}" data-value="${opt.value}">
         ${opt.value === currentSort ? '● ' : '○ '}${opt.label}
       </div>
-    `).join('');
+    `,
+      )
+      .join('');
 
     // Position below sort button
     const rect = this.sortBtn.getBoundingClientRect();
@@ -623,6 +640,15 @@ export class NoteEditor {
   }
 
   loadNote(note) {
+    // Flush any pending autosave for the previous note before switching
+    if (this.saveTimeout) {
+      clearTimeout(this.saveTimeout);
+      this.saveTimeout = null;
+      if (this.currentNote) {
+        this.saveNoteImmediate(this.currentNote);
+      }
+    }
+
     // Reset previous state completely
     if (this.editorView) {
       this.editorView.destroy();
@@ -640,18 +666,18 @@ export class NoteEditor {
 
     this.currentNote = { ...note };
     this.titleInput.value = note.title;
-    
+
     // Show container, hide placeholder
     this.container.classList.remove('hidden');
     this.placeholderDiv.classList.add('hidden');
-    
+
     if (note.noteType === 'CHECKLIST') {
       // Show checklist, hide editor
       this.editorDiv.classList.add('hidden');
       this.previewDiv.classList.add('hidden');
       this.previewToggleBtn.classList.add('hidden');
       this.checklistContainer.classList.remove('hidden');
-      this.sortBtn.classList.remove('hidden');  // F2: Show sort button
+      this.sortBtn.classList.remove('hidden'); // F2: Show sort button
       this.showPreview = false;
       this.renderChecklist();
       // Push initial snapshot so the first undo restores the loaded state
@@ -661,7 +687,7 @@ export class NoteEditor {
       this.checklistContainer.classList.add('hidden');
       this.editorDiv.classList.remove('hidden');
       this.previewToggleBtn.classList.remove('hidden');
-      this.sortBtn.classList.add('hidden');  // F2: Hide sort button for text notes
+      this.sortBtn.classList.add('hidden'); // F2: Hide sort button for text notes
       this.initEditor();
 
       // Preview hidden by default
@@ -743,7 +769,7 @@ export class NoteEditor {
 
     // Restore checklist items (deep replace)
     if (snapshot.checklistItems !== null) {
-      this.currentNote.checklistItems = snapshot.checklistItems.map(i => ({ ...i }));
+      this.currentNote.checklistItems = snapshot.checklistItems.map((i) => ({ ...i }));
     }
 
     this.renderChecklist();
@@ -768,6 +794,13 @@ export class NoteEditor {
   }
 
   // ── /Undo helpers ───────────────────────────────────────────────────────────
+
+  /** Fire-and-forget save for a specific note snapshot (used to flush pending saves). */
+  saveNoteImmediate(noteToSave) {
+    noteService.saveNote(noteToSave).catch((err) => {
+      console.error('[NoteEditor] Background save failed:', err);
+    });
+  }
 
   scheduleSave() {
     if (!this.autosave || !this.currentNote) {
@@ -796,21 +829,21 @@ export class NoteEditor {
     if (!this.currentNote?.checklistItems) {
       return false;
     }
-    return this.currentNote.checklistItems.some(item => item.text.trim() === '');
+    return this.currentNote.checklistItems.some((item) => item.text.trim() === '');
   }
 
   async save() {
     if (!this.currentNote) {
       return;
     }
-    
+
     try {
       // Get updated note with new timestamp from backend
       const updatedNote = await noteService.saveNote(this.currentNote);
-      
+
       // Update local reference with server response
       this.currentNote = { ...updatedNote };
-      
+
       this.updateSyncStatus('Saved');
     } catch (error) {
       console.error('Failed to save note:', error);
@@ -841,7 +874,7 @@ export class NoteEditor {
       console.error('Failed to delete note:', error);
       await dialogService.error({
         title: 'Delete Failed',
-        message: 'Failed to delete note from server. Please check your connection and try again.'
+        message: 'Failed to delete note from server. Please check your connection and try again.',
       });
     }
   }
@@ -857,6 +890,62 @@ export class NoteEditor {
   onDelete(callback) {
     this.onDeleteCallback = callback;
   }
+
+  // ── v0.3.1: Textarea & Scroll Gradient Helpers ──────────────────────────────
+
+  /**
+   * Auto-resize a textarea to fit its content.
+   * The textarea has overflow:hidden; the scroll container (parent) clips at max-height.
+   */
+  autoResizeTextarea(textarea) {
+    textarea.style.height = 'auto';
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }
+
+  /**
+   * Update gradient visibility based on scroll position of a .checklist-item-scroll container.
+   * - Top gradient: visible when scrolled down (content above hidden)
+   * - Bottom gradient: visible when more content below
+   */
+  updateScrollGradients(scrollContainer) {
+    const wrapper = scrollContainer.closest('.checklist-item-text-wrapper');
+    if (!wrapper) return;
+
+    const topGradient = wrapper.querySelector('.checklist-gradient-top');
+    const bottomGradient = wrapper.querySelector('.checklist-gradient-bottom');
+    if (!topGradient || !bottomGradient) return;
+
+    const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
+    const hasOverflow = scrollHeight > clientHeight + 1;
+
+    // Top: visible when user has scrolled down
+    topGradient.classList.toggle('visible', scrollTop > 0 && hasOverflow);
+
+    // Bottom: visible when more content exists below current view
+    bottomGradient.classList.toggle('visible', hasOverflow && scrollTop + clientHeight < scrollHeight - 1);
+  }
+
+  /**
+   * Initialize all checklist textareas: auto-resize to fit content,
+   * then check scroll overflow and set initial gradient visibility.
+   * Must be called after attachChecklistListeners().
+   */
+  initChecklistTextareas() {
+    const textareas = this.checklistContainer.querySelectorAll('.checklist-item-text');
+    textareas.forEach((textarea) => {
+      this.autoResizeTextarea(textarea);
+    });
+
+    // Check gradients after browser has laid out the resized textareas
+    requestAnimationFrame(() => {
+      const scrollContainers = this.checklistContainer.querySelectorAll('.checklist-item-scroll');
+      scrollContainers.forEach((container) => {
+        this.updateScrollGradients(container);
+      });
+    });
+  }
+
+  // ── /v0.3.1 Helpers ─────────────────────────────────────────────────────────
 
   escapeHtml(text) {
     const div = document.createElement('div');
