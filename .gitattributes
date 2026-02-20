@@ -1,0 +1,10 @@
+# Ensure consistent LF line endings across all platforms
+# Prevents Biome formatter from failing on Windows (CRLF vs LF)
+* text=auto eol=lf
+
+# Binary files – no conversion
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff binary
+*.woff2 binary

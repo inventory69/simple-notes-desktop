@@ -1,4 +1,4 @@
-import { redo as cmRedo, undo as cmUndo } from '@codemirror/commands';
+import { undo as cmUndo } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
@@ -218,7 +218,6 @@ export class NoteEditor {
           return a.order - b.order;
         });
         break;
-      case 'MANUAL':
       default:
         sorted.sort((a, b) => a.order - b.order);
         break;
@@ -559,7 +558,7 @@ export class NoteEditor {
 
   // F2: Render checklist item with drag handle
   // v0.3.1: textarea for word-wrap + scroll gradient container
-  renderChecklistItem(item, index) {
+  renderChecklistItem(item, _index) {
     const checked = item.isChecked ? 'checked' : '';
     const isEmpty = item.text.trim() === '';
     const emptyClass = isEmpty ? 'checklist-item-empty' : '';
