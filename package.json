@@ -17,7 +17,7 @@
     "bump": "bash scripts/bump-version.sh",
     "update-aur-sha": "bash scripts/update-aur-sha.sh",
     "lint": "biome check src/ scripts/ index.html vite.config.js vitest.config.js",
-    "lint:fix": "biome check --write src/ scripts/ index.html vite.config.js vitest.config.js",
+    "lint:fix": "biome check --write --unsafe src/ scripts/ index.html vite.config.js vitest.config.js",
     "format": "biome format --write src/ scripts/ index.html vite.config.js vitest.config.js",
     "lint:rust": "cd src-tauri && cargo clippy --lib -- -D warnings",
     "format:rust": "cd src-tauri && cargo fmt",

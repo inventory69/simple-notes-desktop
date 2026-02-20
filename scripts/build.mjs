@@ -6,9 +6,9 @@
  */
 
 import { execSync, spawn } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { platform } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 
 // Linux-spezifische WebKit-Fixes für Wayland
 if (platform() === 'linux') {

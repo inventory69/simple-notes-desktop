@@ -4,8 +4,8 @@
  * Sets WebKit environment variables on Linux for Wayland compatibility
  */
 
-import { spawn } from 'child_process';
-import { platform } from 'os';
+import { spawn } from 'node:child_process';
+import { platform } from 'node:os';
 
 // Linux-spezifische WebKit-Fixes für Wayland
 if (platform() === 'linux') {
