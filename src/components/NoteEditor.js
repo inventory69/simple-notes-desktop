@@ -9,6 +9,9 @@ import { dialogService } from '../services/DialogService.js';
 import noteService from '../services/noteService.js';
 import { UndoStack } from '../utils/UndoStack.js';
 
+/** Autosave debounce delay in milliseconds (matches Android app: 3 seconds) */
+const AUTOSAVE_DEBOUNCE_MS = 3000;
+
 /**
  * Note Editor Component
  */
@@ -820,7 +823,7 @@ export class NoteEditor {
 
     this.saveTimeout = setTimeout(() => {
       this.save();
-    }, 1000);
+    }, AUTOSAVE_DEBOUNCE_MS);
   }
 
   // F3: Check if any checklist items are empty
