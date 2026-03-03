@@ -20,11 +20,13 @@ pub struct WebDavClient {
     client: Client,
     base_url: String,
     auth_header: String,
+    /// Sync folder name (default: "notes"). JSON stored in `/{sync_folder}/`, Markdown in `/{sync_folder}-md/`.
+    sync_folder: String,
 }
 
 impl WebDavClient {
     /// Erstellt einen neuen WebDAV Client
-    pub fn new(url: &str, username: &str, password: &str) -> Result<Self> {
+    pub fn new(url: &str, username: &str, password: &str, sync_folder: &str) -> Result<Self> {
         let client = Client::builder()
             .danger_accept_invalid_certs(true)
             .timeout(std::time::Duration::from_secs(30))
@@ -35,16 +37,28 @@ impl WebDavClient {
         let auth_header = format!("Basic {}", STANDARD.encode(auth));
         let base_url = url.trim_end_matches('/').to_string();
 
+        // Sanitize sync folder: only allow alphanumeric, underscore, dash (Android parity)
+        let sanitized_folder = sync_folder
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
+            .collect::<String>();
+        let sync_folder = if sanitized_folder.is_empty() {
+            "notes".to_string()
+        } else {
+            sanitized_folder.chars().take(50).collect()
+        };
+
         Ok(Self {
             client,
             base_url,
             auth_header,
+            sync_folder,
         })
     }
 
     /// Testet die Verbindung zum Server
     pub async fn test_connection(&self) -> Result<bool> {
-        let url = format!("{}/notes/", self.base_url);
+        let url = format!("{}/{}/", self.base_url, self.sync_folder);
 
         let response = self
             .client
@@ -69,9 +83,9 @@ impl WebDavClient {
         }
     }
 
-    /// Stellt sicher, dass /notes/ und /notes-md/ existieren
+    /// Stellt sicher, dass /{sync_folder}/ und /{sync_folder}-md/ existieren
     pub async fn ensure_directories(&self) -> Result<()> {
-        let notes_url = format!("{}/notes/", self.base_url);
+        let notes_url = format!("{}/{}/", self.base_url, self.sync_folder);
         let _ = self
             .client
             .request(Method::from_bytes(b"MKCOL").unwrap(), &notes_url)
@@ -79,7 +93,7 @@ impl WebDavClient {
             .send()
             .await;
 
-        let notes_md_url = format!("{}/notes-md/", self.base_url);
+        let notes_md_url = format!("{}/{}-md/", self.base_url, self.sync_folder);
         let _ = self
             .client
             .request(Method::from_bytes(b"MKCOL").unwrap(), &notes_md_url)
@@ -90,9 +104,9 @@ impl WebDavClient {
         Ok(())
     }
 
-    /// Listet alle JSON-Dateien in /notes/
+    /// Listet alle JSON-Dateien in /{sync_folder}/
     pub async fn list_json_files(&self) -> Result<Vec<String>> {
-        let url = format!("{}/notes/", self.base_url);
+        let url = format!("{}/{}/", self.base_url, self.sync_folder);
 
         let body = r#"<?xml version="1.0" encoding="utf-8"?>
 <d:propfind xmlns:d="DAV:">
@@ -174,7 +188,7 @@ impl WebDavClient {
 
     /// Lädt eine einzelne Notiz
     pub async fn get_note(&self, id: &str) -> Result<Note> {
-        let url = format!("{}/notes/{}.json", self.base_url, id);
+        let url = format!("{}/{}/{}.json", self.base_url, self.sync_folder, id);
 
         let response = self
             .client
@@ -209,7 +223,7 @@ impl WebDavClient {
     }
 
     async fn save_json(&self, note: &Note) -> Result<()> {
-        let url = format!("{}/notes/{}.json", self.base_url, note.id);
+        let url = format!("{}/{}/{}.json", self.base_url, self.sync_folder, note.id);
 
         #[cfg(debug_assertions)]
         eprintln!("[WebDAV] PUT JSON: {}", url);
@@ -252,7 +266,7 @@ impl WebDavClient {
     async fn save_markdown(&self, note: &Note) -> Result<()> {
         let markdown_content = markdown::generate_markdown(note);
         let safe_title = sanitize_filename(&note.title);
-        let url = format!("{}/notes-md/{}.md", self.base_url, safe_title);
+        let url = format!("{}/{}-md/{}.md", self.base_url, self.sync_folder, safe_title);
 
         let response = self
             .client
@@ -277,7 +291,7 @@ impl WebDavClient {
 
     /// Löscht eine Notiz (beide Dateien)
     pub async fn delete_note(&self, note: &Note) -> Result<()> {
-        let json_url = format!("{}/notes/{}.json", self.base_url, note.id);
+        let json_url = format!("{}/{}/{}.json", self.base_url, self.sync_folder, note.id);
         let _ = self
             .client
             .delete(&json_url)
@@ -286,7 +300,7 @@ impl WebDavClient {
             .await;
 
         let safe_title = sanitize_filename(&note.title);
-        let md_url = format!("{}/notes-md/{}.md", self.base_url, safe_title);
+        let md_url = format!("{}/{}-md/{}.md", self.base_url, self.sync_folder, safe_title);
         let _ = self
             .client
             .delete(&md_url)

@@ -62,9 +62,11 @@ async fn connect(
     url: String,
     username: String,
     password: String,
+    sync_folder: Option<String>,
     state: State<'_, WebDavState>,
 ) -> Result<bool> {
-    let client = WebDavClient::new(&url, &username, &password)?;
+    let folder = sync_folder.unwrap_or_else(|| "notes".to_string());
+    let client = WebDavClient::new(&url, &username, &password, &folder)?;
     let success = client.test_connection().await?;
 
     if success {
@@ -252,11 +254,17 @@ async fn get_settings(app: AppHandle) -> Result<Settings> {
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
+    let sync_folder = store
+        .get("sync_folder")
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_else(|| "notes".to_string());
+
     Ok(Settings {
         theme,
         autosave,
         minimize_to_tray,
         autostart,
+        sync_folder,
     })
 }
 
@@ -273,6 +281,7 @@ async fn save_settings(settings: Settings, app: AppHandle) -> Result<()> {
         serde_json::json!(settings.minimize_to_tray),
     );
     store.set("autostart", serde_json::json!(settings.autostart));
+    store.set("sync_folder", serde_json::json!(settings.sync_folder));
 
     // Handle autostart toggle
     if settings.autostart {

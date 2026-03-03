@@ -30,6 +30,18 @@
               <label for="password">Password</label>
               <input type="password" id="password" required />
             </div>
+            <details class="advanced-toggle">
+              <summary>Advanced</summary>
+              <div class="form-group">
+                <label for="connect-sync-folder">Sync Folder</label>
+                <div class="sync-folder-input-wrapper">
+                  <span class="sync-folder-prefix">/</span>
+                  <input type="text" id="connect-sync-folder" placeholder="notes" maxlength="50" />
+                  <span class="sync-folder-suffix">/</span>
+                </div>
+                <small class="form-hint">WebDAV folder for notes (default: &quot;notes&quot;)</small>
+              </div>
+            </details>
             <div class="form-actions">
               <button type="submit" class="btn-primary">Connect</button>
             </div>
@@ -210,6 +222,21 @@
               </label>
               <small class="form-hint">Launch automatically when you log in</small>
             </div>
+            
+            <!-- Sync Folder (Android Feature Parity) -->
+            <div class="settings-section">
+              <h3>Advanced</h3>
+              <div class="form-group">
+                <label for="sync-folder-input">Sync Folder</label>
+                <div class="sync-folder-input-wrapper">
+                  <span class="sync-folder-prefix">/</span>
+                  <input type="text" id="sync-folder-input" placeholder="notes" maxlength="50" />
+                  <span class="sync-folder-suffix">/</span>
+                </div>
+                <small class="form-hint">WebDAV folder name for notes (default: &quot;notes&quot;). JSON files are stored in /{folder}/, Markdown in /{folder}-md/. Only letters, numbers, dash and underscore allowed.</small>
+              </div>
+            </div>
+            
             <div class="form-group">
               <label>Device ID</label>
               <input type="text" id="device-id" readonly />

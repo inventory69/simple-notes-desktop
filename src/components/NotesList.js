@@ -295,6 +295,10 @@ export class NotesList {
     return div.innerHTML;
   }
 
+  clearSelection() {
+    this.selectedId = null;
+  }
+
   async selectNote(id) {
     this.selectedId = id;
     this.render(this.searchInput.value);
