@@ -343,25 +343,6 @@ export class NoteEditor {
           const items = this.checklistContainer.querySelectorAll('.checklist-item-text');
           items[displayIndex + 1]?.focus();
         }
-
-        // F1: Backspace auf leerem Item → Item löschen, Fokus auf vorheriges
-        if (e.key === 'Backspace' && textInput.value === '' && this.currentNote.checklistItems.length > 1) {
-          e.preventDefault();
-          this._pushSnapshot();
-          this.currentNote.checklistItems.splice(originalIndex, 1);
-          // Recalculate order
-          this.currentNote.checklistItems.forEach((item, i) => {
-            item.order = i;
-          });
-          this._pushSnapshot();
-          this.renderChecklist();
-          this.scheduleSave();
-
-          // Focus previous item (or first if we deleted the first)
-          const focusIndex = Math.max(0, displayIndex - 1);
-          const items = this.checklistContainer.querySelectorAll('.checklist-item-text');
-          items[focusIndex]?.focus();
-        }
       });
 
       // Delete button
