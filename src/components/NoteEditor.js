@@ -161,20 +161,18 @@ export class NoteEditor {
     const items = this.sortChecklistItems(this.currentNote.checklistItems, sortOption);
 
     // F2: Separator-Position berechnen
+    const checkedCount = items.filter((item) => item.isChecked).length;
+    const uncheckedCount = items.length - checkedCount;
     let separatorIndex = -1;
-    if (sortOption === 'UNCHECKED_FIRST' || sortOption === 'MANUAL') {
-      const firstCheckedIndex = items.findIndex((item) => item.isChecked);
-      if (firstCheckedIndex > 0) {
-        separatorIndex = firstCheckedIndex;
-      }
-    } else if (sortOption === 'CHECKED_FIRST') {
-      const firstUncheckedIndex = items.findIndex((item) => !item.isChecked);
-      if (firstUncheckedIndex > 0) {
-        separatorIndex = firstUncheckedIndex;
+
+    // Separator only makes sense when BOTH groups exist
+    if (checkedCount > 0 && uncheckedCount > 0) {
+      if (sortOption === 'UNCHECKED_FIRST' || sortOption === 'MANUAL') {
+        separatorIndex = items.findIndex((item) => item.isChecked);
+      } else if (sortOption === 'CHECKED_FIRST') {
+        separatorIndex = items.findIndex((item) => !item.isChecked);
       }
     }
-
-    const checkedCount = items.filter((item) => item.isChecked).length;
 
     // Render items with separator
     let html = '';
@@ -184,11 +182,6 @@ export class NoteEditor {
       }
       html += this.renderChecklistItem(item, index);
     });
-
-    // Separator at end if all unchecked and sort is UNCHECKED_FIRST
-    if (separatorIndex === -1 && checkedCount === 0 && (sortOption === 'UNCHECKED_FIRST' || sortOption === 'MANUAL')) {
-      html += this.renderSeparator(0);
-    }
 
     html += `<button class="checklist-add-btn" id="add-checklist-item">+ Add Item</button>`;
 
@@ -222,7 +215,12 @@ export class NoteEditor {
         });
         break;
       default:
-        sorted.sort((a, b) => a.order - b.order);
+        // MANUAL: keep user-defined order within each group, but always
+        // put unchecked items above checked items so the separator is correct.
+        sorted.sort((a, b) => {
+          if (a.isChecked !== b.isChecked) return a.isChecked ? 1 : -1;
+          return a.order - b.order;
+        });
         break;
     }
 
@@ -328,13 +326,11 @@ export class NoteEditor {
             isChecked: false,
             order: originalIndex + 1,
           };
-          // Shift order of all subsequent items
-          this.currentNote.checklistItems.forEach((item) => {
-            if (item.order > originalIndex) {
-              item.order++;
-            }
-          });
           this.currentNote.checklistItems.splice(originalIndex + 1, 0, newItem);
+          // Normalize order fields sequentially after insert
+          this.currentNote.checklistItems.forEach((item, i) => {
+            item.order = i;
+          });
           this._pushSnapshot();
           this.renderChecklist();
           this.scheduleSave();
@@ -383,8 +379,13 @@ export class NoteEditor {
           order: this.currentNote.checklistItems.length,
         };
         this.currentNote.checklistItems.push(newItem);
+        // Normalize order fields sequentially after add
+        this.currentNote.checklistItems.forEach((item, i) => {
+          item.order = i;
+        });
         this._pushSnapshot();
         this.renderChecklist();
+        this.scheduleSave();
 
         // Focus new item
         const items = this.checklistContainer.querySelectorAll('.checklist-item-text');
