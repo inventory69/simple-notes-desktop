@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-03-03
+
+### Added
+
+- **Configurable Sync Folder** (Android feature parity)
+  - WebDAV sync folder is now configurable instead of hardcoded `/notes/`
+  - New "Advanced" section in Settings dialog with sync folder input
+  - New "Advanced" toggle in Connection dialog for setting folder before first connect
+  - Input sanitization: only alphanumeric, dash and underscore allowed (max 50 chars)
+  - Changing the sync folder in Settings triggers automatic reconnect with notes reload
+
+- **3-line Sidebar Previews**
+  - Text notes show up to 3 lines of content instead of a single truncated line
+  - Checklist notes show first 3 items with ☐/☑ icons instead of count-only summary
+  - Checklists with more than 3 items show additional "X/X completed" summary line
+
+- **Real-time Sidebar Updates** while editing (title, content, checklist changes reflect immediately)
+
+### Changed
+
+- Autosave debounce increased from 1s to 3s (matches Android app behavior)
+
+### Fixed
+
+- GTK Client-Side Decorations removed on Linux — KWin now uses native Server-Side Decorations
+- Frozen titlebar buttons after tray hide/show on KDE/Wayland (use `gtk_window.present()`)
+- Backspace in empty checklist item no longer deletes the item (only blur + ✕ button do)
+- Checklist separator position when all items are checked or only one item exists
+- Trailing "0 completed" separator on fully unchecked checklists removed
+- Checklist item order gaps after deletions (sequential renormalization)
+- Manual sort mode now groups unchecked above checked while preserving drag order
+- Editor now clears when switching sync folders (no stale note from previous folder)
+- First note no longer appears visually selected after connecting without opening it
+
 ## [0.3.1] - 2026-02-20
 
 ### Added
@@ -182,7 +216,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/inventory69/simple-notes-desktop/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/inventory69/simple-notes-desktop/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/inventory69/simple-notes-desktop/compare/v0.3.1...v0.4.0
+[0.3.1]: https://github.com/inventory69/simple-notes-desktop/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/inventory69/simple-notes-desktop/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/inventory69/simple-notes-desktop/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/inventory69/simple-notes-desktop/releases/tag/v0.1.0
