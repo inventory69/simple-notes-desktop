@@ -36,9 +36,7 @@ export class SettingsDialog {
 
     // Sync folder input sanitization (Android parity: only alphanumeric, dash, underscore)
     this.syncFolderInput.addEventListener('input', () => {
-      const sanitized = this.syncFolderInput.value
-        .replace(/[^a-zA-Z0-9_-]/g, '')
-        .substring(0, 50);
+      const sanitized = this.syncFolderInput.value.replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 50);
       if (sanitized !== this.syncFolderInput.value) {
         this.syncFolderInput.value = sanitized;
       }

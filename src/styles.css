@@ -749,7 +749,7 @@ body {
 }
 
 /* Checklist summary line (last line when > 3 items) */
-.note-item-preview .preview-line:last-child:nth-child(n+4) {
+.note-item-preview .preview-line:last-child:nth-child(n + 4) {
   color: #999;
   font-size: 0.8125rem;
   margin-top: 0.125rem;
@@ -760,7 +760,7 @@ body {
   color: #999;
 }
 
-[data-theme="dark"] .note-item-preview .preview-line:last-child:nth-child(n+4) {
+[data-theme="dark"] .note-item-preview .preview-line:last-child:nth-child(n + 4) {
   color: #777;
 }
 
@@ -1009,7 +1009,7 @@ body {
 
 [data-theme="dark"] .cm-selectionBackground,
 [data-theme="dark"] .cm-content ::selection {
-  background-color: rgba(77, 159, 255, 0.3) !important;
+  background-color: rgba(77, 159, 255, 0.3);
 }
 
 [data-theme="dark"] .cm-content {
@@ -1177,7 +1177,7 @@ body {
 /* Hide gradients during drag-and-drop */
 .checklist-item.dragging .checklist-gradient-top,
 .checklist-item.dragging .checklist-gradient-bottom {
-  opacity: 0 !important;
+  opacity: 0;
 }
 
 /* F2: Checklist Separator */

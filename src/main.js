@@ -177,7 +177,9 @@ class App {
         try {
           const settings = await tauri.getSettings();
           syncFolder = settings.sync_folder || null;
-        } catch (_e) { /* use default */ }
+        } catch (_e) {
+          /* use default */
+        }
         const success = await tauri.connect(credentials.url, credentials.username, credentials.password, syncFolder);
 
         if (success) {

@@ -279,7 +279,7 @@ export class NotesList {
       .filter((line) => line.length > 0);
 
     // Take up to 3 lines, truncate each to 120 chars
-    return lines.slice(0, 3).map((line) => (line.length > 120 ? line.substring(0, 120) + '\u2026' : line));
+    return lines.slice(0, 3).map((line) => (line.length > 120 ? `${line.substring(0, 120)}\u2026` : line));
   }
 
   /**
@@ -303,7 +303,7 @@ export class NotesList {
     // Take first 3 items
     const previewItems = sorted.slice(0, 3).map((item) => {
       const icon = item.isChecked ? '\u2611' : '\u2610';
-      const text = item.text.length > 100 ? item.text.substring(0, 100) + '\u2026' : item.text;
+      const text = item.text.length > 100 ? `${item.text.substring(0, 100)}\u2026` : item.text;
       return `${icon} ${text}`;
     });
 

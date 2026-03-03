@@ -19,6 +19,7 @@ function setupDOM() {
         <input type="checkbox" id="autosave-checkbox" />
         <input type="checkbox" id="tray-checkbox" />
         <input type="checkbox" id="autostart-checkbox" />
+        <input type="text" id="sync-folder-input" placeholder="notes" maxlength="50" />
         <input type="text" id="device-id" readonly />
         <span id="app-version">Loading...</span>
         <a href="#" id="github-link">GitHub</a>
@@ -43,6 +44,7 @@ describe('SettingsDialog', () => {
       autosave: true,
       minimize_to_tray: false,
       autostart: false,
+      sync_folder: 'notes',
     });
     tauri.getDeviceId.mockResolvedValue('tauri-abc123');
     tauri.saveSettings.mockResolvedValue();
@@ -84,6 +86,7 @@ describe('SettingsDialog', () => {
         autosave: false,
         minimize_to_tray: true,
         autostart: true,
+        sync_folder: 'my-sync',
       });
       tauri.getDeviceId.mockResolvedValue('device-xyz');
 
@@ -110,6 +113,7 @@ describe('SettingsDialog', () => {
         autosave: true,
         minimize_to_tray: false,
         autostart: false,
+        sync_folder: 'notes',
       });
 
       const dialog = new SettingsDialog();
@@ -151,6 +155,7 @@ describe('SettingsDialog', () => {
         autosave: false,
         minimize_to_tray: true,
         autostart: true,
+        sync_folder: 'notes',
       });
     });
 
@@ -198,6 +203,7 @@ describe('SettingsDialog', () => {
         autosave: true,
         minimize_to_tray: false,
         autostart: false,
+        sync_folder: 'notes',
       });
 
       const dialog = new SettingsDialog();

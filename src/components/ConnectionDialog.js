@@ -26,9 +26,7 @@ export class ConnectionDialog {
 
     // Sync folder input sanitization (same as SettingsDialog)
     this.syncFolderInput.addEventListener('input', () => {
-      const sanitized = this.syncFolderInput.value
-        .replace(/[^a-zA-Z0-9_-]/g, '')
-        .substring(0, 50);
+      const sanitized = this.syncFolderInput.value.replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 50);
       if (sanitized !== this.syncFolderInput.value) {
         this.syncFolderInput.value = sanitized;
       }
@@ -50,7 +48,9 @@ export class ConnectionDialog {
       try {
         const settings = await tauri.getSettings();
         this.syncFolderInput.value = settings.sync_folder || '';
-      } catch (_e) { /* use default placeholder */ }
+      } catch (_e) {
+        /* use default placeholder */
+      }
     } catch (error) {
       console.error('Failed to load credentials:', error);
     }
@@ -85,7 +85,9 @@ export class ConnectionDialog {
           const settings = await tauri.getSettings();
           settings.sync_folder = syncFolder;
           await tauri.saveSettings(settings);
-        } catch (_e) { /* non-critical */ }
+        } catch (_e) {
+          /* non-critical */
+        }
 
         // Hide dialog
         this.hide();

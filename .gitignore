@@ -35,3 +35,5 @@ src-tauri/Cargo.lock
 *.msi
 *.exe
 commit-*.txt
+.commit-msg.txt
+.commit-*.txt

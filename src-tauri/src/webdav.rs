@@ -266,7 +266,10 @@ impl WebDavClient {
     async fn save_markdown(&self, note: &Note) -> Result<()> {
         let markdown_content = markdown::generate_markdown(note);
         let safe_title = sanitize_filename(&note.title);
-        let url = format!("{}/{}-md/{}.md", self.base_url, self.sync_folder, safe_title);
+        let url = format!(
+            "{}/{}-md/{}.md",
+            self.base_url, self.sync_folder, safe_title
+        );
 
         let response = self
             .client
@@ -300,7 +303,10 @@ impl WebDavClient {
             .await;
 
         let safe_title = sanitize_filename(&note.title);
-        let md_url = format!("{}/{}-md/{}.md", self.base_url, self.sync_folder, safe_title);
+        let md_url = format!(
+            "{}/{}-md/{}.md",
+            self.base_url, self.sync_folder, safe_title
+        );
         let _ = self
             .client
             .delete(&md_url)
