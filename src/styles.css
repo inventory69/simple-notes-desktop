@@ -738,9 +738,35 @@ body {
 .note-item-preview {
   font-size: 0.875rem;
   color: #666;
+  overflow: hidden;
+}
+
+.note-item-preview .preview-line {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: 1.4;
+}
+
+/* Checklist summary line (last line when > 3 items) */
+.note-item-preview .preview-line:last-child:nth-child(n+4) {
+  color: #999;
+  font-size: 0.8125rem;
+  margin-top: 0.125rem;
+}
+
+/* Dark mode overrides for preview */
+[data-theme="dark"] .note-item-preview {
+  color: #999;
+}
+
+[data-theme="dark"] .note-item-preview .preview-line:last-child:nth-child(n+4) {
+  color: #777;
+}
+
+/* KDE Breeze Dark overrides */
+[data-desktop="kde"][data-theme="dark"] .note-item-preview {
+  color: #8e9399;
 }
 
 .note-item-meta {

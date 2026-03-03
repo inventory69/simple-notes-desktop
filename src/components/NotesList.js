@@ -203,7 +203,7 @@ export class NotesList {
   }
 
   renderNoteItem(note) {
-    const preview = this.getPreview(note);
+    const previewLines = this.getPreviewLines(note);
     const date = this.formatDate(note.updatedAt);
     const isActive = note.id === this.selectedId && !this.selectionMode;
     const isSelected = this.selectedIds.has(note.id);
@@ -250,21 +250,69 @@ export class NotesList {
             ${typeIcon}
             <div class="note-item-title">${this.escapeHtml(note.title)}</div>
           </div>
-          <div class="note-item-preview">${this.escapeHtml(preview)}</div>
+          <div class="note-item-preview">${previewLines.map((line) => `<div class="preview-line">${this.escapeHtml(line)}</div>`).join('')}</div>
           <div class="note-item-meta">${date}</div>
         </div>
       </div>
     `;
   }
 
-  getPreview(note) {
+  /**
+   * Generate up to 3 preview lines for a note.
+   * - TEXT notes: first 3 non-empty lines of stripped plaintext content
+   * - CHECKLIST notes: first 3 items as ☐/☑ lines, with optional summary below
+   * @returns {string[]} Array of 1-3 preview lines (plain text, escaped later)
+   */
+  getPreviewLines(note) {
     if (note.noteType === 'CHECKLIST' && note.checklistItems) {
-      const total = note.checklistItems.length;
-      const checked = note.checklistItems.filter((item) => item.isChecked).length;
-      return `☑ ${checked}/${total} completed`;
+      return this.getChecklistPreviewLines(note.checklistItems);
     }
 
-    return note.content ? note.content.substring(0, 100).replace(/\n/g, ' ') : 'Empty note';
+    if (!note.content || !note.content.trim()) {
+      return ['Empty note'];
+    }
+
+    // Split into lines, trim each, filter out empty lines
+    const lines = note.content
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+
+    // Take up to 3 lines, truncate each to 120 chars
+    return lines.slice(0, 3).map((line) => (line.length > 120 ? line.substring(0, 120) + '\u2026' : line));
+  }
+
+  /**
+   * Generate checklist preview lines.
+   * Shows first 3 items as ☐/☑ lines.
+   * If there are more than 3 items, shows "X/X completed" as final summary.
+   * @param {Array} items - Checklist items
+   * @returns {string[]} Array of preview lines
+   */
+  getChecklistPreviewLines(items) {
+    if (!items || items.length === 0) {
+      return ['Empty checklist'];
+    }
+
+    // Sort by order field
+    const sorted = [...items].sort((a, b) => a.order - b.order);
+
+    const total = sorted.length;
+    const checked = sorted.filter((item) => item.isChecked).length;
+
+    // Take first 3 items
+    const previewItems = sorted.slice(0, 3).map((item) => {
+      const icon = item.isChecked ? '\u2611' : '\u2610';
+      const text = item.text.length > 100 ? item.text.substring(0, 100) + '\u2026' : item.text;
+      return `${icon} ${text}`;
+    });
+
+    // If there are more than 3 items, add a summary line
+    if (total > 3) {
+      previewItems.push(`${checked}/${total} completed`);
+    }
+
+    return previewItems;
   }
 
   formatDate(timestamp) {
