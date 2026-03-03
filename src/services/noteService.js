@@ -105,6 +105,19 @@ class NoteService {
   }
 
   /**
+   * Update a note in the local cache immediately (without server save).
+   * Used for real-time sidebar updates while editing.
+   * @param {Object} note - Note object with current changes
+   */
+  updateNoteLocally(note) {
+    const index = this.notes.findIndex((n) => n.id === note.id);
+    if (index >= 0) {
+      this.notes[index] = { ...this.notes[index], ...note };
+    }
+    this.notify();
+  }
+
+  /**
    * Delete a note
    * @param {string} id - Note ID
    */
