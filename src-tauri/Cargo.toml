@@ -38,6 +38,9 @@ base64 = "0.22"
 regex = "1"
 urlencoding = "2.1.3"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+
 # Release Profil Optimierungen
 [profile.release]
 opt-level = 3
