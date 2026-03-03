@@ -15,6 +15,7 @@ pub struct Settings {
     pub autosave: bool,
     pub minimize_to_tray: bool, // Minimize to system tray instead of closing
     pub autostart: bool,        // Start with system boot
+    pub sync_folder: String,    // WebDAV sync folder name (default: "notes")
 }
 
 impl Default for Settings {
@@ -24,6 +25,7 @@ impl Default for Settings {
             autosave: true,
             minimize_to_tray: false,
             autostart: false,
+            sync_folder: "notes".to_string(),
         }
     }
 }
@@ -39,6 +41,7 @@ mod tests {
         assert!(settings.autosave);
         assert!(!settings.minimize_to_tray);
         assert!(!settings.autostart);
+        assert_eq!(settings.sync_folder, "notes");
     }
 
     #[test]
@@ -48,6 +51,7 @@ mod tests {
             autosave: false,
             minimize_to_tray: true,
             autostart: true,
+            sync_folder: "my-notes".to_string(),
         };
 
         let json = serde_json::to_string(&settings).unwrap();
@@ -57,6 +61,7 @@ mod tests {
         assert!(!parsed.autosave);
         assert!(parsed.minimize_to_tray);
         assert!(parsed.autostart);
+        assert_eq!(parsed.sync_folder, "my-notes");
     }
 
     #[test]
@@ -79,6 +84,7 @@ mod tests {
                 autosave: true,
                 minimize_to_tray: tray,
                 autostart,
+                sync_folder: "notes".to_string(),
             };
 
             let json = serde_json::to_string(&settings).unwrap();
@@ -104,6 +110,7 @@ mod tests {
             autosave: false,
             minimize_to_tray: true,
             autostart: true,
+            sync_folder: "notes".to_string(),
         };
 
         let json = serde_json::to_string(&settings).unwrap();
@@ -112,6 +119,7 @@ mod tests {
         assert!(json.contains("\"autostart\":true"));
         assert!(json.contains("\"theme\":\"dark\""));
         assert!(json.contains("\"autosave\":false"));
+        assert!(json.contains("\"sync_folder\":\"notes\""));
     }
 
     #[test]
@@ -137,12 +145,14 @@ mod tests {
             autosave: true,
             minimize_to_tray: true,
             autostart: false,
+            sync_folder: "custom".to_string(),
         };
 
         let cloned = settings.clone();
         assert_eq!(cloned.theme, settings.theme);
         assert_eq!(cloned.minimize_to_tray, settings.minimize_to_tray);
         assert_eq!(cloned.autostart, settings.autostart);
+        assert_eq!(cloned.sync_folder, settings.sync_folder);
     }
 
     #[test]
@@ -151,5 +161,6 @@ mod tests {
         let debug = format!("{:?}", settings);
         assert!(debug.contains("minimize_to_tray"));
         assert!(debug.contains("autostart"));
+        assert!(debug.contains("sync_folder"));
     }
 }

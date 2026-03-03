@@ -13,11 +13,13 @@ export class SettingsDialog {
     this.trayCheckbox = document.getElementById('tray-checkbox');
     this.autostartCheckbox = document.getElementById('autostart-checkbox');
     this.deviceIdInput = document.getElementById('device-id');
+    this.syncFolderInput = document.getElementById('sync-folder-input');
     this.saveBtn = document.getElementById('save-settings-btn');
     this.cancelBtn = document.getElementById('cancel-settings-btn');
     this.appVersionEl = document.getElementById('app-version');
     this.githubLink = document.getElementById('github-link');
     this.onSaveCallback = null;
+    this.onReconnectCallback = null;
     this.originalTheme = null; // Store original theme for cancel
 
     this.init();
@@ -30,6 +32,16 @@ export class SettingsDialog {
     // Theme change handler - only preview, don't save
     this.themeSelect.addEventListener('change', () => {
       this.applyTheme(this.themeSelect.value);
+    });
+
+    // Sync folder input sanitization (Android parity: only alphanumeric, dash, underscore)
+    this.syncFolderInput.addEventListener('input', () => {
+      const sanitized = this.syncFolderInput.value
+        .replace(/[^a-zA-Z0-9_-]/g, '')
+        .substring(0, 50);
+      if (sanitized !== this.syncFolderInput.value) {
+        this.syncFolderInput.value = sanitized;
+      }
     });
 
     // GitHub link handler
@@ -64,11 +76,14 @@ export class SettingsDialog {
 
       // Store original theme for cancel
       this.originalTheme = settings.theme;
+      // Store original sync folder for change detection
+      this._previousSyncFolder = settings.sync_folder || 'notes';
 
       this.themeSelect.value = settings.theme;
       this.autosaveCheckbox.checked = settings.autosave;
       this.trayCheckbox.checked = settings.minimize_to_tray || false;
       this.autostartCheckbox.checked = settings.autostart || false;
+      this.syncFolderInput.value = settings.sync_folder || '';
       this.deviceIdInput.value = deviceId;
 
       this.dialog.classList.remove('hidden');
@@ -91,17 +106,35 @@ export class SettingsDialog {
 
   async handleSave() {
     try {
+      const syncFolderValue = this.syncFolderInput.value.trim();
       const settings = {
         theme: this.themeSelect.value,
         autosave: this.autosaveCheckbox.checked,
         minimize_to_tray: this.trayCheckbox.checked,
         autostart: this.autostartCheckbox.checked,
+        sync_folder: syncFolderValue || 'notes',
       };
 
       await tauri.saveSettings(settings);
       // Update tray runtime state immediately (no restart needed)
       await tauri.updateTraySetting(settings.minimize_to_tray);
       this.applyTheme(settings.theme);
+
+      // Reconnect with new sync folder if it changed
+      if (this._previousSyncFolder !== undefined && this._previousSyncFolder !== settings.sync_folder) {
+        try {
+          const credentials = await tauri.getCredentials();
+          if (credentials) {
+            await tauri.connect(credentials.url, credentials.username, credentials.password, settings.sync_folder);
+            // Notify app to reload notes after reconnect
+            if (this.onReconnectCallback) {
+              await this.onReconnectCallback();
+            }
+          }
+        } catch (e) {
+          console.error('Failed to reconnect with new sync folder:', e);
+        }
+      }
 
       if (this.onSaveCallback) {
         this.onSaveCallback(settings);
@@ -148,5 +181,9 @@ export class SettingsDialog {
 
   onSave(callback) {
     this.onSaveCallback = callback;
+  }
+
+  onReconnect(callback) {
+    this.onReconnectCallback = callback;
   }
 }

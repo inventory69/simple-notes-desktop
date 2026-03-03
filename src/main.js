@@ -91,6 +91,11 @@ class App {
       this.noteEditor.setAutosave(settings.autosave);
     });
 
+    // Settings reconnect callback (sync folder changed)
+    this.settingsDialog.onReconnect(async () => {
+      await this.handleConnected();
+    });
+
     // Toolbar buttons
     this.newNoteBtn.addEventListener('click', () => this.handleNewNote());
     this.newChecklistBtn.addEventListener('click', () => this.handleNewChecklist());
@@ -167,8 +172,13 @@ class App {
     try {
       const credentials = await tauri.getCredentials();
       if (credentials) {
-        // Try to connect
-        const success = await tauri.connect(credentials.url, credentials.username, credentials.password);
+        // Try to connect with sync folder setting
+        let syncFolder = null;
+        try {
+          const settings = await tauri.getSettings();
+          syncFolder = settings.sync_folder || null;
+        } catch (_e) { /* use default */ }
+        const success = await tauri.connect(credentials.url, credentials.username, credentials.password, syncFolder);
 
         if (success) {
           await this.handleConnected();
@@ -184,6 +194,10 @@ class App {
   }
 
   async handleConnected() {
+    // Clear editor and selection state before loading new folder
+    this.noteEditor.clear();
+    this.notesList.clearSelection();
+
     // Show main container
     this.mainContainer.classList.remove('hidden');
 

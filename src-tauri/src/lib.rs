@@ -62,9 +62,11 @@ async fn connect(
     url: String,
     username: String,
     password: String,
+    sync_folder: Option<String>,
     state: State<'_, WebDavState>,
 ) -> Result<bool> {
-    let client = WebDavClient::new(&url, &username, &password)?;
+    let folder = sync_folder.unwrap_or_else(|| "notes".to_string());
+    let client = WebDavClient::new(&url, &username, &password, &folder)?;
     let success = client.test_connection().await?;
 
     if success {
@@ -252,11 +254,17 @@ async fn get_settings(app: AppHandle) -> Result<Settings> {
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
+    let sync_folder = store
+        .get("sync_folder")
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_else(|| "notes".to_string());
+
     Ok(Settings {
         theme,
         autosave,
         minimize_to_tray,
         autostart,
+        sync_folder,
     })
 }
 
@@ -273,6 +281,7 @@ async fn save_settings(settings: Settings, app: AppHandle) -> Result<()> {
         serde_json::json!(settings.minimize_to_tray),
     );
     store.set("autostart", serde_json::json!(settings.autostart));
+    store.set("sync_folder", serde_json::json!(settings.sync_folder));
 
     // Handle autostart toggle
     if settings.autostart {
@@ -322,6 +331,46 @@ async fn update_tray_setting(enabled: bool, state: State<'_, TraySettings>) -> R
 /// State to track minimize-to-tray setting at runtime
 struct TraySettings(Mutex<bool>);
 
+/// Restore a hidden or minimized window safely on all platforms.
+///
+/// On Linux/Wayland (KDE Plasma), tao's `set_focus()` silently drops the
+/// focus request because the GTK widget isn't visible yet when checked
+/// synchronously after the async `show()`. The GTK-CSD titlebar also
+/// corrupts its internal input state during hide/show cycles on Wayland.
+///
+/// Fix: Use `gtk_window().present()` which handles show + focus in a single
+/// call, correctly re-negotiating the compositor focus and fixing frozen
+/// titlebar buttons after tray restore.
+fn restore_window(window: &tauri::WebviewWindow) {
+    #[cfg(target_os = "linux")]
+    {
+        use gtk::prelude::GtkWindowExt;
+
+        // present() both shows and focuses the window, bypassing tao's
+        // set_focus() race condition. It also re-negotiates compositor
+        // focus, fixing frozen titlebar buttons after hide/show cycles.
+        if let Ok(gtk_window) = window.gtk_window() {
+            gtk_window.present();
+        }
+
+        // Unminimize separately in case the window was minimized (not hidden)
+        if let Ok(true) = window.is_minimized() {
+            let _ = window.unminimize();
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        if let Ok(false) = window.is_visible() {
+            let _ = window.show();
+        }
+        if let Ok(true) = window.is_minimized() {
+            let _ = window.unminimize();
+        }
+        let _ = window.set_focus();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -341,9 +390,7 @@ pub fn run() {
                 args
             );
             if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
+                restore_window(&window);
             }
         }))
         .manage(WebDavState(Mutex::new(None)))
@@ -393,9 +440,7 @@ pub fn run() {
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "show" => {
                         if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.unminimize();
-                            let _ = window.set_focus();
+                            restore_window(&window);
                         }
                     }
                     "quit" => {
@@ -411,9 +456,7 @@ pub fn run() {
                     {
                         let app = tray.app_handle();
                         if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.unminimize();
-                            let _ = window.set_focus();
+                            restore_window(&window);
                         }
                     }
                 })
@@ -426,6 +469,18 @@ pub fn run() {
                 .to_owned();
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_icon(window_icon);
+
+                // Bug 1 Fix: Remove GTK Client-Side Decorations (CSD) so the
+                // compositor (KWin) renders Server-Side Decorations (SSD).
+                // Without this, tao PR #979 forces GTK-drawn GNOME-style
+                // titlebars on Wayland, even under KDE Plasma.
+                #[cfg(target_os = "linux")]
+                {
+                    use gtk::prelude::GtkWindowExt;
+                    if let Ok(gtk_window) = window.gtk_window() {
+                        gtk_window.set_titlebar(Option::<&gtk::Widget>::None);
+                    }
+                }
             }
 
             Ok(())

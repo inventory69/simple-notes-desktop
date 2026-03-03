@@ -9,6 +9,9 @@ import { dialogService } from '../services/DialogService.js';
 import noteService from '../services/noteService.js';
 import { UndoStack } from '../utils/UndoStack.js';
 
+/** Autosave debounce delay in milliseconds (matches Android app: 3 seconds) */
+const AUTOSAVE_DEBOUNCE_MS = 3000;
+
 /**
  * Note Editor Component
  */
@@ -38,6 +41,8 @@ export class NoteEditor {
     this._undoStack = new UndoStack(50);
     // Debounce timer for checklist text – we don't want a snapshot per keystroke
     this._undoPushTimer = null;
+    // Debounce timer for local sidebar updates (title + preview refresh)
+    this._localUpdateTimer = null;
 
     this.init();
   }
@@ -48,6 +53,7 @@ export class NoteEditor {
       if (this.currentNote) {
         this.currentNote.title = this.titleInput.value;
         this._schedulePushSnapshot();
+        this._scheduleLocalUpdate();
         this.scheduleSave();
       }
     });
@@ -106,6 +112,7 @@ export class NoteEditor {
         EditorView.updateListener.of((update) => {
           if (update.docChanged && this.currentNote) {
             this.currentNote.content = update.state.doc.toString();
+            this._scheduleLocalUpdate();
             this.scheduleSave();
             if (this.showPreview) {
               this.updatePreview();
@@ -158,20 +165,18 @@ export class NoteEditor {
     const items = this.sortChecklistItems(this.currentNote.checklistItems, sortOption);
 
     // F2: Separator-Position berechnen
+    const checkedCount = items.filter((item) => item.isChecked).length;
+    const uncheckedCount = items.length - checkedCount;
     let separatorIndex = -1;
-    if (sortOption === 'UNCHECKED_FIRST' || sortOption === 'MANUAL') {
-      const firstCheckedIndex = items.findIndex((item) => item.isChecked);
-      if (firstCheckedIndex > 0) {
-        separatorIndex = firstCheckedIndex;
-      }
-    } else if (sortOption === 'CHECKED_FIRST') {
-      const firstUncheckedIndex = items.findIndex((item) => !item.isChecked);
-      if (firstUncheckedIndex > 0) {
-        separatorIndex = firstUncheckedIndex;
+
+    // Separator only makes sense when BOTH groups exist
+    if (checkedCount > 0 && uncheckedCount > 0) {
+      if (sortOption === 'UNCHECKED_FIRST' || sortOption === 'MANUAL') {
+        separatorIndex = items.findIndex((item) => item.isChecked);
+      } else if (sortOption === 'CHECKED_FIRST') {
+        separatorIndex = items.findIndex((item) => !item.isChecked);
       }
     }
-
-    const checkedCount = items.filter((item) => item.isChecked).length;
 
     // Render items with separator
     let html = '';
@@ -181,11 +186,6 @@ export class NoteEditor {
       }
       html += this.renderChecklistItem(item, index);
     });
-
-    // Separator at end if all unchecked and sort is UNCHECKED_FIRST
-    if (separatorIndex === -1 && checkedCount === 0 && (sortOption === 'UNCHECKED_FIRST' || sortOption === 'MANUAL')) {
-      html += this.renderSeparator(0);
-    }
 
     html += `<button class="checklist-add-btn" id="add-checklist-item">+ Add Item</button>`;
 
@@ -219,7 +219,12 @@ export class NoteEditor {
         });
         break;
       default:
-        sorted.sort((a, b) => a.order - b.order);
+        // MANUAL: keep user-defined order within each group, but always
+        // put unchecked items above checked items so the separator is correct.
+        sorted.sort((a, b) => {
+          if (a.isChecked !== b.isChecked) return a.isChecked ? 1 : -1;
+          return a.order - b.order;
+        });
         break;
     }
 
@@ -260,6 +265,7 @@ export class NoteEditor {
         this._pushSnapshot(); // immediate snapshot before state changes
         this.currentNote.checklistItems[originalIndex].isChecked = checkbox.checked;
         this._pushSnapshot(); // snapshot after
+        this._scheduleLocalUpdate();
         this.scheduleSave();
         // Re-render to update sort order and separator
         this.renderChecklist();
@@ -269,6 +275,7 @@ export class NoteEditor {
       textInput.addEventListener('input', () => {
         this.currentNote.checklistItems[originalIndex].text = textInput.value;
         this._schedulePushSnapshot();
+        this._scheduleLocalUpdate();
         this.scheduleSave();
 
         // v0.3.1: Auto-resize textarea and update scroll gradients
@@ -325,28 +332,8 @@ export class NoteEditor {
             isChecked: false,
             order: originalIndex + 1,
           };
-          // Shift order of all subsequent items
-          this.currentNote.checklistItems.forEach((item) => {
-            if (item.order > originalIndex) {
-              item.order++;
-            }
-          });
           this.currentNote.checklistItems.splice(originalIndex + 1, 0, newItem);
-          this._pushSnapshot();
-          this.renderChecklist();
-          this.scheduleSave();
-
-          // Focus new item
-          const items = this.checklistContainer.querySelectorAll('.checklist-item-text');
-          items[displayIndex + 1]?.focus();
-        }
-
-        // F1: Backspace auf leerem Item → Item löschen, Fokus auf vorheriges
-        if (e.key === 'Backspace' && textInput.value === '' && this.currentNote.checklistItems.length > 1) {
-          e.preventDefault();
-          this._pushSnapshot();
-          this.currentNote.checklistItems.splice(originalIndex, 1);
-          // Recalculate order
+          // Normalize order fields sequentially after insert
           this.currentNote.checklistItems.forEach((item, i) => {
             item.order = i;
           });
@@ -354,10 +341,9 @@ export class NoteEditor {
           this.renderChecklist();
           this.scheduleSave();
 
-          // Focus previous item (or first if we deleted the first)
-          const focusIndex = Math.max(0, displayIndex - 1);
+          // Focus new item
           const items = this.checklistContainer.querySelectorAll('.checklist-item-text');
-          items[focusIndex]?.focus();
+          items[displayIndex + 1]?.focus();
         }
       });
 
@@ -399,8 +385,13 @@ export class NoteEditor {
           order: this.currentNote.checklistItems.length,
         };
         this.currentNote.checklistItems.push(newItem);
+        // Normalize order fields sequentially after add
+        this.currentNote.checklistItems.forEach((item, i) => {
+          item.order = i;
+        });
         this._pushSnapshot();
         this.renderChecklist();
+        this.scheduleSave();
 
         // Focus new item
         const items = this.checklistContainer.querySelectorAll('.checklist-item-text');
@@ -662,6 +653,10 @@ export class NoteEditor {
       clearTimeout(this._undoPushTimer);
       this._undoPushTimer = null;
     }
+    if (this._localUpdateTimer) {
+      clearTimeout(this._localUpdateTimer);
+      this._localUpdateTimer = null;
+    }
 
     this.currentNote = { ...note };
     this.titleInput.value = note.title;
@@ -706,6 +701,10 @@ export class NoteEditor {
       clearTimeout(this._undoPushTimer);
       this._undoPushTimer = null;
     }
+    if (this._localUpdateTimer) {
+      clearTimeout(this._localUpdateTimer);
+      this._localUpdateTimer = null;
+    }
     this.container.classList.add('hidden');
     this.placeholderDiv.classList.remove('hidden');
     if (this.undoBtn) this.undoBtn.disabled = true;
@@ -738,6 +737,21 @@ export class NoteEditor {
       this._undoPushTimer = null;
       this._pushSnapshot();
     }, 600);
+  }
+
+  /**
+   * Schedule a local-only cache update so the sidebar reflects the current
+   * editor state (title, content, checklist preview) without waiting for
+   * the server round-trip.  Debounced at 300 ms.
+   */
+  _scheduleLocalUpdate() {
+    if (this._localUpdateTimer) clearTimeout(this._localUpdateTimer);
+    this._localUpdateTimer = setTimeout(() => {
+      this._localUpdateTimer = null;
+      if (this.currentNote) {
+        noteService.updateNoteLocally(this.currentNote);
+      }
+    }, 300);
   }
 
   /** Perform one undo step. */
@@ -820,7 +834,7 @@ export class NoteEditor {
 
     this.saveTimeout = setTimeout(() => {
       this.save();
-    }, 1000);
+    }, AUTOSAVE_DEBOUNCE_MS);
   }
 
   // F3: Check if any checklist items are empty

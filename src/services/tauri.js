@@ -2,9 +2,13 @@ import { invoke } from '@tauri-apps/api/core';
 
 /**
  * WebDAV Connection Service
+ * @param {string} url - WebDAV server URL
+ * @param {string} username - Username
+ * @param {string} password - Password
+ * @param {string|null} syncFolder - Sync folder name (default: "notes")
  */
-export async function connect(url, username, password) {
-  return await invoke('connect', { url, username, password });
+export async function connect(url, username, password, syncFolder = null) {
+  return await invoke('connect', { url, username, password, syncFolder });
 }
 
 /**

@@ -11,6 +11,7 @@ export class ConnectionDialog {
     this.urlInput = document.getElementById('server-url');
     this.usernameInput = document.getElementById('username');
     this.passwordInput = document.getElementById('password');
+    this.syncFolderInput = document.getElementById('connect-sync-folder');
     this.errorDiv = document.getElementById('connection-error');
     this.onConnectCallback = null;
 
@@ -21,6 +22,16 @@ export class ConnectionDialog {
     this.form.addEventListener('submit', async (e) => {
       e.preventDefault();
       await this.handleConnect();
+    });
+
+    // Sync folder input sanitization (same as SettingsDialog)
+    this.syncFolderInput.addEventListener('input', () => {
+      const sanitized = this.syncFolderInput.value
+        .replace(/[^a-zA-Z0-9_-]/g, '')
+        .substring(0, 50);
+      if (sanitized !== this.syncFolderInput.value) {
+        this.syncFolderInput.value = sanitized;
+      }
     });
 
     // Load saved credentials if available
@@ -35,6 +46,11 @@ export class ConnectionDialog {
         this.usernameInput.value = credentials.username;
         this.passwordInput.value = credentials.password;
       }
+      // Load sync folder from settings
+      try {
+        const settings = await tauri.getSettings();
+        this.syncFolderInput.value = settings.sync_folder || '';
+      } catch (_e) { /* use default placeholder */ }
     } catch (error) {
       console.error('Failed to load credentials:', error);
     }
@@ -55,11 +71,21 @@ export class ConnectionDialog {
 
     try {
       this.hideError();
-      const success = await tauri.connect(url, username, password);
+      // Use sync folder from the input field
+      const syncFolderValue = this.syncFolderInput.value.trim();
+      const syncFolder = syncFolderValue || 'notes';
+      const success = await tauri.connect(url, username, password, syncFolder);
 
       if (success) {
         // Save credentials
         await tauri.saveCredentials({ url, username, password });
+
+        // Save sync folder to settings
+        try {
+          const settings = await tauri.getSettings();
+          settings.sync_folder = syncFolder;
+          await tauri.saveSettings(settings);
+        } catch (_e) { /* non-critical */ }
 
         // Hide dialog
         this.hide();
