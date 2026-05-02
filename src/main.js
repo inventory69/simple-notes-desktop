@@ -1,5 +1,5 @@
-import { ConnectionDialog } from './components/ConnectionDialog.js';
 import { ConflictDialog } from './components/ConflictDialog.js';
+import { ConnectionDialog } from './components/ConnectionDialog.js';
 import { NoteEditor } from './components/NoteEditor.js';
 import { NotesList } from './components/NotesList.js';
 import { SettingsDialog } from './components/SettingsDialog.js';

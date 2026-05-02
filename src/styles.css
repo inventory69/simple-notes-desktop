@@ -1540,7 +1540,9 @@ body {
   border-radius: 8px;
   overflow: hidden;
   background-color: var(--color-sidebar-bg);
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
 }
 
 .conflict-version:hover {
@@ -1869,7 +1871,9 @@ body {
   color: var(--color-fg);
   font-size: 1rem;
   font-weight: 600;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
 }
 
 .merge-title-input:focus {
@@ -1890,7 +1894,9 @@ body {
   font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
   line-height: 1.5;
   resize: vertical;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
 }
 
 .merge-content-area:focus {

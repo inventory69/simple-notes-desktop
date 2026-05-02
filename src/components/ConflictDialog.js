@@ -1,5 +1,5 @@
-import * as tauri from '../services/tauri.js';
 import noteService from '../services/noteService.js';
+import * as tauri from '../services/tauri.js';
 
 /**
  * Conflict Resolution Dialog Component
@@ -96,7 +96,7 @@ export class ConflictDialog {
       return items
         .map((item) => {
           const check = item.isChecked ? '☑' : '☐';
-          const text = item.text.length > 50 ? item.text.substring(0, 50) + '…' : item.text;
+          const text = item.text.length > 50 ? `${item.text.substring(0, 50)}…` : item.text;
           return `${check} ${text}`;
         })
         .join('\n');
@@ -106,7 +106,7 @@ export class ConflictDialog {
       const lines = note.content.split('\n').filter((l) => l.trim());
       if (lines.length > 0) {
         const preview = lines.slice(0, 3).join('\n');
-        return preview.length > 150 ? preview.substring(0, 150) + '…' : preview;
+        return preview.length > 150 ? `${preview.substring(0, 150)}…` : preview;
       }
     }
 
@@ -223,11 +223,7 @@ export class ConflictDialog {
     }
 
     try {
-      const resolvedNote = await tauri.resolveConflict(
-        this.localNote.id,
-        mergedNote,
-        'KEEP_LOCAL'
-      );
+      const resolvedNote = await tauri.resolveConflict(this.localNote.id, mergedNote, 'KEEP_LOCAL');
 
       if (resolvedNote) {
         const index = noteService.notes.findIndex((n) => n.id === resolvedNote.id);
@@ -300,6 +296,7 @@ export class ConflictDialog {
    * @returns {Promise<Object|null>} Resolved note or null if cancelled
    */
   async show(localNote) {
+    this.resetState();
     this.localNote = localNote;
 
     try {
@@ -332,8 +329,7 @@ export class ConflictDialog {
   updateDialogContent() {
     if (!this.currentConflictInfo) return;
 
-    const { localNote, remoteNote, localModifiedAt, remoteModifiedAt, diffSummary } =
-      this.currentConflictInfo;
+    const { localNote, remoteNote, localModifiedAt, remoteModifiedAt, diffSummary } = this.currentConflictInfo;
 
     // Update local version
     const localTitleEl = document.getElementById('local-title');
@@ -378,11 +374,7 @@ export class ConflictDialog {
     }
 
     try {
-      const resolvedNote = await tauri.resolveConflict(
-        this.localNote.id,
-        this.localNote,
-        resolution
-      );
+      const resolvedNote = await tauri.resolveConflict(this.localNote.id, this.localNote, resolution);
 
       // Update local cache
       if (resolvedNote) {
@@ -423,12 +415,30 @@ export class ConflictDialog {
   }
 
   /**
-   * Hide the dialog
+   * Reset all state and UI to initial state
    */
-  hide() {
-    this.dialog.classList.add('hidden');
+  resetState() {
+    this.isMergeMode = false;
     this.currentConflictInfo = null;
     this.localNote = null;
+
+    const mergeEditor = document.getElementById('merge-editor');
+    const mainActions = document.getElementById('conflict-main-actions');
+    const conflictDetails = document.querySelector('.conflict-details');
+    const conflictDiff = document.getElementById('conflict-diff');
+
+    if (mergeEditor) mergeEditor.classList.add('hidden');
+    if (mainActions) mainActions.classList.remove('hidden');
+    if (conflictDetails) conflictDetails.classList.remove('hidden');
+    if (conflictDiff) conflictDiff.classList.add('hidden');
+  }
+
+  /**
+   * Hide the dialog and reset all state
+   */
+  hide() {
+    this.resetState();
+    this.dialog.classList.add('hidden');
   }
 
   /**
