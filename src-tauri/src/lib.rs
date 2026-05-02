@@ -5,9 +5,10 @@ mod storage;
 mod webdav;
 
 use error::{AppError, Result};
-use models::{Note, NoteMetadata};
+use models::{ConflictInfo, ConflictResolution, Note, NoteMetadata};
+use std::collections::HashMap;
 use std::sync::Mutex;
-use storage::{Credentials, Settings};
+use storage::{Credentials, Settings, SyncBaseEntry};
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
     tray::TrayIconBuilder,
@@ -23,6 +24,115 @@ struct WebDavState(Mutex<Option<WebDavClient>>);
 
 /// Global Device ID
 struct DeviceIdState(Mutex<Option<String>>);
+
+/// Global Sync Base State (speichert den letzten bekannten Server-Zustand für Konflikt-Erkennung)
+struct SyncBaseState(Mutex<Option<HashMap<String, SyncBaseEntry>>>);
+
+/// Lädt die Sync-Base aus dem Store
+fn load_sync_base(app: &AppHandle) -> Result<HashMap<String, SyncBaseEntry>> {
+    let store = app
+        .store("sync_base.json")
+        .map_err(|e| AppError::StorageError(e.to_string()))?;
+
+    if let Some(value) = store.get("entries") {
+        let entries: HashMap<String, SyncBaseEntry> = serde_json::from_value(value)
+            .unwrap_or_else(|_| HashMap::new());
+        Ok(entries)
+    } else {
+        Ok(HashMap::new())
+    }
+}
+
+/// Speichert die Sync-Base im Store
+fn save_sync_base(app: &AppHandle, entries: &HashMap<String, SyncBaseEntry>) -> Result<()> {
+    let store = app
+        .store("sync_base.json")
+        .map_err(|e| AppError::StorageError(e.to_string()))?;
+
+    store.set("entries", serde_json::to_value(entries).unwrap());
+    store
+        .save()
+        .map_err(|e| AppError::StorageError(e.to_string()))?;
+
+    Ok(())
+}
+
+/// Aktualisiert einen Sync-Base-Eintrag nach erfolgreichem Sync
+fn update_sync_base_entry(
+    app: &AppHandle,
+    state: &State<SyncBaseState>,
+    note: &Note,
+) -> Result<()> {
+    let mut base_lock = state.0.lock().unwrap();
+
+    if base_lock.is_none() {
+        *base_lock = Some(load_sync_base(app)?);
+    }
+
+    let entries = base_lock.as_mut().unwrap();
+
+    let entry = SyncBaseEntry {
+        note_id: note.id.clone(),
+        content_hash: note.compute_content_hash(),
+        synced_at: chrono::Utc::now().timestamp_millis(),
+        server_updated_at: note.updated_at,
+    };
+
+    entries.insert(note.id.clone(), entry);
+    save_sync_base(app, entries)?;
+
+    Ok(())
+}
+
+/// Holt einen Sync-Base-Eintrag
+fn get_sync_base_entry(
+    app: &AppHandle,
+    state: &State<SyncBaseState>,
+    note_id: &str,
+) -> Result<Option<SyncBaseEntry>> {
+    let mut base_lock = state.0.lock().unwrap();
+
+    if base_lock.is_none() {
+        *base_lock = Some(load_sync_base(app)?);
+    }
+
+    let entries = base_lock.as_ref().unwrap();
+    Ok(entries.get(note_id).cloned())
+}
+
+/// Prüft auf Konflikt
+/// Konflikt tritt auf, wenn:
+/// 1. Lokale Notiz hat Änderungen seit dem letzten Sync
+/// 2. Remote-Notiz hat auch Änderungen seit dem letzten Sync
+fn detect_conflict(
+    local_note: &Note,
+    remote_note: &Note,
+    base_entry: &Option<SyncBaseEntry>,
+) -> bool {
+    let local_hash = local_note.compute_content_hash();
+    let remote_hash = remote_note.compute_content_hash();
+
+    // Wenn Hashes gleich sind, kein Konflikt
+    if local_hash == remote_hash {
+        return false;
+    }
+
+    // Wenn es keine Base-Eintrag gibt (neue Notiz oder erster Sync),
+    // prüfe ob beide Versionen existieren und unterschiedlich sind
+    let base_entry = match base_entry {
+        Some(entry) => entry,
+        None => {
+            // Kein Basiseintrag: Konflikt wenn beide Versionen existieren und unterschiedlich sind
+            return local_note.created_at > 0 && remote_note.created_at > 0;
+        }
+    };
+
+    // Prüfe: Lokale Änderungen UND Remote-Änderungen
+    let local_changed = local_hash != base_entry.content_hash;
+    let remote_changed = remote_hash != base_entry.content_hash;
+
+    local_changed && remote_changed
+}
 
 /// Generiert oder lädt Device ID
 fn get_or_create_device_id(app: &AppHandle, state: &State<DeviceIdState>) -> Result<String> {
@@ -110,7 +220,12 @@ async fn get_note(id: String, state: State<'_, WebDavState>) -> Result<Note> {
 }
 
 #[tauri::command]
-async fn save_note(mut note: Note, state: State<'_, WebDavState>) -> Result<Note> {
+async fn save_note(
+    mut note: Note,
+    state: State<'_, WebDavState>,
+    sync_base_state: State<'_, SyncBaseState>,
+    app: AppHandle,
+) -> Result<Note> {
     // Update timestamp to NOW before saving
     note.updated_at = chrono::Utc::now().timestamp_millis();
 
@@ -125,10 +240,33 @@ async fn save_note(mut note: Note, state: State<'_, WebDavState>) -> Result<Note
     };
 
     let client = client.ok_or(AppError::NotConnected)?;
+
+    // ========== Konflikt-Erkennung ==========
+    // 1. Holen der aktuellen Remote-Version (falls existiert)
+    let remote_note_result = client.get_note(&note.id).await;
+
+    if let Ok(remote_note) = remote_note_result {
+        // 2. Holen des Sync-Base-Eintrags
+        let base_entry = get_sync_base_entry(&app, &sync_base_state, &note.id)?;
+
+        // 3. Prüfe auf Konflikt
+        if detect_conflict(&note, &remote_note, &base_entry) {
+            #[cfg(debug_assertions)]
+            eprintln!("[Save] Conflict detected for note: {}", note.id);
+
+            return Err(AppError::SyncConflict(note.id.clone()));
+        }
+    }
+    // ========== Ende Konflikt-Erkennung ==========
+
+    // Speichern der Notiz
     client.save_note(&note).await?;
 
     #[cfg(debug_assertions)]
     eprintln!("[Save] Note saved successfully to WebDAV");
+
+    // Aktualisiere Sync-Base nach erfolgreichem Speichern
+    update_sync_base_entry(&app, &sync_base_state, &note)?;
 
     // Return the updated note with new timestamp
     Ok(note)
@@ -161,6 +299,133 @@ async fn delete_note(id: String, state: State<'_, WebDavState>) -> Result<()> {
     let client = client.ok_or(AppError::NotConnected)?;
     let note = client.get_note(&id).await?;
     client.delete_note(&note).await
+}
+
+// ========== Konflikt-Handling Commands ==========
+
+/// Holt die Konflikt-Informationen für eine Notiz
+/// Gibt lokale und Remote-Version sowie eine Beschreibung der Unterschiede zurück
+#[tauri::command]
+async fn get_conflict_info(
+    note_id: String,
+    local_note: Note,
+    state: State<'_, WebDavState>,
+    sync_base_state: State<'_, SyncBaseState>,
+    app: AppHandle,
+) -> Result<ConflictInfo> {
+    let client = {
+        let client_lock = state.0.lock().unwrap();
+        client_lock.clone()
+    };
+
+    let client = client.ok_or(AppError::NotConnected)?;
+
+    // Holen der Remote-Version
+    let remote_note = client.get_note(&note_id).await?;
+
+    // Holen des Sync-Base-Eintrags
+    let base_entry = get_sync_base_entry(&app, &sync_base_state, &note_id)?;
+
+    // Berechne Diff-Zusammenfassung
+    let diff_summary = ConflictInfo::compute_diff_summary(&local_note, &remote_note);
+
+    Ok(ConflictInfo {
+        note_id: note_id.clone(),
+        local_note: local_note.clone(),
+        remote_note: remote_note.clone(),
+        base_hash: base_entry.map(|e| e.content_hash),
+        local_modified_at: local_note.updated_at,
+        remote_modified_at: remote_note.updated_at,
+        diff_summary,
+    })
+}
+
+/// Löst einen Konflikt basierend auf der Benutzerauswahl
+#[tauri::command]
+async fn resolve_conflict(
+    note_id: String,
+    local_note: Note,
+    resolution: ConflictResolution,
+    state: State<'_, WebDavState>,
+    sync_base_state: State<'_, SyncBaseState>,
+    app: AppHandle,
+    device_id_state: State<'_, DeviceIdState>,
+) -> Result<Note> {
+    let client = {
+        let client_lock = state.0.lock().unwrap();
+        client_lock.clone()
+    };
+
+    let client = client.ok_or(AppError::NotConnected)?;
+
+    // Holen der Remote-Version
+    let remote_note = client.get_note(&note_id).await?;
+
+    match resolution {
+        ConflictResolution::KeepLocal => {
+            // Lokale Version behalten: Überschreibe Remote
+            let mut note_to_save = local_note.clone();
+            note_to_save.updated_at = chrono::Utc::now().timestamp_millis();
+
+            client.save_note(&note_to_save).await?;
+            update_sync_base_entry(&app, &sync_base_state, &note_to_save)?;
+
+            Ok(note_to_save)
+        }
+        ConflictResolution::KeepRemote => {
+            // Remote-Version behalten: Aktualisiere lokalen Sync-Base
+            update_sync_base_entry(&app, &sync_base_state, &remote_note)?;
+
+            Ok(remote_note)
+        }
+        ConflictResolution::KeepBoth => {
+            // Beide Versionen behalten:
+            // 1. Remote-Version bleibt als Original
+            // 2. Lokale Version wird als neue Notiz mit "(Conflict)" im Titel gespeichert
+
+            let device_id = get_or_create_device_id(&app, &device_id_state)?;
+
+            // Erstelle eine neue Notiz aus der lokalen Version
+            let mut new_note = if local_note.note_type == models::NoteType::Checklist {
+                Note::new_checklist(
+                    format!("{} (Conflict Copy)", local_note.title),
+                    device_id,
+                )
+            } else {
+                Note::new(
+                    format!("{} (Conflict Copy)", local_note.title),
+                    device_id,
+                )
+            };
+
+            // Kopiere Inhalt
+            new_note.content = local_note.content.clone();
+            new_note.checklist_items = local_note.checklist_items.clone();
+            new_note.checklist_sort_option = local_note.checklist_sort_option.clone();
+            new_note.updated_at = chrono::Utc::now().timestamp_millis();
+
+            // Speichere die neue Kopie
+            client.save_note(&new_note).await?;
+            update_sync_base_entry(&app, &sync_base_state, &new_note)?;
+
+            // Aktualisiere Sync-Base für die Original-Notiz (Remote-Version)
+            update_sync_base_entry(&app, &sync_base_state, &remote_note)?;
+
+            // Gib die neue Kopie zurück (die der Benutzer bearbeiten kann)
+            Ok(new_note)
+        }
+    }
+}
+
+/// Aktualisiert den Sync-Base nach dem Laden einer Notiz (z.B. nach dem Öffnen)
+/// Dies sollte aufgerufen werden, wenn der Benutzer eine Notiz vom Server lädt
+#[tauri::command]
+async fn update_sync_base_after_load(
+    note: Note,
+    sync_base_state: State<'_, SyncBaseState>,
+    app: AppHandle,
+) -> Result<()> {
+    update_sync_base_entry(&app, &sync_base_state, &note)
 }
 
 #[tauri::command]
@@ -395,6 +660,7 @@ pub fn run() {
         }))
         .manage(WebDavState(Mutex::new(None)))
         .manage(DeviceIdState(Mutex::new(None)))
+        .manage(SyncBaseState(Mutex::new(None)))
         .manage(TraySettings(Mutex::new(false)))
         .setup(|app| {
             // Load minimize_to_tray setting
@@ -515,6 +781,10 @@ pub fn run() {
             get_app_version,
             get_desktop_environment,
             update_tray_setting,
+            // Konflikt-Handling Commands
+            get_conflict_info,
+            resolve_conflict,
+            update_sync_base_after_load,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

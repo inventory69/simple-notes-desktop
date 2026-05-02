@@ -222,7 +222,7 @@
               </label>
               <small class="form-hint">Launch automatically when you log in</small>
             </div>
-            
+
             <!-- Sync Folder (Android Feature Parity) -->
             <div class="settings-section">
               <h3>Advanced</h3>
@@ -236,12 +236,12 @@
                 <small class="form-hint">WebDAV folder name for notes (default: &quot;notes&quot;). JSON files are stored in /{folder}/, Markdown in /{folder}-md/. Only letters, numbers, dash and underscore allowed.</small>
               </div>
             </div>
-            
+
             <div class="form-group">
               <label>Device ID</label>
               <input type="text" id="device-id" readonly />
             </div>
-            
+
             <!-- About Section -->
             <div class="settings-section">
               <h3>About</h3>
@@ -263,10 +263,128 @@
               </div>
             </div>
           </div>
-          
+
           <div class="form-actions">
             <button id="save-settings-btn" class="btn-primary" type="button">Save</button>
             <button id="cancel-settings-btn" class="btn-secondary" type="button">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Conflict Resolution Dialog -->
+      <div id="conflict-dialog" class="dialog hidden">
+        <div class="dialog-content conflict-dialog-content">
+          <div class="dialog-header">
+            <div id="conflict-icon" class="dialog-icon dialog-icon-warning" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                <line x1="12" y1="9" x2="12" y2="13"></line>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+              </svg>
+            </div>
+            <h3 id="conflict-title" class="dialog-title">Sync Conflict Detected</h3>
+          </div>
+          <p id="conflict-message" class="dialog-message">This note has been modified both locally and on the server. Please choose how to resolve the conflict:</p>
+
+          <div id="conflict-details" class="conflict-details">
+            <div class="conflict-version local-version">
+              <h4>Your Local Version</h4>
+              <div class="version-meta">
+                <span id="local-modified-time" class="modified-time">Modified: --</span>
+              </div>
+              <div id="local-preview" class="version-preview">
+                <div class="preview-title" id="local-title">--</div>
+                <div class="preview-content" id="local-content-preview">--</div>
+              </div>
+            </div>
+            <div class="conflict-version remote-version">
+              <h4>Server Version</h4>
+              <div class="version-meta">
+                <span id="remote-modified-time" class="modified-time">Modified: --</span>
+              </div>
+              <div id="remote-preview" class="version-preview">
+                <div class="preview-title" id="remote-title">--</div>
+                <div class="preview-content" id="remote-content-preview">--</div>
+              </div>
+            </div>
+          </div>
+
+          <div id="conflict-diff" class="conflict-diff hidden">
+            <h4>Changes:</h4>
+            <p id="diff-summary" class="diff-summary">--</p>
+          </div>
+
+          <div id="merge-editor" class="merge-editor hidden">
+            <div class="merge-header">
+              <h4>Merge Editor</h4>
+              <p class="merge-hint">Edit the merged version below. You can copy content from both versions.</p>
+            </div>
+            <div class="merge-compare">
+              <div class="merge-version-preview local-preview">
+                <h5>Your Version</h5>
+                <div class="merge-preview-title" id="merge-local-title"></div>
+                <div class="merge-preview-content" id="merge-local-content"></div>
+              </div>
+              <div class="merge-version-preview remote-preview">
+                <h5>Server Version</h5>
+                <div class="merge-preview-title" id="merge-remote-title"></div>
+                <div class="merge-preview-content" id="merge-remote-content"></div>
+              </div>
+            </div>
+            <div class="merge-edit-area">
+              <div class="form-group">
+                <label for="merge-title-input">Merged Title</label>
+                <input type="text" id="merge-title-input" class="merge-title-input" placeholder="Enter merged title..." />
+              </div>
+              <div class="form-group">
+                <label for="merge-content-area">Merged Content</label>
+                <textarea id="merge-content-area" class="merge-content-area" placeholder="Edit merged content here..."></textarea>
+              </div>
+            </div>
+            <div class="merge-actions">
+              <button id="merge-cancel-btn" class="btn-secondary" type="button">Cancel Merge</button>
+              <button id="merge-save-btn" class="btn-primary" type="button">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                  <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                  <polyline points="7 3 7 8 15 8"></polyline>
+                </svg>
+                Save Merged Version
+              </button>
+            </div>
+          </div>
+
+          <div class="dialog-actions conflict-actions" id="conflict-main-actions">
+            <button id="conflict-cancel-btn" class="btn-secondary" type="button">Cancel</button>
+            <button id="conflict-merge-btn" class="btn-secondary" type="button">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
+              </svg>
+              Merge Manually
+            </button>
+            <button id="conflict-keep-both-btn" class="btn-secondary" type="button">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="12" y1="8" x2="12" y2="16"></line>
+                <line x1="8" y1="12" x2="16" y2="12"></line>
+              </svg>
+              Keep Both
+            </button>
+            <button id="conflict-keep-remote-btn" class="btn-secondary" type="button">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2z"></path>
+                <polyline points="8 12 12 16 16 12"></polyline>
+              </svg>
+              Use Server
+            </button>
+            <button id="conflict-keep-local-btn" class="btn-primary" type="button">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                <polyline points="7 3 7 8 15 8"></polyline>
+              </svg>
+              Keep My Changes
+            </button>
           </div>
         </div>
       </div>

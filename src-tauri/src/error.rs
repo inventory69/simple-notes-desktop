@@ -35,6 +35,10 @@ pub enum AppError {
     #[allow(dead_code)]
     #[error("Invalid timestamp: {0}")]
     InvalidTimestamp(String),
+
+    /// Sync-Konflikt erkannt
+    #[error("Sync conflict detected for note: {0}")]
+    SyncConflict(String),
 }
 
 /// Serialisierung für Tauri (Fehler als String)

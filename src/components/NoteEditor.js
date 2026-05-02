@@ -815,6 +815,74 @@ export class NoteEditor {
     });
   }
 
+  /**
+   * Clear all pending save timers without saving.
+   * Used during conflict resolution to prevent saving stale local changes.
+   */
+  clearPendingSave() {
+    if (this.saveTimeout) {
+      clearTimeout(this.saveTimeout);
+      this.saveTimeout = null;
+    }
+  }
+
+  /**
+   * Load a note WITHOUT saving pending changes first.
+   * Used after conflict resolution when we want to discard local changes
+   * and load the resolved version from the server.
+   * @param {Object} note - The note to load
+   */
+  loadNoteResolved(note) {
+    this.clearPendingSave();
+
+    if (this.editorView) {
+      this.editorView.destroy();
+      this.editorView = null;
+    }
+    this.editorDiv.innerHTML = '';
+    this.checklistContainer.innerHTML = '';
+
+    this._undoStack.clear();
+    if (this._undoPushTimer) {
+      clearTimeout(this._undoPushTimer);
+      this._undoPushTimer = null;
+    }
+    if (this._localUpdateTimer) {
+      clearTimeout(this._localUpdateTimer);
+      this._localUpdateTimer = null;
+    }
+
+    this.currentNote = { ...note };
+    this.titleInput.value = note.title;
+
+    this.container.classList.remove('hidden');
+    this.placeholderDiv.classList.add('hidden');
+
+    if (note.noteType === 'CHECKLIST') {
+      this.editorDiv.classList.add('hidden');
+      this.previewDiv.classList.add('hidden');
+      this.previewToggleBtn.classList.add('hidden');
+      this.checklistContainer.classList.remove('hidden');
+      this.sortBtn.classList.remove('hidden');
+      this.showPreview = false;
+      this.renderChecklist();
+      this._pushSnapshot();
+    } else {
+      this.checklistContainer.classList.add('hidden');
+      this.editorDiv.classList.remove('hidden');
+      this.previewToggleBtn.classList.remove('hidden');
+      this.sortBtn.classList.add('hidden');
+      this.initEditor();
+
+      this.showPreview = false;
+      this.previewDiv.classList.add('hidden');
+      this.editorDiv.style.width = '100%';
+    }
+
+    this._updateUndoButton();
+    this.updateSyncStatus('Saved');
+  }
+
   scheduleSave() {
     if (!this.autosave || !this.currentNote) {
       return;
@@ -854,13 +922,21 @@ export class NoteEditor {
       // Get updated note with new timestamp from backend
       const updatedNote = await noteService.saveNote(this.currentNote);
 
-      // Update local reference with server response
-      this.currentNote = { ...updatedNote };
-
-      this.updateSyncStatus('Saved');
+      if (updatedNote) {
+        // Update local reference with server response
+        this.currentNote = { ...updatedNote };
+        this.updateSyncStatus('Saved');
+      }
     } catch (error) {
       console.error('Failed to save note:', error);
-      this.updateSyncStatus('Save error');
+
+      // Check if this is a conflict cancellation (not an error)
+      if (error.name === 'ConflictCancelledError') {
+        // User cancelled conflict resolution, keep local changes
+        this.updateSyncStatus('Conflict cancelled');
+      } else {
+        this.updateSyncStatus('Save error');
+      }
     }
   }
 

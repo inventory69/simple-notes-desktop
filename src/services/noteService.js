@@ -1,13 +1,22 @@
 import * as tauri from './tauri.js';
 
 /**
- * Note Service - Manages notes and syncing
+ * Note Service - Manages notes and syncing with conflict detection
  */
 class NoteService {
   constructor() {
     this.notes = [];
     this.currentNote = null;
     this.listeners = new Set();
+    this.conflictHandler = null;
+  }
+
+  /**
+   * Set conflict handler callback
+   * @param {Function} handler - Callback when conflict is detected
+   */
+  setConflictHandler(handler) {
+    this.conflictHandler = handler;
   }
 
   /**
@@ -49,6 +58,12 @@ class NoteService {
   async getNote(id) {
     try {
       const note = await tauri.getNote(id);
+      // Update sync base after loading from server
+      try {
+        await tauri.updateSyncBaseAfterLoad(note);
+      } catch (syncError) {
+        console.warn('Failed to update sync base:', syncError);
+      }
       this.currentNote = note;
       this.notify();
       return note;
@@ -77,9 +92,21 @@ class NoteService {
   }
 
   /**
-   * Save current note
+   * Check if error is a sync conflict
+   * @param {Error} error - The error to check
+   * @returns {boolean}
+   */
+  isSyncConflict(error) {
+    if (!error) return false;
+    const message = error.message || String(error);
+    return message.includes('Sync conflict') || message.includes('SyncConflict');
+  }
+
+  /**
+   * Save current note with conflict detection
    * @param {Object} note - Note object to save
    * @returns {Promise<Object>} Updated note with new timestamp
+   * @throws {Error} If save fails or conflict is cancelled
    */
   async saveNote(note) {
     try {
@@ -100,6 +127,46 @@ class NoteService {
       return updatedNote;
     } catch (error) {
       console.error('Failed to save note:', error);
+
+      // Check if this is a sync conflict
+      if (this.isSyncConflict(error)) {
+        console.log('Sync conflict detected for note:', note.id);
+
+        // If conflict handler is set, let it handle the conflict
+        if (this.conflictHandler) {
+          try {
+            const resolvedNote = await this.conflictHandler(note);
+
+            // If resolvedNote is null, user cancelled the conflict dialog
+            // We should throw an error to indicate save was not completed
+            if (!resolvedNote) {
+              const cancelError = new Error('Conflict resolution cancelled by user');
+              cancelError.name = 'ConflictCancelledError';
+              throw cancelError;
+            }
+
+            // Update local cache with resolved note
+            const idx = this.notes.findIndex((n) => n.id === resolvedNote.id);
+            if (idx >= 0) {
+              this.notes[idx] = { ...resolvedNote };
+            } else {
+              this.notes.unshift(resolvedNote);
+            }
+
+            this.currentNote = resolvedNote;
+            this.notify();
+
+            return resolvedNote;
+          } catch (resolveError) {
+            console.error('Conflict resolution failed:', resolveError);
+            throw resolveError;
+          }
+        }
+
+        // Re-throw the conflict error for the caller to handle
+        throw error;
+      }
+
       throw error;
     }
   }
