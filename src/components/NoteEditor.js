@@ -854,13 +854,21 @@ export class NoteEditor {
       // Get updated note with new timestamp from backend
       const updatedNote = await noteService.saveNote(this.currentNote);
 
-      // Update local reference with server response
-      this.currentNote = { ...updatedNote };
-
-      this.updateSyncStatus('Saved');
+      if (updatedNote) {
+        // Update local reference with server response
+        this.currentNote = { ...updatedNote };
+        this.updateSyncStatus('Saved');
+      }
     } catch (error) {
       console.error('Failed to save note:', error);
-      this.updateSyncStatus('Save error');
+
+      // Check if this is a conflict cancellation (not an error)
+      if (error.name === 'ConflictCancelledError') {
+        // User cancelled conflict resolution, keep local changes
+        this.updateSyncStatus('Conflict cancelled');
+      } else {
+        this.updateSyncStatus('Save error');
+      }
     }
   }
 

@@ -18,6 +18,21 @@ pub struct Settings {
     pub sync_folder: String,    // WebDAV sync folder name (default: "notes")
 }
 
+/// Sync-Basiseintrag für eine Notiz (speichert den letzten bekannten Server-Zustand)
+/// Wird verwendet, um Konflikte zu erkennen: wenn sowohl lokal als auch remote
+/// seit dem letzten Sync geändert wurden.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncBaseEntry {
+    /// Notiz-ID
+    pub note_id: String,
+    /// Hash des Inhalts zum Zeitpunkt des letzten Syncs
+    pub content_hash: String,
+    /// Letzter Sync-Zeitpunkt (Unix ms)
+    pub synced_at: i64,
+    /// Letzter bekannter updated_at-Wert vom Server
+    pub server_updated_at: i64,
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {

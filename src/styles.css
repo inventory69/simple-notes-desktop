@@ -1510,3 +1510,245 @@ body {
   color: #999;
   opacity: 0.6;
 }
+
+/* ========== Conflict Dialog Styles ========== */
+
+#conflict-dialog .dialog-content {
+  max-width: 900px;
+  width: 95%;
+  padding: 1.5rem;
+}
+
+#conflict-dialog .dialog-header {
+  margin-bottom: 0.5rem;
+}
+
+#conflict-dialog .dialog-message {
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+
+.conflict-details {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.conflict-version {
+  flex: 1;
+  border: 2px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background-color: var(--color-sidebar-bg);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.conflict-version:hover {
+  border-color: var(--color-primary);
+  box-shadow: 0 2px 8px rgba(0, 102, 204, 0.15);
+}
+
+.local-version {
+  border-color: var(--color-primary);
+}
+
+.remote-version {
+  border-color: var(--color-border);
+}
+
+.conflict-version h4 {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.local-version h4 {
+  background-color: rgba(0, 102, 204, 0.1);
+  color: var(--color-primary);
+}
+
+.remote-version h4 {
+  background-color: var(--color-hover);
+  color: var(--color-fg);
+}
+
+.version-meta {
+  padding: 0.5rem 1rem;
+  background-color: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.modified-time {
+  font-size: 0.8rem;
+  color: #999;
+}
+
+.version-preview {
+  padding: 1rem;
+  min-height: 120px;
+  max-height: 200px;
+  overflow-y: auto;
+  background-color: var(--color-bg);
+}
+
+.preview-title {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: var(--color-fg);
+  font-size: 1rem;
+}
+
+.preview-content {
+  font-size: 0.875rem;
+  color: #666;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+[data-theme="dark"] .preview-content {
+  color: #999;
+}
+
+.conflict-diff {
+  margin-top: 1rem;
+  padding: 1rem;
+  background-color: var(--color-sidebar-bg);
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+}
+
+.conflict-diff h4 {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.diff-summary {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #666;
+}
+
+[data-theme="dark"] .diff-summary {
+  color: #999;
+}
+
+.conflict-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border);
+  flex-wrap: wrap;
+}
+
+.conflict-actions button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1.25rem;
+  font-size: 0.875rem;
+}
+
+.conflict-actions button svg {
+  width: 16px;
+  height: 16px;
+}
+
+#conflict-keep-local-btn {
+  background-color: var(--color-primary);
+  color: white;
+  border: none;
+}
+
+#conflict-keep-local-btn:hover {
+  background-color: var(--color-primary-hover);
+}
+
+#conflict-keep-remote-btn {
+  background-color: var(--color-bg);
+  color: var(--color-fg);
+  border: 1px solid var(--color-border);
+}
+
+#conflict-keep-remote-btn:hover {
+  background-color: var(--color-hover);
+  border-color: var(--color-fg);
+}
+
+#conflict-keep-both-btn {
+  background-color: var(--color-success);
+  color: white;
+  border: none;
+}
+
+#conflict-keep-both-btn:hover {
+  background-color: #218838;
+}
+
+#conflict-cancel-btn {
+  background-color: transparent;
+  color: var(--color-fg);
+  border: 1px solid var(--color-border);
+}
+
+#conflict-cancel-btn:hover {
+  background-color: var(--color-hover);
+  border-color: var(--color-fg);
+}
+
+/* Mobile responsiveness for conflict dialog */
+@media (max-width: 768px) {
+  .conflict-details {
+    flex-direction: column;
+  }
+
+  .conflict-version {
+    min-height: auto;
+  }
+
+  .version-preview {
+    min-height: 80px;
+    max-height: 120px;
+  }
+
+  .conflict-actions {
+    justify-content: center;
+  }
+
+  .conflict-actions button {
+    flex: 1;
+    min-width: 140px;
+    justify-content: center;
+  }
+
+  #conflict-dialog .dialog-content {
+    width: 98%;
+    padding: 1rem;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+}
+
+/* Conflict indicator in notes list */
+.note-item.conflict-indicator {
+  border-left: 3px solid var(--color-danger);
+}
+
+.note-item.conflict-indicator::before {
+  content: "⚠";
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  font-size: 1rem;
+  color: var(--color-danger);
+}
+
+.sync-status.conflict {
+  color: var(--color-danger);
+  font-weight: 600;
+}
