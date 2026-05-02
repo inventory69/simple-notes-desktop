@@ -1752,3 +1752,226 @@ body {
   color: var(--color-danger);
   font-weight: 600;
 }
+
+/* ========== Merge Editor Styles ========== */
+
+.merge-editor {
+  margin-top: 0.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.merge-editor.hidden {
+  display: none;
+}
+
+.merge-header {
+  margin-bottom: 1rem;
+}
+
+.merge-header h4 {
+  margin: 0 0 0.25rem 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
+.merge-hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #666;
+  opacity: 0.8;
+}
+
+[data-theme="dark"] .merge-hint {
+  color: #999;
+}
+
+.merge-compare {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.merge-version-preview {
+  flex: 1;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+  background-color: var(--color-sidebar-bg);
+}
+
+.merge-version-preview h5 {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  background-color: var(--color-hover);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.merge-version-preview.local-preview h5 {
+  color: var(--color-primary);
+  background-color: rgba(0, 102, 204, 0.05);
+}
+
+.merge-version-preview.remote-preview h5 {
+  color: var(--color-fg);
+}
+
+.merge-preview-title {
+  padding: 0.5rem 0.75rem 0.25rem 0.75rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--color-fg);
+}
+
+.merge-preview-content {
+  padding: 0 0.75rem 0.75rem 0.75rem;
+  font-size: 0.8rem;
+  color: #666;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 120px;
+  overflow-y: auto;
+  background-color: var(--color-bg);
+  margin: 0 0.5rem 0.5rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid var(--color-border);
+}
+
+[data-theme="dark"] .merge-preview-content {
+  color: #999;
+}
+
+.merge-edit-area {
+  margin-bottom: 1rem;
+}
+
+.merge-edit-area .form-group {
+  margin-bottom: 0.75rem;
+}
+
+.merge-edit-area label {
+  display: block;
+  margin-bottom: 0.375rem;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--color-fg);
+}
+
+.merge-title-input {
+  width: 100%;
+  padding: 0.625rem 0.875rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background-color: var(--color-bg);
+  color: var(--color-fg);
+  font-size: 1rem;
+  font-weight: 600;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.merge-title-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(77, 159, 255, 0.2);
+}
+
+.merge-content-area {
+  width: 100%;
+  min-height: 180px;
+  padding: 0.75rem 0.875rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background-color: var(--color-bg);
+  color: var(--color-fg);
+  font-size: 0.9rem;
+  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  line-height: 1.5;
+  resize: vertical;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.merge-content-area:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(77, 159, 255, 0.2);
+}
+
+[data-theme="dark"] .merge-title-input,
+[data-theme="dark"] .merge-content-area {
+  background-color: #2a2a2a;
+  border-color: #444;
+}
+
+.merge-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.merge-actions button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1.25rem;
+  font-size: 0.875rem;
+}
+
+.merge-actions button svg {
+  width: 16px;
+  height: 16px;
+}
+
+#merge-save-btn {
+  background-color: var(--color-success);
+  color: white;
+  border: none;
+}
+
+#merge-save-btn:hover {
+  background-color: #218838;
+}
+
+#merge-cancel-btn {
+  background-color: transparent;
+  color: var(--color-fg);
+  border: 1px solid var(--color-border);
+}
+
+#merge-cancel-btn:hover {
+  background-color: var(--color-hover);
+  border-color: var(--color-fg);
+}
+
+/* Merge Editor Mobile Responsiveness */
+@media (max-width: 768px) {
+  .merge-compare {
+    flex-direction: column;
+  }
+
+  .merge-version-preview {
+    min-height: auto;
+  }
+
+  .merge-preview-content {
+    max-height: 80px;
+  }
+
+  .merge-content-area {
+    min-height: 140px;
+  }
+
+  .merge-actions {
+    justify-content: center;
+  }
+
+  .merge-actions button {
+    flex: 1;
+    min-width: 140px;
+    justify-content: center;
+  }
+}

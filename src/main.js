@@ -69,15 +69,12 @@ class App {
         if (resolvedNote) {
           console.log('[App] Conflict resolved, loading resolved note:', resolvedNote.id);
 
-          // Update current note in editor if it's the same note
           if (this.noteEditor.currentNote?.id === localNote.id) {
-            this.noteEditor.loadNote(resolvedNote);
+            this.noteEditor.loadNoteResolved(resolvedNote);
           }
 
-          // Refresh notes list to show any changes
           await this.notesList.refresh();
 
-          // Show success message
           await dialogService.success({
             title: 'Conflict Resolved',
             message: 'The sync conflict has been resolved successfully.',
@@ -86,7 +83,6 @@ class App {
           return resolvedNote;
         } else {
           console.log('[App] Conflict resolution cancelled by user');
-          // User cancelled, don't throw error, just return null
           return null;
         }
       } catch (error) {
