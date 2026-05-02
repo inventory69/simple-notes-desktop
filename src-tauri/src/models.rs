@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 /// Sync-Status einer Notiz
@@ -14,6 +15,88 @@ pub enum SyncStatus {
     LocalOnly,
     /// Konflikt erkannt
     Conflict,
+}
+
+/// Konflikt-Auswahl-Optionen
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ConflictResolution {
+    /// Lokale Version behalten
+    KeepLocal,
+    /// Server-Version behalten
+    KeepRemote,
+    /// Beide Versionen behalten (als separate Notizen)
+    KeepBoth,
+}
+
+/// Konflikt-Informationen für die Frontend-Anzeige
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConflictInfo {
+    /// Notiz-ID
+    pub note_id: String,
+    /// Lokale Version der Notiz
+    pub local_note: Note,
+    /// Server-Version der Notiz
+    pub remote_note: Note,
+    /// Letzter bekannter gemeinsamer Zustand (Hash)
+    pub base_hash: Option<String>,
+    /// Lokaler Änderungszeitpunkt
+    pub local_modified_at: i64,
+    /// Remote-Änderungszeitpunkt
+    pub remote_modified_at: i64,
+    /// Beschreibung der Unterschiede (für Anzeige)
+    pub diff_summary: String,
+}
+
+impl ConflictInfo {
+    /// Erstellt eine Zusammenfassung der Unterschiede zwischen lokaler und Remote-Version
+    pub fn compute_diff_summary(local: &Note, remote: &Note) -> String {
+        let mut diffs = Vec::new();
+
+        if local.title != remote.title {
+            diffs.push("Titel geändert".to_string());
+        }
+
+        if local.content != remote.content {
+            diffs.push("Inhalt geändert".to_string());
+        }
+
+        if local.note_type != remote.note_type {
+            diffs.push("Notiztyp geändert".to_string());
+        }
+
+        match (&local.checklist_items, &remote.checklist_items) {
+            (Some(local_items), Some(remote_items)) => {
+                if local_items.len() != remote_items.len() {
+                    diffs.push(format!(
+                        "Checklisten-Einträge: {} vs {}",
+                        local_items.len(),
+                        remote_items.len()
+                    ));
+                } else {
+                    let mut has_changes = false;
+                    for (l, r) in local_items.iter().zip(remote_items.iter()) {
+                        if l.text != r.text || l.is_checked != r.is_checked || l.order != r.order {
+                            has_changes = true;
+                            break;
+                        }
+                    }
+                    if has_changes {
+                        diffs.push("Checklisten-Einträge geändert".to_string());
+                    }
+                }
+            }
+            (Some(_), None) => diffs.push("Checkliste entfernt".to_string()),
+            (None, Some(_)) => diffs.push("Checkliste hinzugefügt".to_string()),
+        }
+
+        if diffs.is_empty() {
+            "Keine erkennbaren Unterschiede".to_string()
+        } else {
+            diffs.join(", ")
+        }
+    }
 }
 
 /// Typ der Notiz
@@ -93,6 +176,15 @@ pub struct Note {
     /// Werte: "MANUAL", "ALPHABETICAL_ASC", "ALPHABETICAL_DESC", "UNCHECKED_FIRST", "CHECKED_FIRST"
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checklist_sort_option: Option<String>,
+
+    /// Letzter bekannter Server-Inhalts-Hash (für Konflikt-Erkennung)
+    /// Wird nach jedem erfolgreichen Sync aktualisiert
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_synced_hash: Option<String>,
+
+    /// Letzter Sync-Zeitpunkt (Unix ms)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_synced_at: Option<i64>,
 }
 
 impl Note {
@@ -110,6 +202,8 @@ impl Note {
             note_type: NoteType::Text,
             checklist_items: None,
             checklist_sort_option: None,
+            last_synced_hash: None,
+            last_synced_at: None,
         }
     }
 
@@ -126,6 +220,57 @@ impl Note {
     #[allow(dead_code)]
     pub fn touch(&mut self) {
         self.updated_at = chrono::Utc::now().timestamp_millis();
+    }
+
+    /// Berechnet einen Hash über den gesamten Inhalt der Notiz (für Konflikt-Erkennung)
+    /// Der Hash basiert auf: Titel, Inhalt, Checklist-Items, Checklist-Sort-Option
+    pub fn compute_content_hash(&self) -> String {
+        let mut hasher = Sha256::new();
+
+        hasher.update(self.title.as_bytes());
+        hasher.update(b"\0");
+        hasher.update(self.content.as_bytes());
+        hasher.update(b"\0");
+
+        if let Some(items) = &self.checklist_items {
+            for item in items {
+                hasher.update(item.id.as_bytes());
+                hasher.update(b"\0");
+                hasher.update(item.text.as_bytes());
+                hasher.update(b"\0");
+                hasher.update(if item.is_checked { b"1" } else { b"0" });
+                hasher.update(b"\0");
+                hasher.update(item.order.to_le_bytes());
+                hasher.update(b"\0");
+            }
+        }
+
+        if let Some(sort_option) = &self.checklist_sort_option {
+            hasher.update(sort_option.as_bytes());
+        }
+
+        let result = hasher.finalize();
+        format!("{:x}", result)
+    }
+
+    /// Prüft, ob der aktuelle Inhalt mit dem letzten synchronisierten Hash übereinstimmt
+    pub fn content_matches_last_sync(&self) -> bool {
+        self.last_synced_hash
+            .as_ref()
+            .map(|last_hash| last_hash == &self.compute_content_hash())
+            .unwrap_or(true)
+    }
+
+    /// Aktualisiert die Sync-Metadaten nach einem erfolgreichen Sync
+    pub fn update_sync_metadata(&mut self) {
+        self.last_synced_hash = Some(self.compute_content_hash());
+        self.last_synced_at = Some(chrono::Utc::now().timestamp_millis());
+        self.sync_status = SyncStatus::Synced;
+    }
+
+    /// Markiert die Notiz als im Konflikt stehend
+    pub fn mark_as_conflict(&mut self) {
+        self.sync_status = SyncStatus::Conflict;
     }
 
     /// Generiert Fallback-Content aus Checklist-Items
@@ -178,6 +323,8 @@ pub struct NoteMetadata {
     pub checklist_items: Option<Vec<ChecklistItem>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checklist_sort_option: Option<String>,
+    #[serde(default)]
+    pub sync_status: SyncStatus,
 }
 
 impl From<&Note> for NoteMetadata {
@@ -190,6 +337,7 @@ impl From<&Note> for NoteMetadata {
             note_type: note.note_type,
             checklist_items: note.checklist_items.clone(),
             checklist_sort_option: note.checklist_sort_option.clone(),
+            sync_status: note.sync_status,
         }
     }
 }

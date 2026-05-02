@@ -1,4 +1,5 @@
 import { ConnectionDialog } from './components/ConnectionDialog.js';
+import { ConflictDialog } from './components/ConflictDialog.js';
 import { NoteEditor } from './components/NoteEditor.js';
 import { NotesList } from './components/NotesList.js';
 import { SettingsDialog } from './components/SettingsDialog.js';
@@ -12,6 +13,7 @@ import * as tauri from './services/tauri.js';
 class App {
   constructor() {
     this.connectionDialog = new ConnectionDialog();
+    this.conflictDialog = new ConflictDialog();
     this.notesList = new NotesList();
     this.noteEditor = new NoteEditor();
     this.settingsDialog = new SettingsDialog();
@@ -37,6 +39,9 @@ class App {
     // Set up event listeners
     this.setupEventListeners();
 
+    // Set up conflict handler for noteService
+    this.setupConflictHandler();
+
     // Detect desktop environment for theming
     await this.detectDesktopEnvironment();
 
@@ -48,6 +53,51 @@ class App {
 
     // Check for saved credentials and auto-connect
     await this.checkAutoConnect();
+  }
+
+  /**
+   * Set up conflict handler for noteService
+   * When a sync conflict is detected, this handler shows the conflict dialog
+   */
+  setupConflictHandler() {
+    noteService.setConflictHandler(async (localNote) => {
+      console.log('[App] Conflict detected, showing dialog for note:', localNote.id);
+
+      try {
+        const resolvedNote = await this.conflictDialog.show(localNote);
+
+        if (resolvedNote) {
+          console.log('[App] Conflict resolved, loading resolved note:', resolvedNote.id);
+
+          // Update current note in editor if it's the same note
+          if (this.noteEditor.currentNote?.id === localNote.id) {
+            this.noteEditor.loadNote(resolvedNote);
+          }
+
+          // Refresh notes list to show any changes
+          await this.notesList.refresh();
+
+          // Show success message
+          await dialogService.success({
+            title: 'Conflict Resolved',
+            message: 'The sync conflict has been resolved successfully.',
+          });
+
+          return resolvedNote;
+        } else {
+          console.log('[App] Conflict resolution cancelled by user');
+          // User cancelled, don't throw error, just return null
+          return null;
+        }
+      } catch (error) {
+        console.error('[App] Conflict resolution failed:', error);
+        await dialogService.error({
+          title: 'Resolution Failed',
+          message: `Failed to resolve conflict: ${error.message}`,
+        });
+        throw error;
+      }
+    });
   }
 
   async detectDesktopEnvironment() {
