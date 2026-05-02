@@ -125,3 +125,35 @@ export async function getDesktopEnvironment() {
 export async function updateTraySetting(enabled) {
   return await invoke('update_tray_setting', { enabled });
 }
+
+// ========== Konflikt-Handling Funktionen ==========
+
+/**
+ * Holt die Konflikt-Informationen für eine Notiz
+ * @param {string} noteId - Note ID
+ * @param {Object} localNote - Lokale Version der Notiz
+ * @returns {Promise<Object>} ConflictInfo object
+ */
+export async function getConflictInfo(noteId, localNote) {
+  return await invoke('get_conflict_info', { noteId, localNote });
+}
+
+/**
+ * Löst einen Konflikt basierend auf der Benutzerauswahl
+ * @param {string} noteId - Note ID
+ * @param {Object} localNote - Lokale Version der Notiz
+ * @param {string} resolution - Auflösungsstrategie: "KEEP_LOCAL", "KEEP_REMOTE", "KEEP_BOTH"
+ * @returns {Promise<Object>} Die resultierende Notiz
+ */
+export async function resolveConflict(noteId, localNote, resolution) {
+  return await invoke('resolve_conflict', { noteId, localNote, resolution });
+}
+
+/**
+ * Aktualisiert den Sync-Base nach dem Laden einer Notiz
+ * Sollte aufgerufen werden, wenn der Benutzer eine Notiz vom Server lädt
+ * @param {Object} note - Die geladene Notiz
+ */
+export async function updateSyncBaseAfterLoad(note) {
+  return await invoke('update_sync_base_after_load', { note });
+}
