@@ -668,6 +668,9 @@ export class NoteEditor {
     this.container.classList.remove('hidden');
     this.placeholderDiv.classList.add('hidden');
 
+    this.showPreview = false;
+    this.previewToggleBtn.classList.remove('active');
+
     if (note.noteType === 'CHECKLIST') {
       // Show checklist, hide editor
       this.editorDiv.classList.add('hidden');
@@ -675,7 +678,6 @@ export class NoteEditor {
       this.previewToggleBtn.classList.add('hidden');
       this.checklistContainer.classList.remove('hidden');
       this.sortBtn.classList.remove('hidden'); // F2: Show sort button
-      this.showPreview = false;
       this.renderChecklist();
       // Push initial snapshot so the first undo restores the loaded state
       this._pushSnapshot();
@@ -688,7 +690,6 @@ export class NoteEditor {
       this.initEditor();
 
       // Preview hidden by default
-      this.showPreview = false;
       this.previewDiv.classList.add('hidden');
       this.editorDiv.style.width = '100%';
     }
