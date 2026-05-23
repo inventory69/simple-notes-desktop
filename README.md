@@ -150,6 +150,22 @@ sudo pacman -S fuse2
 sudo apt install libfuse2
 ```
 
+### Linux: Blank window / `EGL_BAD_PARAMETER` on Fedora Silverblue (Wayland)
+
+On immutable distros like Fedora Silverblue 41+, the AppImage's bundled Wayland libraries can
+conflict with the host's EGL stack, producing:
+
+```
+Could not create default EGL display: EGL_BAD_PARAMETER. Aborting...
+```
+
+Starting with v0.5.0 the app sets the required environment variables automatically. If you are
+on an older version, use this workaround:
+
+```bash
+LD_PRELOAD=/usr/lib64/libwayland-client.so.0 ./simple_notes_desktop.appimage --no-sandbox
+```
+
 ### macOS: "App is damaged" (Gatekeeper)
 
 This happens because the app isn't notarized by Apple. Run:

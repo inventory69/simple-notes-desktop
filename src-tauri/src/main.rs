@@ -13,6 +13,12 @@ fn main() {
             std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
             // Fix for compositing issues on Wayland
             std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+            // Disable WebKit network/renderer sandbox — required on some immutable distros
+            // (Fedora Silverblue, NixOS) where the AppImage sandbox conflicts with the
+            // container runtime and causes EGL_BAD_PARAMETER at startup.
+            std::env::set_var("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS", "1");
+            // Prevent GStreamer VA-API probe from touching EGL before WebKit is ready
+            std::env::set_var("GST_VAAPI_ALL_DRIVERS", "1");
         }
     }
 
