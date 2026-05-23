@@ -234,38 +234,21 @@ async fn get_settings(app: AppHandle) -> Result<Settings> {
         .store("settings.json")
         .map_err(|e| AppError::StorageError(e.to_string()))?;
 
-    let theme = store
-        .get("theme")
-        .and_then(|v| v.as_str().map(String::from))
-        .unwrap_or_else(|| "system".to_string());
+    let mut map = serde_json::Map::new();
+    for key in [
+        "theme",
+        "autosave",
+        "minimize_to_tray",
+        "autostart",
+        "sync_folder",
+    ] {
+        if let Some(val) = store.get(key) {
+            map.insert(key.to_string(), val.clone());
+        }
+    }
 
-    let autosave = store
-        .get("autosave")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true);
-
-    let minimize_to_tray = store
-        .get("minimize_to_tray")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-
-    let autostart = store
-        .get("autostart")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-
-    let sync_folder = store
-        .get("sync_folder")
-        .and_then(|v| v.as_str().map(String::from))
-        .unwrap_or_else(|| "notes".to_string());
-
-    Ok(Settings {
-        theme,
-        autosave,
-        minimize_to_tray,
-        autostart,
-        sync_folder,
-    })
+    // Missing keys are filled from Settings::default() via #[serde(default)]
+    Ok(serde_json::from_value(serde_json::Value::Object(map)).unwrap_or_default())
 }
 
 #[tauri::command]

@@ -10,6 +10,7 @@ pub struct Credentials {
 
 /// App Settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Settings {
     pub theme: String, // "light", "dark", "system"
     pub autosave: bool,
@@ -66,12 +67,15 @@ mod tests {
 
     #[test]
     fn test_settings_deserialization_missing_new_fields() {
-        // Simulates loading old settings that don't have the new fields
+        // Old settings.json without newer fields must deserialize cleanly via #[serde(default)]
         let old_json = r#"{"theme":"light","autosave":true}"#;
-        let result: std::result::Result<Settings, _> = serde_json::from_str(old_json);
-        // This should fail because the fields aren't optional with defaults in serde
-        // but we handle defaults in the Tauri command layer (get_settings)
-        assert!(result.is_err());
+        let result: Settings = serde_json::from_str(old_json)
+            .expect("missing fields must be filled from Settings::default()");
+        assert_eq!(result.theme, "light");
+        assert!(result.autosave);
+        assert!(!result.minimize_to_tray);
+        assert!(!result.autostart);
+        assert_eq!(result.sync_folder, "notes");
     }
 
     #[test]
