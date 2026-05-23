@@ -65,6 +65,8 @@
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  /* Force text-style emoji to avoid COLRv1 rendering crash on older WebKitGTK builds */
+  font-variant-emoji: text;
   background-color: var(--color-bg);
   color: var(--color-fg);
   line-height: 1.6;

@@ -166,6 +166,13 @@ on an older version, use this workaround:
 LD_PRELOAD=/usr/lib64/libwayland-client.so.0 ./simple_notes_desktop.appimage --no-sandbox
 ```
 
+### Linux: App freezes when loading notes with certain emoji
+
+On Fedora Silverblue 41+ the AppImage may freeze when a note contains color emoji (e.g. 🦛)
+due to a COLRv1 rendering bug in the bundled WebKitGTK. Starting with v0.5.0 the app requests
+text-style emoji rendering to avoid this code path. If you are on an older version, open the
+note in the Android app and remove or replace the affected emoji, then re-sync.
+
 ### macOS: "App is damaged" (Gatekeeper)
 
 This happens because the app isn't notarized by Apple. Run:
