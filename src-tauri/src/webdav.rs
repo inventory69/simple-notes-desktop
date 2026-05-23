@@ -215,8 +215,27 @@ impl WebDavClient {
         }
     }
 
-    /// Speichert eine Notiz (Dual-Write: JSON + Markdown)
+    /// Speichert eine Notiz (Dual-Write: JSON + Markdown).
+    ///
+    /// Löscht die alte `.md`-Datei wenn der Titel geändert wurde, damit keine
+    /// verwaisten Markdown-Dateien im `-md/`-Ordner entstehen (TD-01).
     pub async fn save_note(&self, note: &Note) -> Result<()> {
+        // Titel-Diff: alte .md entfernen wenn der Titel sich geändert hat.
+        // Fehler (z.B. NoteNotFound für neue Notizen) werden ignoriert.
+        if let Ok(existing) = self.get_note(&note.id).await {
+            if existing.title != note.title {
+                let old_safe = sanitize_filename(&existing.title);
+                let old_md_url =
+                    format!("{}/{}-md/{}.md", self.base_url, self.sync_folder, old_safe);
+                let _ = self
+                    .client
+                    .delete(&old_md_url)
+                    .header("Authorization", &self.auth_header)
+                    .send()
+                    .await;
+            }
+        }
+
         self.save_json(note).await?;
         self.save_markdown(note).await?;
         Ok(())
