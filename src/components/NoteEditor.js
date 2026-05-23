@@ -866,6 +866,7 @@ export class NoteEditor {
     }
 
     this.saveTimeout = setTimeout(() => {
+      this.saveTimeout = null;
       this.save();
     }, AUTOSAVE_DEBOUNCE_MS);
   }
@@ -879,22 +880,28 @@ export class NoteEditor {
   }
 
   async save() {
-    if (!this.currentNote) {
+    const noteToSave = this.currentNote;
+    if (!noteToSave) {
       return;
     }
 
     try {
-      // Get updated note with new timestamp from backend
-      const updatedNote = await noteService.saveNote(this.currentNote);
+      const updatedNote = await noteService.saveNote(noteToSave);
 
-      // Update local reference with server response
-      this.currentNote = { ...updatedNote };
-      this._isDirty = false;
-
-      this.updateSyncStatus('Saved');
+      // Only apply the server response if the user hasn't switched to a different note
+      // while the network request was in flight. Without this guard, the resolved promise
+      // would overwrite this.currentNote with the old note, leaving the editor pointing
+      // at stale data and causing ghost saves of unintended notes.
+      if (this.currentNote?.id === noteToSave.id) {
+        this.currentNote = { ...updatedNote };
+        this._isDirty = false;
+        this.updateSyncStatus('Saved');
+      }
     } catch (error) {
       console.error('Failed to save note:', error);
-      this.updateSyncStatus('Save error');
+      if (this.currentNote?.id === noteToSave.id) {
+        this.updateSyncStatus('Save error');
+      }
     }
   }
 
