@@ -60,10 +60,11 @@ For detailed build instructions, see [BUILDING.md](BUILDING.md).
 
 ### JavaScript
 
-- ES6+ with ES-Modules
-- No semicolons (project convention)
-- Single quotes for strings
-- Use `const` and `let`, never `var`
+- ES6+ with ES-Modules (`"type": "module"`)
+- **Formatting & linting are enforced by Biome** — run `pnpm lint:fix`. The config
+  (`biome.json`) requires: **semicolons always**, single quotes, trailing commas, 2-space
+  indent, 120-column width, and always-parenthesized arrow params. Imports are auto-organized.
+- Use `const`/`let`, never `var`
 
 ### Rust
 
@@ -79,7 +80,8 @@ For detailed build instructions, see [BUILDING.md](BUILDING.md).
 
 ## Commit Messages
 
-We follow [Conventional Commits](https://www.conventionalcommits.org/):
+We follow [Conventional Commits](https://www.conventionalcommits.org/), kept **consistent with
+the sibling Android app** ([simple-notes-sync](https://github.com/inventory69/simple-notes-sync)):
 
 ```
 <type>(<scope>): <description>
@@ -94,18 +96,31 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 - `feat`: New feature
 - `fix`: Bug fix
 - `docs`: Documentation changes
-- `style`: Code style changes (formatting, etc.)
-- `refactor`: Code refactoring
+- `style`: Code style/formatting only (no behavior change)
+- `refactor`: Code change that neither fixes a bug nor adds a feature
+- `perf`: Performance improvement
 - `test`: Adding or updating tests
-- `chore`: Maintenance tasks
+- `build`: Build system, bundling, packaging (Tauri/Vite/AUR)
+- `ci`: CI/CD workflows
+- `chore`: Maintenance (deps, tooling, version bumps)
+- `revert`: Reverting a previous commit
+- `release`: Release/version commits (e.g. `release: v0.4.0`) — mirrors the Android app's usage
+
+### Common scopes
+
+Use a scope when it sharpens the message. Scopes seen across both apps:
+`editor`, `sync`, `checklist`, `ui`, `linux`, `ci`, `i18n`. Match the affected area; invent a new
+scope only when the existing ones don't fit.
 
 ### Examples
 
 ```
 feat(editor): add markdown live preview
-fix(sync): resolve WebDAV connection timeout
+fix(sync): preserve Android-only note fields (color/labels) on save
+fix(linux): present() window on Wayland to fix frozen titlebar
+perf(sync): batch PROPFIND to avoid N+1 GETs
 docs: update installation instructions
-chore: update dependencies
+chore: bump version to 0.5.0
 ```
 
 ## Pull Requests
