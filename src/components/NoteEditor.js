@@ -43,6 +43,8 @@ export class NoteEditor {
     this._undoPushTimer = null;
     // Debounce timer for local sidebar updates (title + preview refresh)
     this._localUpdateTimer = null;
+    // True when the user has made changes that haven't been persisted to the server yet
+    this._isDirty = false;
 
     this.init();
   }
@@ -659,6 +661,7 @@ export class NoteEditor {
     }
 
     this.currentNote = { ...note };
+    this._isDirty = false;
     this.titleInput.value = note.title;
 
     // Show container, hide placeholder
@@ -696,6 +699,7 @@ export class NoteEditor {
 
   clear() {
     this.currentNote = null;
+    this._isDirty = false;
     this._undoStack.clear();
     if (this._undoPushTimer) {
       clearTimeout(this._undoPushTimer);
@@ -808,6 +812,30 @@ export class NoteEditor {
 
   // ── /Undo helpers ───────────────────────────────────────────────────────────
 
+  /**
+   * Called after a sync refresh when the server version of the currently open note
+   * is newer than what the editor holds.  Reloads silently if there are no unsaved
+   * changes; shows a conflict dialog otherwise.
+   */
+  async notifyServerRefresh(serverNote) {
+    if (this._isDirty) {
+      const confirmed = await dialogService.confirm({
+        title: 'Note Updated on Server',
+        message: 'This note was changed on another device. Load the server version and discard your unsaved changes?',
+        confirmText: 'Load Server Version',
+        cancelText: 'Keep Mine',
+        type: 'warning',
+      });
+      if (!confirmed) return;
+    }
+    // Cancel any pending autosave so loadNote() does not flush stale content
+    if (this.saveTimeout) {
+      clearTimeout(this.saveTimeout);
+      this.saveTimeout = null;
+    }
+    this.loadNote(serverNote);
+  }
+
   /** Fire-and-forget save for a specific note snapshot (used to flush pending saves). */
   saveNoteImmediate(noteToSave) {
     noteService.saveNote(noteToSave).catch((err) => {
@@ -816,7 +844,12 @@ export class NoteEditor {
   }
 
   scheduleSave() {
-    if (!this.autosave || !this.currentNote) {
+    if (!this.currentNote) {
+      return;
+    }
+    this._isDirty = true;
+
+    if (!this.autosave) {
       return;
     }
 
@@ -856,6 +889,7 @@ export class NoteEditor {
 
       // Update local reference with server response
       this.currentNote = { ...updatedNote };
+      this._isDirty = false;
 
       this.updateSyncStatus('Saved');
     } catch (error) {

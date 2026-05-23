@@ -262,10 +262,21 @@ class App {
       this.syncBtn.disabled = true;
       this.syncBtn.classList.add('spinning');
 
+      // Capture the open note's identity and timestamp BEFORE the refresh
+      const openNote = this.noteEditor.currentNote;
+
       await noteService.loadNotes();
 
       this.syncBtn.disabled = false;
       this.syncBtn.classList.remove('spinning');
+
+      // If a note was open, check whether the server returned a newer version
+      if (openNote) {
+        const serverNote = noteService.notes.find((n) => n.id === openNote.id);
+        if (serverNote && serverNote.updatedAt > openNote.updatedAt) {
+          await this.noteEditor.notifyServerRefresh(serverNote);
+        }
+      }
 
       await dialogService.success({
         title: 'Sync Complete',
