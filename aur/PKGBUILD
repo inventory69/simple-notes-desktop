@@ -19,7 +19,7 @@ provides=('simple-notes-desktop')
 conflicts=('simple-notes-desktop' 'simple-notes-desktop-git')
 options=('!strip')
 source=("${pkgname}-${pkgver}.deb::${url}/releases/download/v${pkgver}/Simple.Notes.Desktop_${pkgver}_amd64.deb")
-sha256sums=('SKIP')
+sha256sums=('c0ee84385c5e5ae1f670cc871ae452ec894a47f499256472953eb7adb401d3c1')
 
 package() {
   # Extract data from deb package
