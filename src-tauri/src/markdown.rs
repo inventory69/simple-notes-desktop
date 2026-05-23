@@ -80,7 +80,7 @@ pub fn generate_markdown(note: &Note) -> String {
 
     // F2: Sort-Option in Frontmatter schreiben
     if let Some(ref sort_option) = note.checklist_sort_option {
-        md.push_str(&format!("\nsort: {}", sort_option.to_lowercase()));
+        md.push_str(&format!("\nsort: {}", sort_option));
     }
 
     // Cross-App v2.5.0-Felder: gleiche Reihenfolge/Format wie die Android-App
@@ -429,6 +429,24 @@ mod tests {
             "missing color line: {md}"
         );
         assert!(md.contains("\npinned: true"), "missing pinned line: {md}");
+    }
+
+    #[test]
+    fn test_generate_markdown_sort_option_uppercase() {
+        // Android schreibt sort: UNCHECKED_FIRST (Rohwert), Desktop muss gleich sein
+        let mut note = Note::new("Check".to_string(), "tauri-abc".to_string());
+        note.note_type = NoteType::Checklist;
+        note.checklist_sort_option = Some("UNCHECKED_FIRST".to_string());
+
+        let md = generate_markdown(&note);
+        assert!(
+            md.contains("\nsort: UNCHECKED_FIRST"),
+            "sort option should be uppercase (Android parity): {md}"
+        );
+        assert!(
+            !md.contains("sort: unchecked_first"),
+            "sort option must not be lowercased: {md}"
+        );
     }
 
     #[test]
