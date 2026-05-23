@@ -133,7 +133,7 @@ https://your-nextcloud.com/remote.php/dav/files/USERNAME/Notes/
 | [SETUP.md](docs/SETUP.md) | Detailed installation & configuration |
 | [BUILDING.md](BUILDING.md) | Build from source (developers) |
 | [CHANGELOG.md](CHANGELOG.md) | Version history |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Technical architecture |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup & conventions |
 
 ---
 
@@ -188,6 +188,6 @@ MIT License — see [LICENSE](LICENSE)
 
 <div align="center">
 
-**v0.2.0** · Built with ❤️ using [Tauri](https://tauri.app/) + [CodeMirror](https://codemirror.net/)
+**v0.4.0** · Built with ❤️ using [Tauri](https://tauri.app/) + [CodeMirror](https://codemirror.net/)
 
 </div>
