@@ -113,7 +113,7 @@ jobs:
         run: |
           VERSION=$(node -e "console.log(require('./package.json').version)")
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          CHANGELOG_SECTION=$(awk "/^## \\[${VERSION}\\]/{found=1; next} /^## \\[/{if(found) exit} found{print}" CHANGELOG.md)
+          CHANGELOG_SECTION=$(awk "/^## \\[${VERSION}\\]/{found=1; next} /^## \\[/{if(found) exit} found && (/^#/ || /^- / || /^$/) {print}" CHANGELOG.md | sed 's/\*\*//g')
           {
             echo 'release_body<<EOF_RELEASE_BODY'
             printf '## Downloads\n\n'
