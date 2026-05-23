@@ -9,6 +9,7 @@
 #   3. src-tauri/tauri.conf.json
 #   4. aur/PKGBUILD (pkgver only, sha256sum must be updated after release)
 #   5. aur/.SRCINFO (pkgver and source URL)
+#   6. README.md (footer version badge)
 
 set -euo pipefail
 
@@ -70,19 +71,24 @@ fs.writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(conf, null, 2) + '\
 echo "  ✓ tauri.conf.json → $NEW_VERSION"
 
 # ─── 4. aur/PKGBUILD ──────────────────────────────────────────────────
-echo "[4/5] Updating aur/PKGBUILD..."
+echo "[4/6] Updating aur/PKGBUILD..."
 sed -i "s/^pkgver=.*/pkgver=$NEW_VERSION/" aur/PKGBUILD
 sed -i "s/^pkgrel=.*/pkgrel=1/" aur/PKGBUILD
 sed -i "s/^sha256sums=.*/sha256sums=('SKIP')/" aur/PKGBUILD
 echo "  ✓ PKGBUILD → $NEW_VERSION (sha256sums='SKIP' – update after release!)"
 
 # ─── 5. aur/.SRCINFO ──────────────────────────────────────────────────
-echo "[5/5] Updating aur/.SRCINFO..."
+echo "[5/6] Updating aur/.SRCINFO..."
 sed -i "s/pkgver = $CURRENT_VERSION/pkgver = $NEW_VERSION/" aur/.SRCINFO
 sed -i "s/pkgrel = .*/pkgrel = 1/" aur/.SRCINFO
 sed -i "s|simple-notes-desktop-bin-${CURRENT_VERSION}.deb::https://github.com/inventory69/simple-notes-desktop/releases/download/v${CURRENT_VERSION}/Simple.Notes.Desktop_${CURRENT_VERSION}_amd64.deb|simple-notes-desktop-bin-${NEW_VERSION}.deb::https://github.com/inventory69/simple-notes-desktop/releases/download/v${NEW_VERSION}/Simple.Notes.Desktop_${NEW_VERSION}_amd64.deb|" aur/.SRCINFO
 sed -i "s/sha256sums = .*/sha256sums = SKIP/" aur/.SRCINFO
 echo "  ✓ .SRCINFO → $NEW_VERSION"
+
+# ─── 6. README.md ─────────────────────────────────────────────────────
+echo "[6/6] Updating README.md..."
+sed -i "s/\*\*v${CURRENT_VERSION}\*\*/**v${NEW_VERSION}**/" README.md
+echo "  ✓ README.md → $NEW_VERSION"
 
 # ─── Summary ──────────────────────────────────────────────────────────
 echo ""
@@ -96,6 +102,7 @@ echo "  • src-tauri/Cargo.toml"
 echo "  • src-tauri/tauri.conf.json"
 echo "  • aur/PKGBUILD"
 echo "  • aur/.SRCINFO"
+echo "  • README.md"
 echo ""
 echo "⚠ IMPORTANT: After release, update sha256sum in PKGBUILD:"
 echo "    sha256sum Simple.Notes.Desktop_${NEW_VERSION}_amd64.deb"

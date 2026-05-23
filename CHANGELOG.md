@@ -7,6 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-05-23
+
+### Fixed
+
+- **Cross-app data loss: Android fields now preserved on desktop save**
+  - Desktop round-trips (`save_note`) were silently dropping all fields unknown to the Rust model,
+    including `color`, `labels`, `isPinned`, `importedAt` (Note) and `originalOrder`, `createdAt`,
+    `indentationLevel` (ChecklistItem) — causing Android note colors and labels to disappear after
+    any desktop edit
+  - `Note` and `ChecklistItem` now carry explicit fields for the near-term Android v2.5.0 features
+    plus a `#[serde(flatten)]` catch-all for future fields; no desktop-visible changes
+  - Markdown export updated accordingly: `color`, `labels`, `pinned`, `imported` frontmatter lines
+    written when set (matching Android `Note.toMarkdown` format)
+
+- **Editor reloads open note after server sync**
+  - "Sync Now" previously refreshed the sidebar but left the editor showing stale content;
+    a subsequent save would silently overwrite the newer server version
+  - If the server version is newer and the editor is clean, the note reloads silently;
+    if there are unsaved changes a conflict dialog is shown ("Load Server Version" / "Keep Mine")
+
+- **Ghost saves eliminated when switching notes after autosave** (`fix(editor)`)
+  - `scheduleSave()` left a stale timer ID set, causing every note switch after an autosave to
+    flush an extra save of the previous note; Android reported 2–3 notes synced when only one
+    was edited
+  - Save now snapshots `currentNote` before the network `await` so a note switch mid-request
+    can no longer overwrite the wrong note
+
+- **Stale markdown file deleted when note title changes** (`fix(sync)`)
+  - Renaming a note now fetches the current server title before writing; if the title changed the
+    old `{title}.md` is deleted first, preventing `.md` file accumulation in the `-md/` folder
+
+- **Markdown `sort:` field written as SCREAMING_SNAKE_CASE** (`fix(sync)`)
+  - Desktop was writing `sort: unchecked_first`; Android writes `UNCHECKED_FIRST` (raw enum value)
+
+- **Preview toggle button state reset when switching notes** (`fix(ui)`)
+  - `previewToggleBtn` kept its active (blue) highlight when switching away from a previewed note
+
+- **Linux/AppImage crash on Fedora Silverblue 41+ and similar immutable distros** (`fix(linux)`)
+  - WebKit sandbox conflicts with the host container runtime, causing an EGL_BAD_PARAMETER crash
+    at startup; GStreamer VA-API probe before WebKit init caused a secondary crash
+  - Fixed by setting `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` and `GST_VAAPI_ALL_DRIVERS=1`
+    in `main.rs` (before Tauri init) and in the deb/rpm launcher script
+  - Thanks to [@daalja](https://github.com/daalja) for the detailed report and workaround — closes [#1](https://github.com/inventory69/simple-notes-desktop/issues/1)
+
+- **COLRv1 emoji crash in AppImage on Fedora Silverblue / older FreeType** (`fix(ui)`)
+  - Certain notes containing emoji triggered a bounds-check abort in colrv1_configure_skpaint
+    when the host's Noto Color Emoji (COLRv1 format) was rendered via an older bundled FreeType
+  - Fixed by setting `font-variant-emoji: text` globally; emoji render in monochrome instead of color
+  - Thanks to [@daalja](https://github.com/daalja) for identifying the affected note and reproducing the crash — closes [#5](https://github.com/inventory69/simple-notes-desktop/issues/5)
+
+### Changed
+
+- **`Settings` deserialization simplified** (`refactor(storage)`)
+  - Added `#[serde(default)]` to `Settings`; `get_settings` now deserializes from a single JSON
+    map instead of reading each key individually — adding a new setting only requires updating the
+    struct and `impl Default`
+
+### Removed
+
+- **Dead markdown parse path removed** (`refactor(sync)`)
+  - `parse_markdown`, `iso_to_timestamp`, and all associated regex helpers and unit tests deleted
+    from `markdown.rs`; the desktop only ever reads JSON, markdown is write-only export
+
+### Documentation
+
+- Stale v0.2.0 version footer and dead `docs/ARCHITECTURE.md` link in README fixed
+- Contributing guide updated for current tooling, Biome semicolons convention, and full
+  Conventional Commit type list
+
 ## [0.4.0] - 2026-03-03
 
 ### Added
