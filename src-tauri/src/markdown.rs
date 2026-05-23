@@ -83,6 +83,28 @@ pub fn generate_markdown(note: &Note) -> String {
         md.push_str(&format!("\nsort: {}", sort_option.to_lowercase()));
     }
 
+    // Cross-App v2.5.0-Felder: gleiche Reihenfolge/Format wie die Android-App
+    // (Note.toMarkdown): imported, labels, color, pinned. Nur schreiben wenn gesetzt.
+    if let Some(imported) = note.imported_at {
+        md.push_str(&format!("\nimported: {}", imported));
+    }
+    if let Some(ref labels) = note.labels {
+        if !labels.is_empty() {
+            let quoted = labels
+                .iter()
+                .map(|l| format!("\"{}\"", l))
+                .collect::<Vec<_>>()
+                .join(", ");
+            md.push_str(&format!("\nlabels: [{}]", quoted));
+        }
+    }
+    if let Some(ref color) = note.color {
+        md.push_str(&format!("\ncolor: \"{}\"", color));
+    }
+    if let Some(is_pinned) = note.is_pinned {
+        md.push_str(&format!("\npinned: {}", is_pinned));
+    }
+
     md.push_str(&format!("\n---\n\n# {}\n\n", note.title));
 
     match note.note_type {
@@ -223,6 +245,38 @@ pub fn parse_markdown(md: &str, server_mtime: Option<i64>) -> Result<Note> {
         note_type,
         checklist_items,
         checklist_sort_option,
+        color: metadata
+            .get("color")
+            .map(|s| s.trim().trim_matches('"').to_string())
+            .filter(|s| !s.is_empty()),
+        labels: metadata.get("labels").and_then(|s| {
+            let inner = s
+                .trim()
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .trim();
+            if inner.is_empty() {
+                return None;
+            }
+            let items: Vec<String> = inner
+                .split(',')
+                .map(|item| item.trim().trim_matches('"').to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if items.is_empty() {
+                None
+            } else {
+                Some(items)
+            }
+        }),
+        imported_at: metadata
+            .get("imported")
+            .and_then(|s| s.trim().parse::<i64>().ok()),
+        is_pinned: metadata.get("pinned").map(|s| s.trim() == "true"),
+        // extra kann hier nicht rekonstruiert werden — der naive Zeilen-Parser kennt nur
+        // bekannte Keys; unbekannte Felder wären im Frontmatter als Strings vorhanden, aber
+        // ohne Schema nicht sicher in serde_json::Value überführbar. JSON ist Sync-Quelle.
+        extra: serde_json::Map::new(),
     })
 }
 
@@ -250,6 +304,7 @@ fn parse_checklist_items(content: &str) -> Vec<ChecklistItem> {
                 text,
                 is_checked,
                 order: order as i32,
+                ..Default::default()
             }
         })
         .collect()
@@ -294,6 +349,7 @@ pub fn recover_checklist_from_content(content: &str) -> Vec<ChecklistItem> {
                 text,
                 is_checked,
                 order: order as i32,
+                ..Default::default()
             }
         })
         .collect()
@@ -347,5 +403,41 @@ mod tests {
         assert!(!items[0].is_checked);
         assert!(items[1].is_checked);
         assert!(items[2].is_checked);
+    }
+
+    #[test]
+    fn test_generate_markdown_includes_v250_fields() {
+        // Cross-App-Parität: die Felder müssen im Frontmatter im selben Format wie
+        // bei der Android-App (Note.toMarkdown) erscheinen.
+        let mut note = Note::new("My Note".to_string(), "tauri-abc".to_string());
+        note.color = Some("#FF5733".to_string());
+        note.labels = Some(vec!["work".to_string(), "urgent".to_string()]);
+        note.imported_at = Some(1699999999999);
+        note.is_pinned = Some(true);
+
+        let md = generate_markdown(&note);
+        assert!(
+            md.contains("\nimported: 1699999999999"),
+            "missing imported line: {md}"
+        );
+        assert!(
+            md.contains("\nlabels: [\"work\", \"urgent\"]"),
+            "missing labels line: {md}"
+        );
+        assert!(
+            md.contains("\ncolor: \"#FF5733\""),
+            "missing color line: {md}"
+        );
+        assert!(md.contains("\npinned: true"), "missing pinned line: {md}");
+    }
+
+    #[test]
+    fn test_generate_markdown_omits_unset_v250_fields() {
+        let note = Note::new("Plain".to_string(), "tauri-abc".to_string());
+        let md = generate_markdown(&note);
+        assert!(!md.contains("color:"));
+        assert!(!md.contains("labels:"));
+        assert!(!md.contains("imported:"));
+        assert!(!md.contains("pinned:"));
     }
 }

@@ -94,7 +94,7 @@ async fn list_notes(state: State<'_, WebDavState>) -> Result<Vec<NoteMetadata>> 
         }
     }
 
-    notes.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    notes.sort_by_key(|n| std::cmp::Reverse(n.updated_at));
     Ok(notes)
 }
 

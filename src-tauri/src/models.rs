@@ -28,7 +28,7 @@ pub enum NoteType {
 }
 
 /// Ein Item in einer Checkliste
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChecklistItem {
     /// UUID v4 für das Item
@@ -39,6 +39,12 @@ pub struct ChecklistItem {
     pub is_checked: bool,
     /// Sortierreihenfolge (0-basiert)
     pub order: i32,
+    /// Cross-App-Kompatibilität: alle Item-Felder, die die Desktop-App (noch)
+    /// nicht modelliert — Android schreibt z.B. `originalOrder`, `createdAt`,
+    /// `indentationLevel`, und künftige Felder kommen dazu. Werden 1:1 erhalten,
+    /// damit ein Speichern auf dem Desktop sie nicht aus dem Server-JSON entfernt.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl ChecklistItem {
@@ -50,6 +56,7 @@ impl ChecklistItem {
             text,
             is_checked: false,
             order,
+            ..Default::default()
         }
     }
 }
@@ -93,6 +100,29 @@ pub struct Note {
     /// Werte: "MANUAL", "ALPHABETICAL_ASC", "ALPHABETICAL_DESC", "UNCHECKED_FIRST", "CHECKED_FIRST"
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checklist_sort_option: Option<String>,
+
+    /// Android v2.5.0: Hintergrundfarbe der Notiz, Hex `#RRGGBB`. None = Standardfarbe.
+    /// Desktop erhält den Wert bereits, rendert ihn aber noch NICHT (geplant, siehe Plan v0.5.0+).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+
+    /// Android v2.5.0: Labels/Tags der Notiz (serverseitig zusätzlich in notes_labels.json aggregiert).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<Vec<String>>,
+
+    /// Android v2.5.0: Google-Keep-Import-Marker (Epoch ms). None = nicht aus Keep importiert.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported_at: Option<i64>,
+
+    /// Android v2.5.0: Pin-Status. None = nicht angepinnt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_pinned: Option<bool>,
+
+    /// Cross-App-Kompatibilität: Auffangbecken für alle weiteren Notiz-Felder, die
+    /// die Desktop-App nicht modelliert (inkl. künftiger Android-Schema-Erweiterungen).
+    /// Werden beim Round-Trip 1:1 erhalten — der Kern des Datenverlust-Fix.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl Note {
@@ -110,6 +140,11 @@ impl Note {
             note_type: NoteType::Text,
             checklist_items: None,
             checklist_sort_option: None,
+            color: None,
+            labels: None,
+            imported_at: None,
+            is_pinned: None,
+            extra: serde_json::Map::new(),
         }
     }
 
@@ -249,12 +284,14 @@ mod tests {
                 text: "Item A".to_string(),
                 is_checked: false,
                 order: 0,
+                ..Default::default()
             },
             ChecklistItem {
                 id: "2".to_string(),
                 text: "Item B".to_string(),
                 is_checked: true,
                 order: 1,
+                ..Default::default()
             },
         ]);
 
@@ -273,5 +310,100 @@ mod tests {
         assert_eq!(meta.title, note.title);
         assert_eq!(meta.updated_at, note.updated_at);
         assert_eq!(meta.note_type, note.note_type);
+    }
+
+    // ── Cross-App-Kompatibilität: Felder-Erhaltung beim JSON-Round-Trip ──────────
+    // Regression-Schutz für den Datenverlust-Bug: Speichern auf dem Desktop darf
+    // KEINE Felder entfernen, die die Android-App schreibt (color, labels, …) und
+    // auch keine künftigen, der Desktop-App unbekannten Felder.
+
+    #[test]
+    fn test_note_preserves_v250_and_unknown_fields() {
+        // Notiz wie von der Android-App (v2.5.0) geschrieben + ein hypothetisches Zukunftsfeld.
+        let json = r##"{
+            "id": "abc",
+            "title": "T",
+            "content": "C",
+            "createdAt": 1700000000000,
+            "updatedAt": 1700000000001,
+            "deviceId": "android-xyz",
+            "syncStatus": "SYNCED",
+            "noteType": "TEXT",
+            "color": "#FF5733",
+            "labels": ["work", "urgent"],
+            "importedAt": 1699999999999,
+            "isPinned": true,
+            "futureField": {"nested": 42}
+        }"##;
+
+        let note: Note = serde_json::from_str(json).unwrap();
+        assert_eq!(note.color.as_deref(), Some("#FF5733"));
+        assert_eq!(
+            note.labels.as_deref(),
+            Some(&["work".to_string(), "urgent".to_string()][..])
+        );
+        assert_eq!(note.imported_at, Some(1699999999999));
+        assert_eq!(note.is_pinned, Some(true));
+        assert!(
+            note.extra.contains_key("futureField"),
+            "unknown field must land in extra"
+        );
+
+        // Re-Serialisierung darf nichts davon verlieren (der eigentliche Bug).
+        let out = serde_json::to_value(&note).unwrap();
+        assert_eq!(out["color"], "#FF5733");
+        assert_eq!(out["labels"][0], "work");
+        assert_eq!(out["labels"][1], "urgent");
+        assert_eq!(out["importedAt"], 1699999999999i64);
+        assert_eq!(out["isPinned"], true);
+        assert_eq!(out["futureField"]["nested"], 42);
+    }
+
+    #[test]
+    fn test_note_without_extra_fields_stays_clean() {
+        // Eine frische Notiz darf weder null-Felder noch einen "extra"-Key serialisieren.
+        let note = Note::new("T".to_string(), "tauri-x".to_string());
+        let out = serde_json::to_value(&note).unwrap();
+        let obj = out.as_object().unwrap();
+        assert!(!obj.contains_key("color"));
+        assert!(!obj.contains_key("labels"));
+        assert!(!obj.contains_key("importedAt"));
+        assert!(!obj.contains_key("isPinned"));
+        // flatten darf NIE einen wörtlichen "extra"-Key erzeugen.
+        assert!(!obj.contains_key("extra"));
+    }
+
+    #[test]
+    fn test_checklist_item_preserves_android_fields() {
+        // Android-ChecklistItem-Felder: originalOrder (v1.9.0), createdAt (v1.11.0),
+        // indentationLevel (v2.5.0). Müssen erhalten bleiben.
+        let json = r#"{
+            "id": "i1",
+            "text": "milk",
+            "isChecked": false,
+            "order": 0,
+            "originalOrder": 3,
+            "createdAt": 1700000000000,
+            "indentationLevel": 2
+        }"#;
+
+        let item: ChecklistItem = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            item.extra.get("originalOrder").and_then(|v| v.as_i64()),
+            Some(3)
+        );
+        assert_eq!(
+            item.extra.get("createdAt").and_then(|v| v.as_i64()),
+            Some(1700000000000)
+        );
+        assert_eq!(
+            item.extra.get("indentationLevel").and_then(|v| v.as_i64()),
+            Some(2)
+        );
+
+        let out = serde_json::to_value(&item).unwrap();
+        assert_eq!(out["originalOrder"], 3);
+        assert_eq!(out["createdAt"], 1700000000000i64);
+        assert_eq!(out["indentationLevel"], 2);
     }
 }
