@@ -46,7 +46,7 @@ if [ "$CURRENT_VERSION" = "$NEW_VERSION" ]; then
 fi
 
 # ─── 1. package.json ──────────────────────────────────────────────────
-echo "[1/5] Updating package.json..."
+echo "[1/6] Updating package.json..."
 node -e "
 const fs = require('fs');
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf-8'));
@@ -56,12 +56,12 @@ fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
 echo "  ✓ package.json → $NEW_VERSION"
 
 # ─── 2. src-tauri/Cargo.toml ──────────────────────────────────────────
-echo "[2/5] Updating src-tauri/Cargo.toml..."
+echo "[2/6] Updating src-tauri/Cargo.toml..."
 sed -i "s/^version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/" src-tauri/Cargo.toml
 echo "  ✓ Cargo.toml → $NEW_VERSION"
 
 # ─── 3. src-tauri/tauri.conf.json ─────────────────────────────────────
-echo "[3/5] Updating src-tauri/tauri.conf.json..."
+echo "[3/6] Updating src-tauri/tauri.conf.json..."
 node -e "
 const fs = require('fs');
 const conf = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf-8'));
