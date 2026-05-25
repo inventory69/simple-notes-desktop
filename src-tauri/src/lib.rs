@@ -265,14 +265,14 @@ async fn save_settings(settings: Settings, app: AppHandle) -> Result<()> {
         .store("settings.json")
         .map_err(|e| AppError::StorageError(e.to_string()))?;
 
-    store.set("theme", serde_json::json!(settings.theme));
-    store.set("autosave", serde_json::json!(settings.autosave));
-    store.set(
-        "minimize_to_tray",
-        serde_json::json!(settings.minimize_to_tray),
-    );
-    store.set("autostart", serde_json::json!(settings.autostart));
-    store.set("sync_folder", serde_json::json!(settings.sync_folder));
+    // Derive store keys from the Settings struct itself so adding a new field
+    // to the struct automatically persists it without a separate hand-typed entry.
+    let value = serde_json::to_value(&settings).map_err(|e| AppError::ParseError(e.to_string()))?;
+    if let serde_json::Value::Object(map) = value {
+        for (k, v) in map {
+            store.set(k, v);
+        }
+    }
 
     // Handle autostart toggle
     if settings.autostart {
