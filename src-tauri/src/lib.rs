@@ -96,8 +96,9 @@ async fn list_notes(state: State<'_, WebDavState>) -> Result<Vec<NoteMetadata>> 
 
     let mut notes = Vec::new();
     for id in ids {
-        if let Ok(note) = client.get_note(&id).await {
-            notes.push(NoteMetadata::from(&note));
+        match client.get_note(&id).await {
+            Ok(note) => notes.push(NoteMetadata::from(&note)),
+            Err(e) => eprintln!("[list_notes] failed to load {}: {}", id, e),
         }
     }
 
