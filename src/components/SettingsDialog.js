@@ -21,6 +21,14 @@ export class SettingsDialog {
     this.onSaveCallback = null;
     this.onReconnectCallback = null;
     this.originalTheme = null; // Store original theme for cancel
+    this._currentTheme = null;
+    this._mql = window.matchMedia('(prefers-color-scheme: dark)');
+    this._mqlListener = () => {
+      if (this._currentTheme === 'system') {
+        this.applyTheme('system');
+      }
+    };
+    this._mql.addEventListener('change', this._mqlListener);
 
     this.init();
   }
@@ -149,6 +157,7 @@ export class SettingsDialog {
   }
 
   applyTheme(theme) {
+    this._currentTheme = theme;
     const root = document.documentElement;
 
     if (theme === 'dark') {
@@ -156,9 +165,8 @@ export class SettingsDialog {
     } else if (theme === 'light') {
       root.removeAttribute('data-theme');
     } else {
-      // System theme
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      if (prefersDark) {
+      // System theme — reuse the persistent MQL instance so the change listener stays in sync
+      if (this._mql.matches) {
         root.setAttribute('data-theme', 'dark');
       } else {
         root.removeAttribute('data-theme');
