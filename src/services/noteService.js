@@ -8,6 +8,7 @@ class NoteService {
     this.notes = [];
     this.currentNote = null;
     this.listeners = new Set();
+    this._saveQueues = new Map(); // note id → last in-flight save Promise
   }
 
   /**
@@ -82,25 +83,37 @@ class NoteService {
    * @returns {Promise<Object>} Updated note with new timestamp
    */
   async saveNote(note) {
+    // Chain saves for the same note id so they execute in submission order.
+    // Saves for different ids run concurrently.
+    const prev = this._saveQueues.get(note.id) ?? Promise.resolve();
+    const next = prev
+      .catch(() => {}) // don't let a prior failure poison the chain
+      .then(async () => {
+        const updatedNote = await tauri.saveNote(note);
+
+        // Update local cache with server response
+        const index = this.notes.findIndex((n) => n.id === updatedNote.id);
+        if (index >= 0) {
+          this.notes[index] = { ...updatedNote };
+        } else {
+          this.notes.unshift(updatedNote);
+        }
+
+        this.currentNote = updatedNote;
+        this.notify();
+
+        return updatedNote;
+      });
+
+    this._saveQueues.set(note.id, next);
+
     try {
-      // Backend updates timestamp and returns updated note
-      const updatedNote = await tauri.saveNote(note);
-
-      // Update local cache with server response
-      const index = this.notes.findIndex((n) => n.id === updatedNote.id);
-      if (index >= 0) {
-        this.notes[index] = { ...updatedNote };
-      } else {
-        this.notes.unshift(updatedNote);
+      return await next;
+    } finally {
+      // Clean up the queue entry once this save is the last one in the chain
+      if (this._saveQueues.get(note.id) === next) {
+        this._saveQueues.delete(note.id);
       }
-
-      this.currentNote = updatedNote;
-      this.notify();
-
-      return updatedNote;
-    } catch (error) {
-      console.error('Failed to save note:', error);
-      throw error;
     }
   }
 
