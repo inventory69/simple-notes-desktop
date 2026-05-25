@@ -24,9 +24,16 @@ struct WebDavState(Mutex<Option<WebDavClient>>);
 /// Global Device ID
 struct DeviceIdState(Mutex<Option<String>>);
 
+/// Recovers from a poisoned mutex by extracting the inner value.
+/// A panic while holding a lock is rare in this app (no heavy work inside critical
+/// sections) but would otherwise leave the mutex permanently unusable.
+fn lock_recover<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// Generiert oder lädt Device ID
 fn get_or_create_device_id(app: &AppHandle, state: &State<DeviceIdState>) -> Result<String> {
-    let mut device_id_lock = state.0.lock().unwrap();
+    let mut device_id_lock = lock_recover(&state.0);
 
     if let Some(id) = &*device_id_lock {
         return Ok(id.clone());
@@ -70,7 +77,7 @@ async fn connect(
     let success = client.test_connection().await?;
 
     if success {
-        let mut client_lock = state.0.lock().unwrap();
+        let mut client_lock = lock_recover(&state.0);
         *client_lock = Some(client);
     }
 
@@ -80,7 +87,7 @@ async fn connect(
 #[tauri::command]
 async fn list_notes(state: State<'_, WebDavState>) -> Result<Vec<NoteMetadata>> {
     let client = {
-        let client_lock = state.0.lock().unwrap();
+        let client_lock = lock_recover(&state.0);
         client_lock.clone()
     };
 
@@ -101,7 +108,7 @@ async fn list_notes(state: State<'_, WebDavState>) -> Result<Vec<NoteMetadata>> 
 #[tauri::command]
 async fn get_note(id: String, state: State<'_, WebDavState>) -> Result<Note> {
     let client = {
-        let client_lock = state.0.lock().unwrap();
+        let client_lock = lock_recover(&state.0);
         client_lock.clone()
     };
 
@@ -120,7 +127,7 @@ async fn save_note(mut note: Note, state: State<'_, WebDavState>) -> Result<Note
     eprintln!("[Save] Updated timestamp: {}", note.updated_at);
 
     let client = {
-        let client_lock = state.0.lock().unwrap();
+        let client_lock = lock_recover(&state.0);
         client_lock.clone()
     };
 
@@ -154,7 +161,7 @@ async fn create_note(
 #[tauri::command]
 async fn delete_note(id: String, state: State<'_, WebDavState>) -> Result<()> {
     let client = {
-        let client_lock = state.0.lock().unwrap();
+        let client_lock = lock_recover(&state.0);
         client_lock.clone()
     };
 
@@ -306,7 +313,7 @@ fn get_desktop_environment() -> Option<String> {
 /// Update the minimize-to-tray runtime setting without restarting
 #[tauri::command]
 async fn update_tray_setting(enabled: bool, state: State<'_, TraySettings>) -> Result<()> {
-    let mut lock = state.0.lock().unwrap();
+    let mut lock = lock_recover(&state.0);
     *lock = enabled;
     Ok(())
 }
@@ -387,7 +394,7 @@ pub fn run() {
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
                 let state = app.state::<TraySettings>();
-                *state.0.lock().unwrap() = minimize;
+                *lock_recover(&state.0) = minimize;
 
                 // Sync autostart state
                 let autostart = store
@@ -472,7 +479,7 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let app = window.app_handle();
                 let tray_settings = app.state::<TraySettings>();
-                let minimize = *tray_settings.0.lock().unwrap();
+                let minimize = *lock_recover(&tray_settings.0);
 
                 if minimize {
                     // Prevent window from closing, hide instead
