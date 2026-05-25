@@ -849,6 +849,8 @@ export class NoteEditor {
   saveNoteImmediate(noteToSave) {
     noteService.saveNote(noteToSave).catch((err) => {
       console.error('[NoteEditor] Background save failed:', err);
+      // Show on whichever note is currently open so the user is not left uninformed
+      this.updateSyncStatus('Save error');
     });
   }
 
@@ -891,6 +893,11 @@ export class NoteEditor {
   async save() {
     const noteToSave = this.currentNote;
     if (!noteToSave) {
+      return;
+    }
+    // F3: same empty-item guard as scheduleSave() – covers Ctrl+S, flush on note-switch, etc.
+    if (noteToSave.noteType === 'CHECKLIST' && this.hasEmptyChecklistItems()) {
+      this.updateSyncStatus('Unsaved (empty item)');
       return;
     }
 
