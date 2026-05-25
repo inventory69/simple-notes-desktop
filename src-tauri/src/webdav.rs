@@ -224,7 +224,7 @@ impl WebDavClient {
         // Fehler (z.B. NoteNotFound für neue Notizen) werden ignoriert.
         if let Ok(existing) = self.get_note(&note.id).await {
             if existing.title != note.title {
-                let old_safe = sanitize_filename(&existing.title);
+                let old_safe = sanitize_filename(&existing.title, &note.id);
                 let old_md_url =
                     format!("{}/{}-md/{}.md", self.base_url, self.sync_folder, old_safe);
                 let _ = self
@@ -284,7 +284,7 @@ impl WebDavClient {
 
     async fn save_markdown(&self, note: &Note) -> Result<()> {
         let markdown_content = markdown::generate_markdown(note);
-        let safe_title = sanitize_filename(&note.title);
+        let safe_title = sanitize_filename(&note.title, &note.id);
         let url = format!(
             "{}/{}-md/{}.md",
             self.base_url, self.sync_folder, safe_title
@@ -301,11 +301,11 @@ impl WebDavClient {
             .map_err(|e| AppError::NetworkError(e.to_string()))?;
 
         if !response.status().is_success() {
-            eprintln!(
-                "Warning: PUT Markdown failed: {} for note {}",
+            return Err(AppError::WebDav(format!(
+                "PUT Markdown failed: {} for note {}",
                 response.status(),
                 note.id
-            );
+            )));
         }
 
         Ok(())
@@ -321,7 +321,7 @@ impl WebDavClient {
             .send()
             .await;
 
-        let safe_title = sanitize_filename(&note.title);
+        let safe_title = sanitize_filename(&note.title, &note.id);
         let md_url = format!(
             "{}/{}-md/{}.md",
             self.base_url, self.sync_folder, safe_title
@@ -337,8 +337,8 @@ impl WebDavClient {
     }
 }
 
-fn sanitize_filename(title: &str) -> String {
-    title
+fn sanitize_filename(title: &str, id: &str) -> String {
+    let sanitized: String = title
         .chars()
         .map(|c| match c {
             '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
@@ -346,7 +346,13 @@ fn sanitize_filename(title: &str) -> String {
         })
         .collect::<String>()
         .trim()
-        .to_string()
+        .to_string();
+
+    if sanitized.is_empty() {
+        format!("untitled-{}", &id[..8.min(id.len())])
+    } else {
+        sanitized
+    }
 }
 
 #[cfg(test)]
@@ -355,10 +361,13 @@ mod tests {
 
     #[test]
     fn test_sanitize_filename() {
-        assert_eq!(sanitize_filename("Normal Title"), "Normal Title");
-        assert_eq!(sanitize_filename("With/Slash"), "With_Slash");
-        assert_eq!(sanitize_filename("Test:Colon"), "Test_Colon");
-        assert_eq!(sanitize_filename("Multi<>Special"), "Multi__Special");
-        assert_eq!(sanitize_filename("  Trimmed  "), "Trimmed");
+        let id = "abcdef12-0000-0000-0000-000000000000";
+        assert_eq!(sanitize_filename("Normal Title", id), "Normal Title");
+        assert_eq!(sanitize_filename("With/Slash", id), "With_Slash");
+        assert_eq!(sanitize_filename("Test:Colon", id), "Test_Colon");
+        assert_eq!(sanitize_filename("Multi<>Special", id), "Multi__Special");
+        assert_eq!(sanitize_filename("  Trimmed  ", id), "Trimmed");
+        assert_eq!(sanitize_filename("", id), "untitled-abcdef12");
+        assert_eq!(sanitize_filename("   ", id), "untitled-abcdef12");
     }
 }
