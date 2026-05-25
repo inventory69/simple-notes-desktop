@@ -269,8 +269,12 @@ export class NoteEditor {
         this._pushSnapshot(); // snapshot after
         this._scheduleLocalUpdate();
         this.scheduleSave();
-        // Re-render to update sort order and separator
-        this.renderChecklist();
+        // Re-render only when the sort mode can reorder items; MANUAL leaves the
+        // list unchanged so skipping the rebuild preserves keyboard focus.
+        const sort = this.currentNote.checklistSortOption ?? 'MANUAL';
+        if (sort !== 'MANUAL') {
+          this.renderChecklist();
+        }
       });
 
       // Text input
@@ -307,19 +311,23 @@ export class NoteEditor {
       // F3: Bei Fokusverlust leere Einträge entfernen (mit kurzer Verzögerung für UX)
       textInput.addEventListener('blur', () => {
         if (textInput.value.trim() === '') {
+          const targetNoteId = this.currentNote?.id;
+          const targetItemId = item.id;
           setTimeout(() => {
-            // Prüfe ob der Eintrag immer noch leer ist (Nutzer könnte zurückgekehrt sein)
-            if (this.currentNote.checklistItems[originalIndex]?.text.trim() === '') {
-              this._pushSnapshot();
-              this.currentNote.checklistItems.splice(originalIndex, 1);
-              // Order-Felder neu berechnen
-              this.currentNote.checklistItems.forEach((item, i) => {
-                item.order = i;
-              });
-              this._pushSnapshot();
-              this.renderChecklist();
-              this.scheduleSave();
-            }
+            // Guard: user switched to a different note during the 200ms window
+            if (this.currentNote?.id !== targetNoteId) return;
+            const idx = this.currentNote.checklistItems.findIndex((i) => i.id === targetItemId);
+            if (idx === -1) return;
+            if (this.currentNote.checklistItems[idx].text.trim() !== '') return;
+            this._pushSnapshot();
+            this.currentNote.checklistItems.splice(idx, 1);
+            // Order-Felder neu berechnen
+            this.currentNote.checklistItems.forEach((itm, i) => {
+              itm.order = i;
+            });
+            this._pushSnapshot();
+            this.renderChecklist();
+            this.scheduleSave();
           }, 200);
         }
       });
