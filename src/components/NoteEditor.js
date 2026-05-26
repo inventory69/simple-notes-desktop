@@ -890,7 +890,7 @@ export class NoteEditor {
 
   /** Fire-and-forget save for a specific note snapshot (used to flush pending saves). */
   saveNoteImmediate(noteToSave) {
-    noteService.saveNote(noteToSave).catch((err) => {
+    noteService.saveNote(this._sanitizeForSave(noteToSave)).catch((err) => {
       console.error('[NoteEditor] Background save failed:', err);
       // Show on whichever note is currently open so the user is not left uninformed
       this.updateSyncStatus('Save error');
@@ -933,16 +933,23 @@ export class NoteEditor {
     return this.currentNote.checklistItems.some((item) => item.text.trim() === '');
   }
 
+  /** Returns a shallow copy of `note` with empty checklist items removed (does NOT mutate the
+   *  original, so Undo snapshots remain intact). Non-checklist notes are returned as-is. */
+  _sanitizeForSave(note) {
+    if (note?.noteType !== 'CHECKLIST' || !Array.isArray(note.checklistItems)) {
+      return note;
+    }
+    const cleaned = note.checklistItems
+      .filter((i) => i.text.trim() !== '')
+      .map((i, idx) => ({ ...i, order: idx, originalOrder: idx }));
+    return { ...note, checklistItems: cleaned };
+  }
+
   async save() {
-    const noteToSave = this.currentNote;
-    if (!noteToSave) {
+    if (!this.currentNote) {
       return;
     }
-    // F3: same empty-item guard as scheduleSave() – covers Ctrl+S, flush on note-switch, etc.
-    if (noteToSave.noteType === 'CHECKLIST' && this.hasEmptyChecklistItems()) {
-      this.updateSyncStatus('Unsaved (empty item)');
-      return;
-    }
+    const noteToSave = this._sanitizeForSave(this.currentNote);
 
     try {
       const updatedNote = await noteService.saveNote(noteToSave);
