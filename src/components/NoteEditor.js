@@ -29,6 +29,7 @@ export class NoteEditor {
     this.placeholderDiv = document.getElementById('no-note-selected');
 
     this.undoBtn = document.getElementById('undo-btn');
+    this.addItemHeaderBtn = document.getElementById('add-checklist-item-btn');
 
     this.editorView = null;
     this.currentNote = null;
@@ -85,6 +86,9 @@ export class NoteEditor {
     // Undo button
     this.undoBtn.addEventListener('click', () => this._handleUndo());
 
+    // Header add-item button (checklist only)
+    this.addItemHeaderBtn.addEventListener('click', () => this.addChecklistItem());
+
     // Ctrl+Z / Ctrl+Shift+Z keyboard shortcut
     document.addEventListener('keydown', (e) => {
       if (!(e.ctrlKey || e.metaKey)) return;
@@ -96,6 +100,12 @@ export class NoteEditor {
           this._handleUndo();
         }
         // For text notes: let CodeMirror handle it natively (its own Ctrl+Z)
+      }
+      if (e.key === 'Enter' && !e.shiftKey) {
+        if (this.currentNote?.noteType !== 'CHECKLIST') return;
+        if (!e.target.closest('.checklist-container, .note-title')) return;
+        e.preventDefault();
+        this.addChecklistItem();
       }
     });
   }
@@ -245,6 +255,45 @@ export class NoteEditor {
     });
   }
 
+  addChecklistItem(afterItemId = null) {
+    if (!this.currentNote || this.currentNote.noteType !== 'CHECKLIST') return null;
+
+    const items = this.currentNote.checklistItems;
+    const sort = this.currentNote.checklistSortOption ?? 'MANUAL';
+    const hasSeparator = sort === 'MANUAL' || sort === 'UNCHECKED_FIRST';
+    let insertIdx;
+
+    if (afterItemId) {
+      const trigger = items.findIndex((i) => i.id === afterItemId);
+      if (hasSeparator && trigger >= 0 && items[trigger].isChecked) {
+        const firstChecked = items.findIndex((i) => i.isChecked);
+        insertIdx = firstChecked >= 0 ? firstChecked : trigger + 1;
+      } else {
+        insertIdx = trigger + 1;
+      }
+    } else {
+      if (hasSeparator) {
+        const firstChecked = items.findIndex((i) => i.isChecked);
+        insertIdx = firstChecked >= 0 ? firstChecked : items.length;
+      } else {
+        insertIdx = items.length;
+      }
+    }
+
+    const newItem = { id: crypto.randomUUID(), text: '', isChecked: false, order: insertIdx };
+    items.splice(insertIdx, 0, newItem);
+    this._renumberOrders();
+    this._pushSnapshot();
+    this.renderChecklist();
+    this.scheduleSave();
+
+    const el = this.checklistContainer.querySelector(
+      `.checklist-item[data-item-id="${newItem.id}"] .checklist-item-text`,
+    );
+    el?.focus();
+    return newItem;
+  }
+
   // Einmalige Ableitung von originalOrder aus order für Notizen, die vor Android-F04 (v1.9.0)
   // erstellt wurden und das Feld noch nicht kennen. Kein Speichern — nur In-Memory-Fix.
   _fixPreF04Orders() {
@@ -360,21 +409,7 @@ export class NoteEditor {
       textInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
-          const newItem = {
-            id: crypto.randomUUID(),
-            text: '',
-            isChecked: false,
-            order: originalIndex + 1,
-          };
-          this.currentNote.checklistItems.splice(originalIndex + 1, 0, newItem);
-          this._renumberOrders();
-          this._pushSnapshot();
-          this.renderChecklist();
-          this.scheduleSave();
-
-          // Focus new item
-          const items = this.checklistContainer.querySelectorAll('.checklist-item-text');
-          items[displayIndex + 1]?.focus();
+          this.addChecklistItem(item.id);
         }
       });
 
@@ -405,23 +440,7 @@ export class NoteEditor {
     // Add new item button
     const addBtn = this.checklistContainer.querySelector('#add-checklist-item');
     if (addBtn) {
-      addBtn.addEventListener('click', () => {
-        const newItem = {
-          id: crypto.randomUUID(),
-          text: '',
-          isChecked: false,
-          order: this.currentNote.checklistItems.length,
-        };
-        this.currentNote.checklistItems.push(newItem);
-        this._renumberOrders();
-        this._pushSnapshot();
-        this.renderChecklist();
-        this.scheduleSave();
-
-        // Focus new item
-        const items = this.checklistContainer.querySelectorAll('.checklist-item-text');
-        items[items.length - 1]?.focus();
-      });
+      addBtn.addEventListener('click', () => this.addChecklistItem());
     }
 
     // v0.3.1: Initialize textarea auto-resize and scroll gradients
@@ -697,6 +716,7 @@ export class NoteEditor {
       this.previewToggleBtn.classList.add('hidden');
       this.checklistContainer.classList.remove('hidden');
       this.sortBtn.classList.remove('hidden'); // F2: Show sort button
+      this.addItemHeaderBtn.classList.remove('hidden');
       this._fixPreF04Orders();
       this.renderChecklist();
       // Push initial snapshot so the first undo restores the loaded state
@@ -707,6 +727,7 @@ export class NoteEditor {
       this.editorDiv.classList.remove('hidden');
       this.previewToggleBtn.classList.remove('hidden');
       this.sortBtn.classList.add('hidden'); // F2: Hide sort button for text notes
+      this.addItemHeaderBtn.classList.add('hidden');
       this.initEditor();
 
       // Preview hidden by default

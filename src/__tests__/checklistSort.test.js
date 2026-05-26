@@ -37,9 +37,10 @@ function setupDOM() {
     <button id="delete-note-btn"></button>
     <button id="preview-toggle-btn"></button>
     <button id="checklist-sort-btn" class="hidden"></button>
-    <div id="checklist-container"></div>
+    <div id="checklist-container" class="checklist-container"></div>
     <div id="no-note-selected"></div>
     <button id="undo-btn"></button>
+    <button id="add-checklist-item-btn" class="hidden"></button>
   `;
 }
 
@@ -200,5 +201,168 @@ describe('NoteEditor — _fixPreF04Orders', () => {
     expect(editor.currentNote.checklistItems[0].originalOrder).toBe(2);
     expect(editor.currentNote.checklistItems[1].originalOrder).toBe(0);
     expect(editor.currentNote.checklistItems[2].originalOrder).toBe(1);
+  });
+});
+
+describe('NoteEditor — addChecklistItem', () => {
+  let NoteEditor;
+  let editor;
+
+  beforeEach(async () => {
+    setupDOM();
+    vi.clearAllMocks();
+    const mod = await import('../components/NoteEditor.js');
+    NoteEditor = mod.NoteEditor;
+    editor = new NoteEditor();
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+    vi.resetModules();
+  });
+
+  function makeNote(items, sort = 'UNCHECKED_FIRST') {
+    return { id: 'n1', title: 'T', noteType: 'CHECKLIST', checklistItems: items, checklistSortOption: sort };
+  }
+
+  it('inserts before first checked item when no afterItemId (UNCHECKED_FIRST)', () => {
+    editor.currentNote = makeNote([
+      { id: 'a', text: 'Apple', isChecked: false, order: 0, originalOrder: 0 },
+      { id: 'b', text: 'Banana', isChecked: true, order: 1, originalOrder: 1 },
+    ]);
+
+    const newItem = editor.addChecklistItem();
+
+    expect(editor.currentNote.checklistItems.length).toBe(3);
+    expect(editor.currentNote.checklistItems[1]).toMatchObject({ text: '', isChecked: false });
+    expect(newItem).toMatchObject({ text: '', isChecked: false });
+  });
+
+  it('appends to end when no checked items exist', () => {
+    editor.currentNote = makeNote([
+      { id: 'a', text: 'Apple', isChecked: false, order: 0, originalOrder: 0 },
+      { id: 'b', text: 'Banana', isChecked: false, order: 1, originalOrder: 1 },
+    ]);
+
+    editor.addChecklistItem();
+
+    expect(editor.currentNote.checklistItems.length).toBe(3);
+    expect(editor.currentNote.checklistItems[2]).toMatchObject({ text: '', isChecked: false });
+  });
+
+  it('inserts after the given unchecked item when afterItemId provided', () => {
+    editor.currentNote = makeNote([
+      { id: 'a', text: 'Apple', isChecked: false, order: 0, originalOrder: 0 },
+      { id: 'b', text: 'Banana', isChecked: false, order: 1, originalOrder: 1 },
+    ]);
+
+    editor.addChecklistItem('a');
+
+    expect(editor.currentNote.checklistItems.length).toBe(3);
+    expect(editor.currentNote.checklistItems[1]).toMatchObject({ text: '', isChecked: false });
+  });
+
+  it('redirects to before first checked item when afterItemId is a checked item (UNCHECKED_FIRST)', () => {
+    editor.currentNote = makeNote([
+      { id: 'a', text: 'Apple', isChecked: false, order: 0, originalOrder: 0 },
+      { id: 'b', text: 'Banana', isChecked: true, order: 1, originalOrder: 1 },
+    ]);
+
+    editor.addChecklistItem('b');
+
+    expect(editor.currentNote.checklistItems.length).toBe(3);
+    // New item must land before 'b' (index 1), not after it
+    expect(editor.currentNote.checklistItems[1]).toMatchObject({ text: '', isChecked: false });
+    expect(editor.currentNote.checklistItems[2].id).toBe('b');
+  });
+
+  it('appends to end regardless of checked items for ALPHABETICAL_ASC sort', () => {
+    editor.currentNote = makeNote(
+      [
+        { id: 'a', text: 'Apple', isChecked: false, order: 0, originalOrder: 0 },
+        { id: 'b', text: 'Banana', isChecked: true, order: 1, originalOrder: 1 },
+      ],
+      'ALPHABETICAL_ASC',
+    );
+
+    editor.addChecklistItem();
+
+    expect(editor.currentNote.checklistItems.length).toBe(3);
+    expect(editor.currentNote.checklistItems[2]).toMatchObject({ text: '', isChecked: false });
+  });
+
+  it('returns null and does not mutate for TEXT notes', () => {
+    editor.currentNote = { id: 'n2', noteType: 'TEXT', title: 'text', content: '' };
+
+    const result = editor.addChecklistItem();
+
+    expect(result).toBeNull();
+  });
+
+  it('returns null when no note is loaded', () => {
+    editor.currentNote = null;
+
+    const result = editor.addChecklistItem();
+
+    expect(result).toBeNull();
+  });
+});
+
+describe('NoteEditor — addChecklistItem shortcut & header button', () => {
+  let NoteEditor;
+  let editor;
+
+  beforeEach(async () => {
+    setupDOM();
+    vi.clearAllMocks();
+    const mod = await import('../components/NoteEditor.js');
+    NoteEditor = mod.NoteEditor;
+    editor = new NoteEditor();
+    editor.currentNote = {
+      id: 'note-1',
+      title: 'Test',
+      noteType: 'CHECKLIST',
+      checklistItems: [{ id: 'a', text: 'first', isChecked: false, order: 0, originalOrder: 0 }],
+      checklistSortOption: 'UNCHECKED_FIRST',
+    };
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+    vi.resetModules();
+  });
+
+  it('Ctrl+Enter adds an item when focus is inside checklist-container', () => {
+    editor.renderChecklist();
+    const checklist = document.getElementById('checklist-container');
+
+    checklist.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }));
+
+    expect(editor.currentNote.checklistItems.length).toBe(2);
+  });
+
+  it('Ctrl+Enter does nothing when focus is outside checklist and title', () => {
+    editor.renderChecklist();
+
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }));
+
+    expect(editor.currentNote.checklistItems.length).toBe(1);
+  });
+
+  it('Ctrl+Enter does nothing for TEXT notes', () => {
+    editor.currentNote = { id: 'n2', noteType: 'TEXT', title: 'text', content: '' };
+    const checklist = document.getElementById('checklist-container');
+
+    checklist.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }));
+
+    expect(editor.currentNote.noteType).toBe('TEXT');
+  });
+
+  it('header button click adds an item', () => {
+    const btn = document.getElementById('add-checklist-item-btn');
+
+    btn.click();
+
+    expect(editor.currentNote.checklistItems.length).toBe(2);
   });
 });
