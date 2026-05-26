@@ -272,12 +272,7 @@ export class NoteEditor {
         insertIdx = trigger + 1;
       }
     } else {
-      if (hasSeparator) {
-        const firstChecked = items.findIndex((i) => i.isChecked);
-        insertIdx = firstChecked >= 0 ? firstChecked : items.length;
-      } else {
-        insertIdx = items.length;
-      }
+      insertIdx = items.length;
     }
 
     const newItem = { id: crypto.randomUUID(), text: '', isChecked: false, order: insertIdx };

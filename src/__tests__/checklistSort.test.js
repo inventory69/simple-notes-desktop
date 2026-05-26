@@ -225,7 +225,7 @@ describe('NoteEditor — addChecklistItem', () => {
     return { id: 'n1', title: 'T', noteType: 'CHECKLIST', checklistItems: items, checklistSortOption: sort };
   }
 
-  it('inserts before first checked item when no afterItemId (UNCHECKED_FIRST)', () => {
+  it('inserts as last unchecked item when no afterItemId (UNCHECKED_FIRST)', () => {
     editor.currentNote = makeNote([
       { id: 'a', text: 'Apple', isChecked: false, order: 0, originalOrder: 0 },
       { id: 'b', text: 'Banana', isChecked: true, order: 1, originalOrder: 1 },
@@ -234,8 +234,26 @@ describe('NoteEditor — addChecklistItem', () => {
     const newItem = editor.addChecklistItem();
 
     expect(editor.currentNote.checklistItems.length).toBe(3);
-    expect(editor.currentNote.checklistItems[1]).toMatchObject({ text: '', isChecked: false });
     expect(newItem).toMatchObject({ text: '', isChecked: false });
+    const sorted = editor.sortChecklistItems(editor.currentNote.checklistItems, 'UNCHECKED_FIRST');
+    expect(sorted[1]).toMatchObject({ text: '', isChecked: false });
+    expect(sorted[2]).toMatchObject({ text: 'Banana', isChecked: true });
+  });
+
+  it('inserts as last unchecked item when checked item is first in data array (bug-16)', () => {
+    editor.currentNote = makeNote([
+      { id: 'a', text: 'Apple', isChecked: true, order: 0, originalOrder: 0 },
+      { id: 'b', text: 'Banana', isChecked: false, order: 1, originalOrder: 1 },
+      { id: 'c', text: 'Cherry', isChecked: false, order: 2, originalOrder: 2 },
+    ]);
+
+    const newItem = editor.addChecklistItem();
+
+    expect(editor.currentNote.checklistItems.length).toBe(4);
+    expect(newItem).toMatchObject({ text: '', isChecked: false });
+    const sorted = editor.sortChecklistItems(editor.currentNote.checklistItems, 'UNCHECKED_FIRST');
+    expect(sorted[2]).toMatchObject({ text: '', isChecked: false });
+    expect(sorted[3]).toMatchObject({ text: 'Apple', isChecked: true });
   });
 
   it('appends to end when no checked items exist', () => {
