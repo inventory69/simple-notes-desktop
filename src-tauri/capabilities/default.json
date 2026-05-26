@@ -9,6 +9,12 @@
     "core:tray:default",
     "core:tray:allow-set-icon",
     "core:tray:allow-set-tooltip",
+    "core:window:allow-current-monitor",
+    "core:window:allow-set-size",
+    "core:window:allow-center",
+    "core:window:allow-outer-size",
+    "core:window:allow-inner-size",
+    "window-state:default",
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled"

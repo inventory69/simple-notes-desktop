@@ -1,3 +1,4 @@
+import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
 import { ConnectionDialog } from './components/ConnectionDialog.js';
 import { NoteEditor } from './components/NoteEditor.js';
 import { NotesList } from './components/NotesList.js';
@@ -34,6 +35,8 @@ class App {
   }
 
   async init() {
+    await this.clampWindowToMonitor();
+
     // Set up event listeners
     this.setupEventListeners();
 
@@ -48,6 +51,50 @@ class App {
 
     // Check for saved credentials and auto-connect
     await this.checkAutoConnect();
+  }
+
+  async clampWindowToMonitor() {
+    try {
+      // Kurz warten bis das Fenster vollständig gerendert ist, damit
+      // outerSize() die echte Größe inkl. Titelleiste zurückgibt.
+      await new Promise((r) => setTimeout(r, 200));
+
+      const win = getCurrentWindow();
+      const monitor = await win.currentMonitor();
+      if (!monitor) return;
+
+      const scale = monitor.scaleFactor;
+      const logScreenW = Math.floor(monitor.size.width / scale);
+      const logScreenH = Math.floor(monitor.size.height / scale);
+      if (logScreenW < 400 || logScreenH < 300) return;
+
+      const safeW = Math.floor(logScreenW * 0.92);
+      const safeH = Math.floor(logScreenH * 0.92);
+
+      // outerSize enthält Titelleiste/Ränder — nur das passt zum Monitor-Vergleich.
+      const outer = await win.outerSize();
+      const inner = await win.innerSize();
+      const logOuterW = Math.floor(outer.width / scale);
+      const logOuterH = Math.floor(outer.height / scale);
+      const logInnerW = Math.floor(inner.width / scale);
+      const logInnerH = Math.floor(inner.height / scale);
+
+      if (logOuterW <= safeW && logOuterH <= safeH) return;
+
+      // Dekorations-Overhead (Titelleiste, Ränder) berechnen
+      const decorW = Math.max(0, logOuterW - logInnerW);
+      const decorH = Math.max(0, logOuterH - logInnerH);
+
+      const newW = Math.max(600, Math.min(logInnerW, safeW - decorW));
+      const newH = Math.max(500, Math.min(logInnerH, safeH - decorH));
+
+      if (newW !== logInnerW || newH !== logInnerH) {
+        await win.setSize(new LogicalSize(newW, newH));
+        await win.center();
+      }
+    } catch (_e) {
+      // Fehler beim Fenstergröße-Clamp ignorieren
+    }
   }
 
   async detectDesktopEnvironment() {
