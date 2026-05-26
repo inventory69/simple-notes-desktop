@@ -682,6 +682,11 @@ export class NoteEditor {
     this.editorDiv.innerHTML = '';
     this.checklistContainer.innerHTML = '';
 
+    // Reset scroll positions before loading new content
+    this.checklistContainer.scrollTop = 0;
+    this.editorDiv.scrollTop = 0;
+    this.previewDiv.scrollTop = 0;
+
     // Reset undo stack for the new note
     this._undoStack.clear();
     if (this._undoPushTimer) {
