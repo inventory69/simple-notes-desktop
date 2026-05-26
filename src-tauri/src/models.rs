@@ -39,9 +39,14 @@ pub struct ChecklistItem {
     pub is_checked: bool,
     /// Sortierreihenfolge (0-basiert)
     pub order: i32,
+    /// Android v1.9.0 (F04): Ursprüngliche Sort-Position für MANUAL-Modus.
+    /// Wird gemeinsam mit `order` bei jedem strukturellen Eingriff (Add, Delete,
+    /// Drag-Drop) zementiert — identisches Verhalten zur Android-App.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_order: Option<i32>,
     /// Cross-App-Kompatibilität: alle Item-Felder, die die Desktop-App (noch)
-    /// nicht modelliert — Android schreibt z.B. `originalOrder`, `createdAt`,
-    /// `indentationLevel`, und künftige Felder kommen dazu. Werden 1:1 erhalten,
+    /// nicht modelliert — Android schreibt z.B. `createdAt`, `indentationLevel`,
+    /// und künftige Felder kommen dazu. Werden 1:1 erhalten,
     /// damit ein Speichern auf dem Desktop sie nicht aus dem Server-JSON entfernt.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
@@ -375,8 +380,8 @@ mod tests {
 
     #[test]
     fn test_checklist_item_preserves_android_fields() {
-        // Android-ChecklistItem-Felder: originalOrder (v1.9.0), createdAt (v1.11.0),
-        // indentationLevel (v2.5.0). Müssen erhalten bleiben.
+        // Android-ChecklistItem-Felder: originalOrder (v1.9.0 — jetzt benanntes Feld),
+        // createdAt (v1.11.0), indentationLevel (v2.5.0 — weiterhin in extra).
         let json = r#"{
             "id": "i1",
             "text": "milk",
@@ -388,10 +393,15 @@ mod tests {
         }"#;
 
         let item: ChecklistItem = serde_json::from_str(json).unwrap();
-        assert_eq!(
-            item.extra.get("originalOrder").and_then(|v| v.as_i64()),
-            Some(3)
+
+        // originalOrder landet jetzt im benannten Feld, nicht mehr in extra.
+        assert_eq!(item.original_order, Some(3));
+        assert!(
+            !item.extra.contains_key("originalOrder"),
+            "originalOrder darf nicht doppelt in extra stehen"
         );
+
+        // Übrige Android-Felder bleiben in extra.
         assert_eq!(
             item.extra.get("createdAt").and_then(|v| v.as_i64()),
             Some(1700000000000)
@@ -401,9 +411,22 @@ mod tests {
             Some(2)
         );
 
+        // Re-Serialisierung: originalOrder erscheint genau einmal im Output.
         let out = serde_json::to_value(&item).unwrap();
         assert_eq!(out["originalOrder"], 3);
         assert_eq!(out["createdAt"], 1700000000000i64);
         assert_eq!(out["indentationLevel"], 2);
+
+        // Kein wörtlicher "extra"-Key im Output.
+        assert!(!out.as_object().unwrap().contains_key("extra"));
+    }
+
+    #[test]
+    fn test_checklist_item_original_order_absent_when_none() {
+        // Neu erstelltes Item (kein originalOrder) → Feld fehlt im JSON-Output.
+        let item = ChecklistItem::new("task".to_string(), 2);
+        assert_eq!(item.original_order, None);
+        let out = serde_json::to_value(&item).unwrap();
+        assert!(!out.as_object().unwrap().contains_key("originalOrder"));
     }
 }

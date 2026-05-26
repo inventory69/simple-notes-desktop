@@ -220,17 +220,44 @@ export class NoteEditor {
           return a.order - b.order;
         });
         break;
-      default:
-        // MANUAL: keep user-defined order within each group, but always
-        // put unchecked items above checked items so the separator is correct.
-        sorted.sort((a, b) => {
-          if (a.isChecked !== b.isChecked) return a.isChecked ? 1 : -1;
-          return a.order - b.order;
-        });
-        break;
+      default: {
+        // Android-Parität (ChecklistSorter.kt): unchecked vor checked, innerhalb jeder
+        // Gruppe nach originalOrder sortiert (zementierte Drag-Drop-Position). Falls das
+        // Feld fehlt (Pre-F04-Notiz), fällt order als Fallback ein.
+        const unchecked = sorted
+          .filter((i) => !i.isChecked)
+          .sort((a, b) => (a.originalOrder ?? a.order) - (b.originalOrder ?? b.order));
+        const checked = sorted
+          .filter((i) => i.isChecked)
+          .sort((a, b) => (a.originalOrder ?? a.order) - (b.originalOrder ?? b.order));
+        return [...unchecked, ...checked];
+      }
     }
 
     return sorted;
+  }
+
+  // Android-Parität: order und originalOrder nach jeder strukturellen Änderung synchron halten.
+  _renumberOrders() {
+    this.currentNote.checklistItems.forEach((item, i) => {
+      item.order = i;
+      item.originalOrder = i;
+    });
+  }
+
+  // Einmalige Ableitung von originalOrder aus order für Notizen, die vor Android-F04 (v1.9.0)
+  // erstellt wurden und das Feld noch nicht kennen. Kein Speichern — nur In-Memory-Fix.
+  _fixPreF04Orders() {
+    const items = this.currentNote?.checklistItems;
+    if (!items || items.length === 0) return;
+    const isPreF04 = items.every((item) => item.originalOrder == null || item.originalOrder === 0);
+    if (isPreF04) {
+      items.forEach((item) => {
+        if (item.originalOrder == null) {
+          item.originalOrder = item.order;
+        }
+      });
+    }
   }
 
   // F2: Render separator between checked/unchecked groups
@@ -321,10 +348,7 @@ export class NoteEditor {
             if (this.currentNote.checklistItems[idx].text.trim() !== '') return;
             this._pushSnapshot();
             this.currentNote.checklistItems.splice(idx, 1);
-            // Order-Felder neu berechnen
-            this.currentNote.checklistItems.forEach((itm, i) => {
-              itm.order = i;
-            });
+            this._renumberOrders();
             this._pushSnapshot();
             this.renderChecklist();
             this.scheduleSave();
@@ -343,10 +367,7 @@ export class NoteEditor {
             order: originalIndex + 1,
           };
           this.currentNote.checklistItems.splice(originalIndex + 1, 0, newItem);
-          // Normalize order fields sequentially after insert
-          this.currentNote.checklistItems.forEach((item, i) => {
-            item.order = i;
-          });
+          this._renumberOrders();
           this._pushSnapshot();
           this.renderChecklist();
           this.scheduleSave();
@@ -361,10 +382,7 @@ export class NoteEditor {
       deleteBtn.addEventListener('click', () => {
         this._pushSnapshot();
         this.currentNote.checklistItems.splice(originalIndex, 1);
-        // Recalculate order
-        this.currentNote.checklistItems.forEach((item, i) => {
-          item.order = i;
-        });
+        this._renumberOrders();
         this._pushSnapshot();
         this.renderChecklist();
         this.scheduleSave();
@@ -395,10 +413,7 @@ export class NoteEditor {
           order: this.currentNote.checklistItems.length,
         };
         this.currentNote.checklistItems.push(newItem);
-        // Normalize order fields sequentially after add
-        this.currentNote.checklistItems.forEach((item, i) => {
-          item.order = i;
-        });
+        this._renumberOrders();
         this._pushSnapshot();
         this.renderChecklist();
         this.scheduleSave();
@@ -535,11 +550,7 @@ export class NoteEditor {
 
               const insertIdx = this.currentNote.checklistItems.findIndex((i) => i.id === targetItem.id);
               this.currentNote.checklistItems.splice(currentIndex > dragIndex ? insertIdx + 1 : insertIdx, 0, moved);
-
-              // Recalculate order
-              this.currentNote.checklistItems.forEach((item, i) => {
-                item.order = i;
-              });
+              this._renumberOrders();
 
               // Switch to MANUAL sort if re-ordering manually
               this.currentNote.checklistSortOption = 'MANUAL';
@@ -686,6 +697,7 @@ export class NoteEditor {
       this.previewToggleBtn.classList.add('hidden');
       this.checklistContainer.classList.remove('hidden');
       this.sortBtn.classList.remove('hidden'); // F2: Show sort button
+      this._fixPreF04Orders();
       this.renderChecklist();
       // Push initial snapshot so the first undo restores the loaded state
       this._pushSnapshot();
