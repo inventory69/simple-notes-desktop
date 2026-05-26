@@ -285,7 +285,17 @@ export class NoteEditor {
     const el = this.checklistContainer.querySelector(
       `.checklist-item[data-item-id="${newItem.id}"] .checklist-item-text`,
     );
-    el?.focus();
+    if (el) {
+      el.focus();
+      requestAnimationFrame(() => {
+        const item = el.closest('.checklist-item');
+        if (!item) return;
+        const containerRect = this.checklistContainer.getBoundingClientRect();
+        const itemRect = item.getBoundingClientRect();
+        const gap = containerRect.bottom - itemRect.bottom;
+        if (gap < 48) this.checklistContainer.scrollTop += 48 - gap;
+      });
+    }
     return newItem;
   }
 
