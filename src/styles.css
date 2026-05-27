@@ -1304,6 +1304,12 @@ body {
   font-weight: 500;
 }
 
+.sort-menu-separator {
+  height: 1px;
+  background-color: var(--color-border);
+  margin: 0.25rem 0;
+}
+
 /* F3: Leere Checklist-Items visuell kennzeichnen */
 .checklist-item-empty {
   opacity: 0.5;

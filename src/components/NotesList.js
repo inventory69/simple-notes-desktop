@@ -22,6 +22,7 @@ export class NotesList {
 
     // Sortierung: persistiert in localStorage
     this.sortOption = localStorage.getItem('noteListSortOption') || 'UPDATED_AT';
+    this.sortDirection = localStorage.getItem('noteListSortDirection') || 'DESC';
     this._sortMenuCloseHandler = null;
 
     this.init();
@@ -273,24 +274,29 @@ export class NotesList {
   applySortOption(notes) {
     const pinned = notes.filter((n) => n.isPinned);
     const rest = notes.filter((n) => !n.isPinned);
+    const asc = this.sortDirection === 'ASC';
 
     switch (this.sortOption) {
       case 'CREATED_AT':
-        rest.sort((a, b) => b.createdAt - a.createdAt);
+        rest.sort((a, b) => (asc ? a.createdAt - b.createdAt : b.createdAt - a.createdAt));
         break;
       case 'TITLE':
-        rest.sort((a, b) => a.title.localeCompare(b.title));
+        rest.sort((a, b) => {
+          const cmp = a.title.localeCompare(b.title);
+          return asc ? cmp : -cmp;
+        });
         break;
       case 'NOTE_TYPE':
-        // Text (0) vor Checklist (1); innerhalb gleichen Typs nach updatedAt desc
+        // ASC: Text (0) vor Checklist (1); sekundär immer updatedAt desc
         rest.sort((a, b) => {
           const ta = a.noteType === 'TEXT' ? 0 : 1;
           const tb = b.noteType === 'TEXT' ? 0 : 1;
-          return ta !== tb ? ta - tb : b.updatedAt - a.updatedAt;
+          if (ta !== tb) return asc ? ta - tb : tb - ta;
+          return b.updatedAt - a.updatedAt;
         });
         break;
       case 'COLOR': {
-        // Palettenreihenfolge aus NOTE_COLORS; farblose Notizen ans Ende
+        // ASC: Palettenreihenfolge (Red→Gray→farblos); sekundär immer updatedAt desc
         const colorIdx = (hex) => {
           if (!hex) return NOTE_COLORS.length;
           const i = NOTE_COLORS.findIndex((c) => c.light.toLowerCase() === hex.toLowerCase());
@@ -298,12 +304,13 @@ export class NotesList {
         };
         rest.sort((a, b) => {
           const diff = colorIdx(a.color) - colorIdx(b.color);
-          return diff !== 0 ? diff : b.updatedAt - a.updatedAt;
+          if (diff !== 0) return asc ? diff : -diff;
+          return b.updatedAt - a.updatedAt;
         });
         break;
       }
       default: // UPDATED_AT
-        rest.sort((a, b) => b.updatedAt - a.updatedAt);
+        rest.sort((a, b) => (asc ? a.updatedAt - b.updatedAt : b.updatedAt - a.updatedAt));
     }
 
     return [...pinned, ...rest];
@@ -324,13 +331,28 @@ export class NotesList {
 
     const menu = document.createElement('div');
     menu.className = 'sort-menu list-sort-menu';
-    menu.innerHTML = NotesList.SORT_OPTIONS.map(
-      (opt) => `
+    const dirOptions = [
+      { value: 'DESC', label: '↓ Descending' },
+      { value: 'ASC', label: '↑ Ascending' },
+    ];
+    menu.innerHTML =
+      NotesList.SORT_OPTIONS.map(
+        (opt) => `
         <div class="sort-menu-item ${opt.value === this.sortOption ? 'active' : ''}" data-value="${opt.value}">
           ${opt.value === this.sortOption ? '● ' : '○ '}${opt.label}
         </div>
       `,
-    ).join('');
+      ).join('') +
+      '<div class="sort-menu-separator"></div>' +
+      dirOptions
+        .map(
+          (d) => `
+        <div class="sort-menu-item ${d.value === this.sortDirection ? 'active' : ''}" data-direction="${d.value}">
+          ${d.value === this.sortDirection ? '● ' : '○ '}${d.label}
+        </div>
+      `,
+        )
+        .join('');
 
     // Unterhalb des Sort-Buttons positionieren
     const rect = this.sortBtn.getBoundingClientRect();
@@ -343,8 +365,13 @@ export class NotesList {
     menu.addEventListener('click', (e) => {
       const item = e.target.closest('.sort-menu-item');
       if (!item) return;
-      this.sortOption = item.dataset.value;
-      localStorage.setItem('noteListSortOption', this.sortOption);
+      if (item.dataset.direction) {
+        this.sortDirection = item.dataset.direction;
+        localStorage.setItem('noteListSortDirection', this.sortDirection);
+      } else {
+        this.sortOption = item.dataset.value;
+        localStorage.setItem('noteListSortOption', this.sortOption);
+      }
       this._updateSortBtnState();
       this.render(this.searchInput.value);
       menu.remove();
@@ -366,9 +393,11 @@ export class NotesList {
   }
 
   _updateSortBtnState() {
-    this.sortBtn.classList.toggle('active', this.sortOption !== 'UPDATED_AT');
+    const isDefault = this.sortOption === 'UPDATED_AT' && this.sortDirection === 'DESC';
+    this.sortBtn.classList.toggle('active', !isDefault);
     const label = NotesList.SORT_OPTIONS.find((o) => o.value === this.sortOption)?.label ?? 'Last modified';
-    this.sortBtn.title = `Sort: ${label}`;
+    const dirLabel = this.sortDirection === 'ASC' ? '↑' : '↓';
+    this.sortBtn.title = `Sort: ${label} ${dirLabel}`;
   }
 
   renderNoteItem(note) {
