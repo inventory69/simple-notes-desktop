@@ -1,7 +1,7 @@
 import { dialogService } from '../services/DialogService.js';
 import noteService from '../services/noteService.js';
 import { colorPicker } from '../utils/ColorPicker.js';
-import { getColorPair } from '../utils/noteColors.js';
+import { getColorPair, NOTE_COLORS } from '../utils/noteColors.js';
 
 /**
  * Notes List Component with Multi-Select support (F6)
@@ -10,6 +10,7 @@ export class NotesList {
   constructor() {
     this.container = document.getElementById('notes-list');
     this.searchInput = document.getElementById('search-input');
+    this.sortBtn = document.getElementById('list-sort-btn');
     this.selectedId = null;
     this.onSelectCallback = null;
 
@@ -18,6 +19,10 @@ export class NotesList {
     this.selectedIds = new Set();
     this.lastSelectedId = null;
     this.onSelectionChangeCallback = null;
+
+    // Sortierung: persistiert in localStorage
+    this.sortOption = localStorage.getItem('noteListSortOption') || 'UPDATED_AT';
+    this._sortMenuCloseHandler = null;
 
     this.init();
   }
@@ -30,6 +35,10 @@ export class NotesList {
     this.searchInput.addEventListener('input', (e) => {
       this.render(e.target.value);
     });
+
+    // Sort button
+    this.sortBtn.addEventListener('click', () => this.showSortMenu());
+    this._updateSortBtnState();
 
     // F6: Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
@@ -84,7 +93,8 @@ export class NotesList {
       return;
     }
 
-    const notes = this.searchInput.value ? noteService.searchNotes(this.searchInput.value) : noteService.getNotes();
+    const rawNotes = this.searchInput.value ? noteService.searchNotes(this.searchInput.value) : noteService.getNotes();
+    const notes = this.applySortOption(rawNotes);
 
     const lastIndex = notes.findIndex((n) => n.id === this.lastSelectedId);
     const targetIndex = notes.findIndex((n) => n.id === targetId);
@@ -173,7 +183,8 @@ export class NotesList {
   }
 
   render(searchQuery = '') {
-    const notes = searchQuery ? noteService.searchNotes(searchQuery) : noteService.getNotes();
+    const rawNotes = searchQuery ? noteService.searchNotes(searchQuery) : noteService.getNotes();
+    const notes = this.applySortOption(rawNotes);
 
     if (notes.length === 0) {
       this.container.innerHTML = '<div style="padding: 1rem; text-align: center; color: #999;">No notes found</div>';
@@ -246,6 +257,118 @@ export class NotesList {
         }
       });
     });
+  }
+
+  // Sortieroptionen für die Notizliste (Android-Parität)
+  static get SORT_OPTIONS() {
+    return [
+      { value: 'UPDATED_AT', label: 'Last modified' },
+      { value: 'CREATED_AT', label: 'Last created' },
+      { value: 'TITLE', label: 'Alphabetical (A→Z)' },
+      { value: 'NOTE_TYPE', label: 'By note type' },
+      { value: 'COLOR', label: 'By color' },
+    ];
+  }
+
+  applySortOption(notes) {
+    const pinned = notes.filter((n) => n.isPinned);
+    const rest = notes.filter((n) => !n.isPinned);
+
+    switch (this.sortOption) {
+      case 'CREATED_AT':
+        rest.sort((a, b) => b.createdAt - a.createdAt);
+        break;
+      case 'TITLE':
+        rest.sort((a, b) => a.title.localeCompare(b.title));
+        break;
+      case 'NOTE_TYPE':
+        // Text (0) vor Checklist (1); innerhalb gleichen Typs nach updatedAt desc
+        rest.sort((a, b) => {
+          const ta = a.noteType === 'TEXT' ? 0 : 1;
+          const tb = b.noteType === 'TEXT' ? 0 : 1;
+          return ta !== tb ? ta - tb : b.updatedAt - a.updatedAt;
+        });
+        break;
+      case 'COLOR': {
+        // Palettenreihenfolge aus NOTE_COLORS; farblose Notizen ans Ende
+        const colorIdx = (hex) => {
+          if (!hex) return NOTE_COLORS.length;
+          const i = NOTE_COLORS.findIndex((c) => c.light.toLowerCase() === hex.toLowerCase());
+          return i === -1 ? NOTE_COLORS.length : i;
+        };
+        rest.sort((a, b) => {
+          const diff = colorIdx(a.color) - colorIdx(b.color);
+          return diff !== 0 ? diff : b.updatedAt - a.updatedAt;
+        });
+        break;
+      }
+      default: // UPDATED_AT
+        rest.sort((a, b) => b.updatedAt - a.updatedAt);
+    }
+
+    return [...pinned, ...rest];
+  }
+
+  showSortMenu() {
+    // Stale outside-click Handler aus vorherigem Öffnen/Schließen-Zyklus entfernen
+    if (this._sortMenuCloseHandler) {
+      document.removeEventListener('click', this._sortMenuCloseHandler);
+      this._sortMenuCloseHandler = null;
+    }
+
+    const existing = document.querySelector('.list-sort-menu');
+    if (existing) {
+      existing.remove();
+      return;
+    }
+
+    const menu = document.createElement('div');
+    menu.className = 'sort-menu list-sort-menu';
+    menu.innerHTML = NotesList.SORT_OPTIONS.map(
+      (opt) => `
+        <div class="sort-menu-item ${opt.value === this.sortOption ? 'active' : ''}" data-value="${opt.value}">
+          ${opt.value === this.sortOption ? '● ' : '○ '}${opt.label}
+        </div>
+      `,
+    ).join('');
+
+    // Unterhalb des Sort-Buttons positionieren
+    const rect = this.sortBtn.getBoundingClientRect();
+    menu.style.position = 'fixed';
+    menu.style.top = `${rect.bottom + 4}px`;
+    menu.style.right = `${window.innerWidth - rect.right}px`;
+
+    document.body.appendChild(menu);
+
+    menu.addEventListener('click', (e) => {
+      const item = e.target.closest('.sort-menu-item');
+      if (!item) return;
+      this.sortOption = item.dataset.value;
+      localStorage.setItem('noteListSortOption', this.sortOption);
+      this._updateSortBtnState();
+      this.render(this.searchInput.value);
+      menu.remove();
+      if (this._sortMenuCloseHandler) {
+        document.removeEventListener('click', this._sortMenuCloseHandler);
+        this._sortMenuCloseHandler = null;
+      }
+    });
+
+    const closeHandler = (e) => {
+      if (!menu.contains(e.target) && e.target !== this.sortBtn) {
+        menu.remove();
+        document.removeEventListener('click', closeHandler);
+        this._sortMenuCloseHandler = null;
+      }
+    };
+    this._sortMenuCloseHandler = closeHandler;
+    setTimeout(() => document.addEventListener('click', closeHandler), 0);
+  }
+
+  _updateSortBtnState() {
+    this.sortBtn.classList.toggle('active', this.sortOption !== 'UPDATED_AT');
+    const label = NotesList.SORT_OPTIONS.find((o) => o.value === this.sortOption)?.label ?? 'Last modified';
+    this.sortBtn.title = `Sort: ${label}`;
   }
 
   renderNoteItem(note) {

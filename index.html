@@ -152,12 +152,21 @@
           <!-- Sidebar -->
           <div class="sidebar">
             <div class="search-container">
-              <input
-                type="text"
-                id="search-input"
-                class="search-input"
-                placeholder="Search notes..."
-              />
+              <div class="search-row">
+                <input
+                  type="text"
+                  id="search-input"
+                  class="search-input"
+                  placeholder="Search notes..."
+                />
+                <button id="list-sort-btn" class="btn-icon-small" title="Sort: Last modified" type="button">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="4" y1="6" x2="16" y2="6"/>
+                    <line x1="4" y1="12" x2="12" y2="12"/>
+                    <line x1="4" y1="18" x2="8" y2="18"/>
+                  </svg>
+                </button>
+              </div>
             </div>
             <div id="notes-list" class="notes-list"></div>
           </div>

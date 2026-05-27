@@ -172,6 +172,7 @@ pub struct NoteMetadata {
     pub id: String,
     pub title: String,
     pub content: String,
+    pub created_at: i64,
     pub updated_at: i64,
     pub note_type: NoteType,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -191,6 +192,7 @@ impl From<&Note> for NoteMetadata {
             id: note.id.clone(),
             title: note.title.clone(),
             content: note.content.clone(),
+            created_at: note.created_at,
             updated_at: note.updated_at,
             note_type: note.note_type,
             checklist_items: note.checklist_items.clone(),
@@ -325,6 +327,7 @@ mod tests {
 
         assert_eq!(meta.id, note.id);
         assert_eq!(meta.title, note.title);
+        assert_eq!(meta.created_at, note.created_at);
         assert_eq!(meta.updated_at, note.updated_at);
         assert_eq!(meta.note_type, note.note_type);
         assert_eq!(meta.is_pinned, note.is_pinned);
