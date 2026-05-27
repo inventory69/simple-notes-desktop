@@ -56,7 +56,9 @@ fn get_or_create_device_id(app: &AppHandle, state: &State<DeviceIdState>) -> Res
     let new_id = format!("tauri-{}", &uuid[..16]);
 
     store.set("device_id", serde_json::json!(new_id.clone()));
-    let _ = store.save();
+    store
+        .save()
+        .map_err(|e| AppError::StorageError(e.to_string()))?;
 
     *device_id_lock = Some(new_id.clone());
     Ok(new_id)

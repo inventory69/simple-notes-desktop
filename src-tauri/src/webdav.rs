@@ -37,10 +37,12 @@ impl WebDavClient {
         let auth_header = format!("Basic {}", STANDARD.encode(auth));
         let base_url = url.trim_end_matches('/').to_string();
 
-        // Sanitize sync folder: only allow alphanumeric, underscore, dash (Android parity)
+        // Sanitize sync folder: only allow ASCII alphanumeric, underscore, dash (Android parity).
+        // Must use is_ascii_alphanumeric() — is_alphanumeric() accepts Unicode letters which
+        // would produce a different path than the JS frontend's /[^a-zA-Z0-9_-]/g regex.
         let sanitized_folder = sync_folder
             .chars()
-            .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
             .collect::<String>();
         let sync_folder = if sanitized_folder.is_empty() {
             "notes".to_string()
@@ -358,6 +360,41 @@ fn sanitize_filename(title: &str, id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Helper: run the sync-folder sanitization logic extracted from WebDavClient::new
+    fn sanitize_sync_folder(input: &str) -> String {
+        let sanitized: String = input
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+            .collect();
+        if sanitized.is_empty() {
+            "notes".to_string()
+        } else {
+            sanitized.chars().take(50).collect()
+        }
+    }
+
+    #[test]
+    fn test_sanitize_sync_folder() {
+        // Normal cases
+        assert_eq!(sanitize_sync_folder("notes"), "notes");
+        assert_eq!(sanitize_sync_folder("my-notes"), "my-notes");
+        assert_eq!(sanitize_sync_folder("my_notes"), "my_notes");
+        assert_eq!(sanitize_sync_folder("Notes123"), "Notes123");
+        // Empty → default
+        assert_eq!(sanitize_sync_folder(""), "notes");
+        assert_eq!(sanitize_sync_folder("!!!"), "notes");
+        // Non-ASCII must be stripped (not passed through as Unicode alphanumeric)
+        assert_eq!(sanitize_sync_folder("café"), "caf");
+        assert_eq!(sanitize_sync_folder("Nötig"), "Ntig");
+        assert_eq!(sanitize_sync_folder("📝notes"), "notes");
+        // Spaces and slashes stripped
+        assert_eq!(sanitize_sync_folder("my notes"), "mynotes");
+        assert_eq!(sanitize_sync_folder("my/notes"), "mynotes");
+        // Max 50 chars enforced
+        let long = "a".repeat(60);
+        assert_eq!(sanitize_sync_folder(&long).len(), 50);
+    }
 
     #[test]
     fn test_sanitize_filename() {
