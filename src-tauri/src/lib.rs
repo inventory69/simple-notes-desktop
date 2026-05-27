@@ -104,7 +104,13 @@ async fn list_notes(state: State<'_, WebDavState>) -> Result<Vec<NoteMetadata>> 
         }
     }
 
-    notes.sort_by_key(|n| std::cmp::Reverse(n.updated_at));
+    notes.sort_by(|a, b| {
+        let a_pin = a.is_pinned.unwrap_or(false);
+        let b_pin = b.is_pinned.unwrap_or(false);
+        b_pin
+            .cmp(&a_pin)
+            .then_with(|| b.updated_at.cmp(&a.updated_at))
+    });
     Ok(notes)
 }
 
@@ -325,6 +331,31 @@ async fn update_tray_setting(enabled: bool, state: State<'_, TraySettings>) -> R
     Ok(())
 }
 
+/// Mehrere Notizen auf einmal an-/abpinnen
+#[tauri::command]
+async fn pin_notes(ids: Vec<String>, pinned: bool, state: State<'_, WebDavState>) -> Result<()> {
+    let client = {
+        let lock = lock_recover(&state.0);
+        lock.clone()
+    };
+    let client = client.ok_or(AppError::NotConnected)?;
+
+    for id in ids {
+        match client.get_note(&id).await {
+            Ok(mut note) => {
+                // None statt Some(false) beim Lösen — Android-kompatibel
+                note.is_pinned = if pinned { Some(true) } else { None };
+                note.updated_at = chrono::Utc::now().timestamp_millis();
+                if let Err(e) = client.save_note(&note).await {
+                    eprintln!("[pin_notes] save failed for {}: {}", id, e);
+                }
+            }
+            Err(e) => eprintln!("[pin_notes] get failed for {}: {}", id, e),
+        }
+    }
+    Ok(())
+}
+
 /// State to track minimize-to-tray setting at runtime
 struct TraySettings(Mutex<bool>);
 
@@ -523,6 +554,7 @@ pub fn run() {
             get_app_version,
             get_desktop_environment,
             update_tray_setting,
+            pin_notes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

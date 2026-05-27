@@ -654,6 +654,24 @@ body {
   background-color: color-mix(in srgb, var(--color-danger) 85%, black);
 }
 
+.btn-batch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.8rem;
+  border-radius: 4px;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-fg);
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.btn-batch:hover {
+  background: var(--color-hover);
+}
+
 /* Main Layout */
 .main-layout {
   flex: 1;
@@ -775,6 +793,27 @@ body {
   font-size: 0.75rem;
   color: #999;
   margin-top: 0.25rem;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.pin-icon {
+  display: inline-block;
+  vertical-align: middle;
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.notes-section-header {
+  padding: 0.35rem 0.75rem 0.2rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+  color: #999;
+  user-select: none;
 }
 
 /* F1: Note Type Icon in List */

@@ -125,3 +125,12 @@ export async function getDesktopEnvironment() {
 export async function updateTraySetting(enabled) {
   return await invoke('update_tray_setting', { enabled });
 }
+
+/**
+ * Pin or unpin multiple notes
+ * @param {string[]} ids - Array of note IDs
+ * @param {boolean} pinned - true = pin, false = unpin
+ */
+export async function pinNotes(ids, pinned) {
+  return await invoke('pin_notes', { ids, pinned });
+}

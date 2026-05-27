@@ -182,6 +182,17 @@ class NoteService {
   }
 
   /**
+   * Pin or unpin multiple notes
+   * @param {string[]} ids - Note IDs to update
+   * @param {boolean} pinned - true = pin, false = unpin
+   */
+  async pinNotes(ids, pinned) {
+    await tauri.pinNotes(ids, pinned);
+    await this.loadNotes();
+    this.notify();
+  }
+
+  /**
    * Search notes by query
    * @param {string} query - Search query
    */

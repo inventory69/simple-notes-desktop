@@ -109,6 +109,20 @@ export class NotesList {
     return Array.from(this.selectedIds);
   }
 
+  // F6: Pin/Unpin selected notes
+  async pinSelected(pinned) {
+    const count = this.selectedIds.size;
+    if (count === 0) return;
+    const ids = this.getSelectedIds();
+    try {
+      await noteService.pinNotes(ids, pinned);
+    } catch (e) {
+      console.error('[NotesList] pinSelected failed:', e);
+      await dialogService.error({ title: 'Pin Failed', message: e.message || 'Could not update notes.' });
+    }
+    this.exitSelectionMode();
+  }
+
   // F6: Delete selected notes (uses F4's confirmDeletion dialog)
   async deleteSelected() {
     const count = this.selectedIds.size;
@@ -148,7 +162,21 @@ export class NotesList {
       return;
     }
 
-    this.container.innerHTML = notes.map((note) => this.renderNoteItem(note)).join('');
+    // Abschnitts-Header "Pinned" / "Notes" wenn mindestens eine gepinnte Notiz vorhanden
+    const hasPinned = notes.some((n) => n.isPinned);
+    const html = [];
+    let normalHeaderInserted = false;
+    if (hasPinned) {
+      html.push('<div class="notes-section-header">Pinned</div>');
+    }
+    for (const note of notes) {
+      if (hasPinned && !note.isPinned && !normalHeaderInserted) {
+        html.push('<div class="notes-section-header">Notes</div>');
+        normalHeaderInserted = true;
+      }
+      html.push(this.renderNoteItem(note));
+    }
+    this.container.innerHTML = html.join('');
 
     // Add click handlers
     this.container.querySelectorAll('.note-item').forEach((item) => {
@@ -207,6 +235,12 @@ export class NotesList {
     const date = this.formatDate(note.updatedAt);
     const isActive = note.id === this.selectedId && !this.selectionMode;
     const isSelected = this.selectedIds.has(note.id);
+    const pinIcon = note.isPinned
+      ? `<svg class="pin-icon" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-label="Pinned">
+           <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/>
+           <line x1="12" y1="17" x2="12" y2="22" stroke="currentColor" stroke-width="2"/>
+         </svg>`
+      : '';
 
     let classes = 'note-item';
     if (isActive) classes += ' selected';
@@ -251,7 +285,7 @@ export class NotesList {
             <div class="note-item-title">${this.escapeHtml(note.title)}</div>
           </div>
           <div class="note-item-preview">${previewLines.map((line) => `<div class="preview-line">${this.escapeHtml(line)}</div>`).join('')}</div>
-          <div class="note-item-meta">${date}</div>
+          <div class="note-item-meta">${pinIcon}${date}</div>
         </div>
       </div>
     `;

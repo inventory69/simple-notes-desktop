@@ -166,13 +166,14 @@ mod tests {
         // and asserts that the hardcoded list and the struct fields are identical.
         // If you add a field to Settings, CI will catch the mismatch here before
         // it becomes a silent "new setting is never persisted" bug.
-        let actual_keys: std::collections::HashSet<String> = serde_json::to_value(Settings::default())
-            .unwrap()
-            .as_object()
-            .unwrap()
-            .keys()
-            .cloned()
-            .collect();
+        let actual_keys: std::collections::HashSet<String> =
+            serde_json::to_value(Settings::default())
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .keys()
+                .cloned()
+                .collect();
 
         let hardcoded_keys: std::collections::HashSet<String> = [
             "theme",
@@ -186,7 +187,8 @@ mod tests {
         .collect();
 
         assert_eq!(
-            actual_keys, hardcoded_keys,
+            actual_keys,
+            hardcoded_keys,
             "get_settings() key list in lib.rs is out of sync with the Settings struct fields.\n\
              In actual but not hardcoded: {:?}\n\
              In hardcoded but not actual: {:?}",

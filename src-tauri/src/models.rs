@@ -52,7 +52,6 @@ pub struct ChecklistItem {
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
-
 /// Eine Notiz
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -179,6 +178,8 @@ pub struct NoteMetadata {
     pub checklist_items: Option<Vec<ChecklistItem>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checklist_sort_option: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_pinned: Option<bool>,
 }
 
 impl From<&Note> for NoteMetadata {
@@ -191,7 +192,53 @@ impl From<&Note> for NoteMetadata {
             note_type: note.note_type,
             checklist_items: note.checklist_items.clone(),
             checklist_sort_option: note.checklist_sort_option.clone(),
+            is_pinned: note.is_pinned,
         }
+    }
+}
+
+/// Test-Hilfsmethoden — werden nur beim Compilieren von Tests eingebunden.
+/// Die ursprünglichen Produktions-Implementierungen wurden im "remove dead code"-
+/// Refactor entfernt; die Tests brauchen sie aber weiterhin.
+#[cfg(test)]
+impl ChecklistItem {
+    pub fn new(text: String, order: i32) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            text,
+            is_checked: false,
+            order,
+            original_order: None,
+            extra: serde_json::Map::new(),
+        }
+    }
+}
+
+#[cfg(test)]
+impl Note {
+    /// Setzt updated_at auf jetzt (nur für Tests)
+    pub fn touch(&mut self) {
+        self.updated_at = chrono::Utc::now().timestamp_millis();
+    }
+
+    /// Erzeugt den Checklist-Fallback-String `[ ] text` / `[x] text` (nur für Tests)
+    pub fn generate_checklist_fallback(&self) -> String {
+        let Some(items) = &self.checklist_items else {
+            return String::new();
+        };
+        let mut sorted = items.clone();
+        sorted.sort_by_key(|i| i.order);
+        sorted
+            .iter()
+            .map(|i| {
+                if i.is_checked {
+                    format!("[x] {}", i.text)
+                } else {
+                    format!("[ ] {}", i.text)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }
 
@@ -276,6 +323,21 @@ mod tests {
         assert_eq!(meta.title, note.title);
         assert_eq!(meta.updated_at, note.updated_at);
         assert_eq!(meta.note_type, note.note_type);
+        assert_eq!(meta.is_pinned, note.is_pinned);
+    }
+
+    #[test]
+    fn test_note_metadata_from_pinned_note() {
+        let mut note = Note::new("Pinned".to_string(), "tauri-abc".to_string());
+        note.is_pinned = Some(true);
+        let meta: NoteMetadata = (&note).into();
+
+        assert_eq!(meta.is_pinned, Some(true));
+
+        // Unpinned note → None (kein isPinned im JSON-Output)
+        let note2 = Note::new("Normal".to_string(), "tauri-abc".to_string());
+        let meta2: NoteMetadata = (&note2).into();
+        assert_eq!(meta2.is_pinned, None);
     }
 
     // ── Cross-App-Kompatibilität: Felder-Erhaltung beim JSON-Round-Trip ──────────
