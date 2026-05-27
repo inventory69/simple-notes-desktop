@@ -617,6 +617,12 @@ export class NoteEditor {
 
   // F2: Show sort option menu
   showSortMenu() {
+    // Remove any stale outside-click handler from a previous open/close cycle
+    if (this._sortMenuCloseHandler) {
+      document.removeEventListener('click', this._sortMenuCloseHandler);
+      this._sortMenuCloseHandler = null;
+    }
+
     const existing = document.querySelector('.sort-menu');
     if (existing) {
       existing.remove();
@@ -664,13 +670,16 @@ export class NoteEditor {
       menu.remove();
     });
 
-    // Close on outside click
+    // Close on outside click — store handler on the instance so it can be
+    // cleaned up if showSortMenu() is called again before it fires naturally.
     const closeHandler = (e) => {
       if (!menu.contains(e.target) && e.target !== this.sortBtn) {
         menu.remove();
         document.removeEventListener('click', closeHandler);
+        this._sortMenuCloseHandler = null;
       }
     };
+    this._sortMenuCloseHandler = closeHandler;
     setTimeout(() => document.addEventListener('click', closeHandler), 0);
   }
 
@@ -892,8 +901,12 @@ export class NoteEditor {
   saveNoteImmediate(noteToSave) {
     noteService.saveNote(this._sanitizeForSave(noteToSave)).catch((err) => {
       console.error('[NoteEditor] Background save failed:', err);
-      // Show on whichever note is currently open so the user is not left uninformed
-      this.updateSyncStatus('Save error');
+      // Only update the status indicator if the user is still viewing the same note.
+      // If the note was switched before the response arrived, do NOT clobber the new
+      // note's status with an error that belongs to the previous one.
+      if (this.currentNote?.id === noteToSave.id) {
+        this.updateSyncStatus('Save error');
+      }
     });
   }
 
