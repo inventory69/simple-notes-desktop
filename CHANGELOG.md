@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-05-27
+
+### Added
+
+- Pinned notes — pinned notes always stay at the top of the list; sidebar shows "Pinned" / "Notes" section headers when any note is pinned; pin icon in the note meta line; batch Pin/Unpin buttons in the multi-select action bar (Android parity)
+  - Backend: new `pin_notes` command sets `isPinned = Some(true)` or `None` (not `false` — Android-compatible); `NoteMetadata` carries `is_pinned` so the sidebar renders the icon without a full GET
+
+- Note color picker — 11-color Keep-compatible palette matching Android v2.5.0; color swatch shown in the sidebar item; picker popup in the editor header; batch color change via Multi-Select
+  - New `color_notes` backend command; `NoteMetadata` carries `color` for sidebar rendering
+  - New `src/utils/ColorPicker.js` singleton popup; `src/utils/noteColors.js` palette with light/dark variants
+
+- Note list sort selector — five sort modes matching Android: Last modified, Last created, Alphabetical A→Z, By note type, By color; plus Ascending/Descending direction toggle; preference persisted in `localStorage`
+  - Sort button turns blue when a non-default option or direction is active; tooltip shows current sort + direction
+  - `NoteMetadata` gains `created_at` field to support Last created sort without a full GET
+
+- Checklist: Ctrl+Enter and a `+` button in the editor header as additional ways to add a new item (Android parity); bottom "+ Add Item" button delegates to the same `addChecklistItem()` method
+
+### Fixed
+
+- Checklist `MANUAL` sort now uses `originalOrder` for Android-parity — item order no longer drifts between apps after drag-drop or insert
+  - `ChecklistItem` gains a first-class `original_order: Option<i32>` field (promoted out of the `extra` catch-all)
+  - `_renumberOrders()` cements `order = originalOrder = i` after every structural change; `_fixPreF04Orders()` derives `originalOrder` on load for pre-v1.9.0 notes without the field (no save triggered)
+
+- Window clamped to monitor bounds on first start so it never opens partially off-screen on multi-monitor or lower-resolution setups; window size persisted across restarts via `tauri-plugin-window-state`
+  - Previous clamp ran in Rust before the Wayland surface was mapped (`outer_size()` returned 0×0); new JS clamp runs after DOM load with a 200 ms delay and accounts for OS titlebar height
+
+- OS color-scheme changes now update the system theme live — no restart required when the system switches light/dark
+  - `applyTheme('system')` now holds a persistent `MediaQueryList` and listens for `change` events
+
+- Empty checklist items no longer reach the server on any save path (autosave timer, Ctrl+S, note-switch flush)
+  - `_sanitizeForSave()` returns a cleaned shallow copy without mutating the note (keeps Undo snapshots intact)
+  - Previous gap: `saveNoteImmediate()` had no empty-item guard; switching notes within the autosave debounce window could flush a blank item
+
+- Per-note save queue prevents out-of-order writes — concurrent `saveNote()` calls for the same note now execute in submission order; saves for different notes still run concurrently
+
+- Sort menu click-handler leak fixed — rapid open/close cycles no longer leave a stale `document` listener that consumes unrelated clicks
+
+- Checklist blur timer guarded against note-switch — the 200 ms blur `setTimeout` now captures the note ID and item ID and bails if either changed before it fires; checkbox toggle skips `renderChecklist()` on MANUAL sort (preserves keyboard focus and scroll position)
+
+- Stale save status no longer shown on the wrong note — `saveNoteImmediate()` now checks the active note ID before updating the sync-status indicator, so a late response from a previous note no longer flashes "Save error" on the newly opened note
+
+- New checklist item always inserted as the last unchecked entry, not at array index 0 — a checked item at index 0 previously caused the new item to appear second after re-render
+
+- Scroll position reset to top when switching notes — switching from a scrolled note no longer leaves the new note's editor/checklist/preview container scrolled to a mid-point
+
+- Scroll buffer added when appending checklist items — new item is nudged 48 px into view so it doesn't sit flush against the viewport bottom edge
+
+- Sync folder sanitization is now ASCII-only (matching the JS frontend regex) — Unicode letters such as é, ö were previously accepted by Rust but rejected by JS, silently producing mismatched server paths; `c.is_ascii_alphanumeric()` is now used on both sides
+
+- Empty note title falls back to `untitled-{id[:8]}` for Markdown export; Markdown `PUT` errors propagated to the caller instead of only logged
+
+- Failed note loads in `list_notes` logged to stderr instead of silently skipped — a single unreachable note no longer disappears from the list without any trace in app logs
+
+- Poisoned Rust mutexes recovered gracefully — `lock_recover()` extracts the inner value instead of panicking; a panic while holding `WebDavState`/`DeviceIdState`/`TraySettings` no longer permanently breaks the affected lock
+
+- Note list re-sorted in local cache immediately after save — color or pin changes are reflected without waiting for the next full sync
+
+- Checklist item delete button always visible (raised resting opacity from 0 to 0.5; larger click target)
+
+- Background save errors now shown in the sync-status line — `saveNoteImmediate()` previously only logged failures to the console
+
+### Technical
+
+- `save_settings` keys auto-derived from the `Settings` struct via `serde_json` serialization loop — adding a new field no longer requires a matching manual `store.set()` call; new `test_get_settings_keys_match_settings_struct` CI test catches struct/key drift
+- Dead checklist/note helper methods removed from `models.rs`; PROPFIND and MKCOL as module-level `LazyLock` statics in `webdav.rs` (eliminates repeated `Method::from_bytes().unwrap()`)
+- CI release body now shows only section headers and top-level bullets; sub-bullets and `**bold**` markers stripped by the awk/sed extractor
+
 ## [0.5.0] - 2026-05-23
 
 ### Fixed
