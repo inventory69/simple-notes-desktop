@@ -626,9 +626,58 @@ pub fn run() {
                 // titlebars on Wayland, even under KDE Plasma.
                 #[cfg(target_os = "linux")]
                 {
-                    use gtk::prelude::GtkWindowExt;
+                    use gtk::prelude::{GtkWindowExt, WidgetExt};
                     if let Ok(gtk_window) = window.gtk_window() {
                         gtk_window.set_titlebar(Option::<&gtk::Widget>::None);
+
+                        // Bug 2 Fix: Wayland-Taskleiste zeigt generisches Icon statt App-Icon.
+                        // Tauri setzt die GTK-GApplication-ID auf den Identifier
+                        // "com.inventory69.simple-notes-desktop", der direkt als Wayland
+                        // xdg_toplevel app_id landet. KDE sucht dann nach
+                        // "com.inventory69.simple-notes-desktop.desktop", installiert ist
+                        // aber "simple-notes-desktop.desktop" → kein Match → falsches Icon.
+                        // gdk_wayland_window_set_application_id() (GTK ≥ 3.24.22) setzt die
+                        // app_id direkt am GDK-Surface und hat Vorrang vor der GApplication-ID.
+                        // Beide Pfade: Fenster bereits realized (GTK-Warning oben) oder noch nicht.
+                        if std::env::var("WAYLAND_DISPLAY").is_ok() {
+                            extern "C" {
+                                fn gdk_wayland_window_set_application_id(
+                                    window: *mut std::ffi::c_void,
+                                    application_id: *const std::ffi::c_char,
+                                );
+                            }
+
+                            // Fenster ist beim Tauri-Setup bereits realized → direkt anwenden.
+                            if let Some(gdk_win) = gtk_window.window() {
+                                use glib::translate::ToGlibPtr;
+                                let app_id =
+                                    std::ffi::CString::new("simple-notes-desktop").unwrap();
+                                let raw: *mut gtk::gdk::ffi::GdkWindow = gdk_win.to_glib_none().0;
+                                unsafe {
+                                    gdk_wayland_window_set_application_id(
+                                        raw as *mut std::ffi::c_void,
+                                        app_id.as_ptr(),
+                                    );
+                                }
+                            } else {
+                                // Fallback: noch nicht realized – beim Realize-Signal anwenden.
+                                gtk_window.connect_realize(|w| {
+                                    use glib::translate::ToGlibPtr;
+                                    if let Some(gdk_win) = w.window() {
+                                        let app_id =
+                                            std::ffi::CString::new("simple-notes-desktop").unwrap();
+                                        let raw: *mut gtk::gdk::ffi::GdkWindow =
+                                            gdk_win.to_glib_none().0;
+                                        unsafe {
+                                            gdk_wayland_window_set_application_id(
+                                                raw as *mut std::ffi::c_void,
+                                                app_id.as_ptr(),
+                                            );
+                                        }
+                                    }
+                                });
+                            }
+                        }
                     }
                 }
             }

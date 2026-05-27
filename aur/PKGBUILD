@@ -30,6 +30,15 @@ package() {
   find "${pkgdir}" -type f -exec chmod 644 {} +
   chmod 755 "${pkgdir}/usr/bin/simple-notes-desktop"
 
+  # Tauri benennt die .desktop-Datei nach productName ("Simple Notes Desktop.desktop"
+  # mit Leerzeichen). Wayland-Compositors (KDE) matchen Fenster über die xdg_toplevel
+  # app_id gegen den Dateinamen ohne .desktop – Leerzeichen im Dateinamen verhindern
+  # das Matching. Umbenennen auf die freedesktop-konforme Form (Binary-Name).
+  if [[ -f "${pkgdir}/usr/share/applications/Simple Notes Desktop.desktop" ]]; then
+    mv "${pkgdir}/usr/share/applications/Simple Notes Desktop.desktop" \
+       "${pkgdir}/usr/share/applications/simple-notes-desktop.desktop"
+  fi
+
   # Install license
   install -Dm644 /dev/null "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
 }

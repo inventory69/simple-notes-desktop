@@ -6,6 +6,6 @@ Icon=simple-notes-desktop
 Name=Simple Notes Desktop
 Terminal=false
 Type=Application
-StartupWMClass=Simple Notes Desktop
+StartupWMClass=simple-notes-desktop
 MimeType=text/plain;text/markdown;
 Keywords=notes;notizen;text;editor;checklist;sync;webdav;
