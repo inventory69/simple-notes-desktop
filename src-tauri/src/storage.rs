@@ -160,6 +160,42 @@ mod tests {
     }
 
     #[test]
+    fn test_get_settings_keys_match_settings_struct() {
+        // get_settings() in lib.rs reads a hardcoded list of store keys and must
+        // cover every field in Settings. This test serializes Settings::default()
+        // and asserts that the hardcoded list and the struct fields are identical.
+        // If you add a field to Settings, CI will catch the mismatch here before
+        // it becomes a silent "new setting is never persisted" bug.
+        let actual_keys: std::collections::HashSet<String> = serde_json::to_value(Settings::default())
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
+
+        let hardcoded_keys: std::collections::HashSet<String> = [
+            "theme",
+            "autosave",
+            "minimize_to_tray",
+            "autostart",
+            "sync_folder",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+        assert_eq!(
+            actual_keys, hardcoded_keys,
+            "get_settings() key list in lib.rs is out of sync with the Settings struct fields.\n\
+             In actual but not hardcoded: {:?}\n\
+             In hardcoded but not actual: {:?}",
+            actual_keys.difference(&hardcoded_keys).collect::<Vec<_>>(),
+            hardcoded_keys.difference(&actual_keys).collect::<Vec<_>>(),
+        );
+    }
+
+    #[test]
     fn test_settings_debug_format() {
         let settings = Settings::default();
         let debug = format!("{:?}", settings);

@@ -14,6 +14,13 @@ static UUID_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     .expect("UUID pattern is valid")
 });
 
+/// PROPFIND and MKCOL are not in reqwest's built-in Method constants — define them once here
+/// rather than calling from_bytes().unwrap() at every call site.
+static PROPFIND: LazyLock<Method> =
+    LazyLock::new(|| Method::from_bytes(b"PROPFIND").expect("PROPFIND is a valid HTTP method"));
+static MKCOL: LazyLock<Method> =
+    LazyLock::new(|| Method::from_bytes(b"MKCOL").expect("MKCOL is a valid HTTP method"));
+
 #[derive(Clone)]
 /// WebDAV Client für Server-Kommunikation
 pub struct WebDavClient {
@@ -64,7 +71,7 @@ impl WebDavClient {
 
         let response = self
             .client
-            .request(Method::from_bytes(b"PROPFIND").unwrap(), &url)
+            .request(PROPFIND.clone(), &url)
             .header("Authorization", &self.auth_header)
             .header("Depth", "0")
             .send()
@@ -90,7 +97,7 @@ impl WebDavClient {
         let notes_url = format!("{}/{}/", self.base_url, self.sync_folder);
         let _ = self
             .client
-            .request(Method::from_bytes(b"MKCOL").unwrap(), &notes_url)
+            .request(MKCOL.clone(), &notes_url)
             .header("Authorization", &self.auth_header)
             .send()
             .await;
@@ -98,7 +105,7 @@ impl WebDavClient {
         let notes_md_url = format!("{}/{}-md/", self.base_url, self.sync_folder);
         let _ = self
             .client
-            .request(Method::from_bytes(b"MKCOL").unwrap(), &notes_md_url)
+            .request(MKCOL.clone(), &notes_md_url)
             .header("Authorization", &self.auth_header)
             .send()
             .await;
@@ -123,7 +130,7 @@ impl WebDavClient {
 
         let response = self
             .client
-            .request(Method::from_bytes(b"PROPFIND").unwrap(), &url)
+            .request(PROPFIND.clone(), &url)
             .header("Authorization", &self.auth_header)
             .header("Depth", "1")
             .header("Content-Type", "application/xml")

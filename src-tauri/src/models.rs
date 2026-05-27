@@ -52,19 +52,6 @@ pub struct ChecklistItem {
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
-impl ChecklistItem {
-    /// Erstellt ein neues Checklist-Item
-    #[allow(dead_code)]
-    pub fn new(text: String, order: i32) -> Self {
-        Self {
-            id: Uuid::new_v4().to_string(),
-            text,
-            is_checked: false,
-            order,
-            ..Default::default()
-        }
-    }
-}
 
 /// Eine Notiz
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -160,32 +147,6 @@ impl Note {
         note.checklist_items = Some(Vec::new());
         note.checklist_sort_option = Some("UNCHECKED_FIRST".to_string());
         note
-    }
-
-    /// Aktualisiert den Timestamp auf jetzt
-    #[allow(dead_code)]
-    pub fn touch(&mut self) {
-        self.updated_at = chrono::Utc::now().timestamp_millis();
-    }
-
-    /// Generiert Fallback-Content aus Checklist-Items
-    #[allow(dead_code)]
-    pub fn generate_checklist_fallback(&self) -> String {
-        match &self.checklist_items {
-            Some(items) => {
-                let mut sorted = items.clone();
-                sorted.sort_by_key(|i| i.order);
-                sorted
-                    .iter()
-                    .map(|item| {
-                        let check = if item.is_checked { "x" } else { " " };
-                        format!("[{}] {}", check, item.text)
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            }
-            None => String::new(),
-        }
     }
 
     /// Korrigiert den noteType basierend auf vorhandenen checklistItems

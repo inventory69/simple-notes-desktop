@@ -244,6 +244,10 @@ async fn get_settings(app: AppHandle) -> Result<Settings> {
         .store("settings.json")
         .map_err(|e| AppError::StorageError(e.to_string()))?;
 
+    // Read each Settings key individually so missing keys fall back to Settings::default()
+    // rather than failing deserialization. This list MUST stay in sync with the fields
+    // of the Settings struct in storage.rs — see test_get_settings_keys_match_settings_struct
+    // in storage.rs which enforces this at test time.
     let mut map = serde_json::Map::new();
     for key in [
         "theme",
