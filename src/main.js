@@ -31,6 +31,7 @@ class App {
     this.batchCancelBtn = document.getElementById('batch-cancel-btn');
     this.batchPinBtn = document.getElementById('batch-pin-btn');
     this.batchUnpinBtn = document.getElementById('batch-unpin-btn');
+    this.batchColorBtn = document.getElementById('batch-color-btn');
     this.selectionCount = this.batchActionsBar?.querySelector('.selection-count');
 
     this.init();
@@ -171,6 +172,9 @@ class App {
     });
     this.batchUnpinBtn?.addEventListener('click', () => {
       this.notesList.pinSelected(false);
+    });
+    this.batchColorBtn?.addEventListener('click', () => {
+      this.notesList.colorSelected();
     });
 
     // F1: Global keyboard shortcuts

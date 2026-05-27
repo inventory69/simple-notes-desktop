@@ -193,6 +193,17 @@ class NoteService {
   }
 
   /**
+   * Set or remove the background color of multiple notes
+   * @param {string[]} ids - Note IDs to update
+   * @param {string|null} color - Hex color string or null to remove
+   */
+  async colorNotes(ids, color) {
+    await tauri.colorNotes(ids, color);
+    await this.loadNotes();
+    this.notify();
+  }
+
+  /**
    * Search notes by query
    * @param {string} query - Search query
    */

@@ -124,6 +124,16 @@
               </svg>
               Unpin
             </button>
+            <button id="batch-color-btn" class="btn-batch" title="Change color of selected notes" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/>
+                <circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/>
+                <circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/>
+                <circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/>
+                <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/>
+              </svg>
+              Color
+            </button>
             <button id="batch-delete-btn" class="btn-danger-batch" title="Delete selected notes" type="button">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <polyline points="3 6 5 6 21 6"></polyline>
@@ -191,6 +201,15 @@
                       <line x1="4" y1="18" x2="8" y2="18"></line>
                       <polyline points="15 15 18 18 21 15"></polyline>
                       <line x1="18" y1="12" x2="18" y2="18"></line>
+                    </svg>
+                  </button>
+                  <button id="note-color-btn" class="btn-icon-small" title="Note color" type="button">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/>
+                      <circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/>
+                      <circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/>
+                      <circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/>
+                      <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/>
                     </svg>
                   </button>
                   <span id="sync-status" class="sync-status"></span>
@@ -291,6 +310,19 @@
             <button id="cancel-settings-btn" class="btn-secondary" type="button">Cancel</button>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Color Picker Popup -->
+    <div id="color-picker-popup" class="color-picker-popup hidden" role="dialog" aria-label="Choose note color">
+      <div class="color-circles">
+        <!-- "No color" circle -->
+        <button class="color-circle color-none" data-color="" title="No color" type="button" aria-label="Remove color">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+        <!-- 11 Farbkreise werden per JS gerendert -->
       </div>
     </div>
 

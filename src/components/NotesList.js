@@ -1,5 +1,7 @@
 import { dialogService } from '../services/DialogService.js';
 import noteService from '../services/noteService.js';
+import { colorPicker } from '../utils/ColorPicker.js';
+import { getColorPair } from '../utils/noteColors.js';
 
 /**
  * Notes List Component with Multi-Select support (F6)
@@ -123,6 +125,22 @@ export class NotesList {
     this.exitSelectionMode();
   }
 
+  // Farbe mehrerer Notizen setzen
+  colorSelected() {
+    if (this.selectedIds.size === 0) return;
+    const btn = document.getElementById('batch-color-btn');
+    colorPicker.show(btn, null, async (color) => {
+      const ids = this.getSelectedIds();
+      try {
+        await noteService.colorNotes(ids, color);
+      } catch (e) {
+        console.error('[NotesList] colorSelected failed:', e);
+        await dialogService.error({ title: 'Color Failed', message: e.message || 'Could not update notes.' });
+      }
+      this.exitSelectionMode();
+    });
+  }
+
   // F6: Delete selected notes (uses F4's confirmDeletion dialog)
   async deleteSelected() {
     const count = this.selectedIds.size;
@@ -242,9 +260,13 @@ export class NotesList {
          </svg>`
       : '';
 
+    const colorPair = getColorPair(note.color);
+    const colorStyle = colorPair ? `style="--nc-l:${colorPair.light};--nc-d:${colorPair.dark}"` : '';
+
     let classes = 'note-item';
     if (isActive) classes += ' selected';
     if (isSelected) classes += ' multi-selected';
+    if (colorPair) classes += ' has-color';
 
     // F1: Note Type Icon
     const typeIcon =
@@ -262,7 +284,7 @@ export class NotesList {
          </svg>`;
 
     return `
-      <div class="${classes}" data-id="${note.id}">
+      <div class="${classes}" data-id="${note.id}" ${colorStyle}>
         ${
           this.selectionMode
             ? `<div class="note-item-checkbox">

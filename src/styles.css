@@ -1553,3 +1553,85 @@ body {
   color: #999;
   opacity: 0.6;
 }
+
+/* ── Note Colors ─────────────────────────────────────────────────────────── */
+
+/* Farbige Sidebar-Items */
+.note-item.has-color {
+  background-color: var(--nc-l, transparent);
+}
+
+[data-theme="dark"] .note-item.has-color {
+  background-color: var(--nc-d, var(--nc-l, transparent));
+}
+
+/* Selektierter Zustand: dezenter Overlay über die Notizfarbe */
+.note-item.has-color.selected,
+.note-item.has-color.multi-selected {
+  background-color: color-mix(in srgb, var(--color-selected) 70%, var(--nc-l, transparent) 30%);
+}
+
+/* Color-Picker-Popup */
+.color-picker-popup.hidden {
+  display: none;
+}
+
+.color-picker-popup {
+  position: fixed;
+  z-index: 1000;
+  background: var(--color-bg);
+  border: 1px solid var(--color-hover);
+  border-radius: 8px;
+  padding: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.color-circles {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+}
+
+.color-circle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.color-circle:hover,
+.color-circle.active {
+  border-color: var(--color-fg);
+}
+
+.color-circle.active {
+  box-shadow: 0 0 0 2px var(--color-primary);
+}
+
+.color-none {
+  background: var(--color-hover);
+  color: var(--color-fg);
+}
+
+/* Color-Button im Editor-Header */
+#note-color-btn {
+  position: relative;
+}
+
+#note-color-btn.has-color::after {
+  content: "";
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--btn-color, transparent);
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+}

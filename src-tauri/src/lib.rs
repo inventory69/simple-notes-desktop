@@ -331,6 +331,34 @@ async fn update_tray_setting(enabled: bool, state: State<'_, TraySettings>) -> R
     Ok(())
 }
 
+/// Farbe mehrerer Notizen setzen oder entfernen
+#[tauri::command]
+async fn color_notes(
+    ids: Vec<String>,
+    color: Option<String>,
+    state: State<'_, WebDavState>,
+) -> Result<()> {
+    let client = {
+        let lock = lock_recover(&state.0);
+        lock.clone()
+    };
+    let client = client.ok_or(AppError::NotConnected)?;
+
+    for id in ids {
+        match client.get_note(&id).await {
+            Ok(mut note) => {
+                note.color = color.clone();
+                note.updated_at = chrono::Utc::now().timestamp_millis();
+                if let Err(e) = client.save_note(&note).await {
+                    eprintln!("[color_notes] save failed for {}: {}", id, e);
+                }
+            }
+            Err(e) => eprintln!("[color_notes] get failed for {}: {}", id, e),
+        }
+    }
+    Ok(())
+}
+
 /// Mehrere Notizen auf einmal an-/abpinnen
 #[tauri::command]
 async fn pin_notes(ids: Vec<String>, pinned: bool, state: State<'_, WebDavState>) -> Result<()> {
@@ -555,6 +583,7 @@ pub fn run() {
             get_desktop_environment,
             update_tray_setting,
             pin_notes,
+            color_notes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

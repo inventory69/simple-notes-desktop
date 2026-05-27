@@ -134,3 +134,12 @@ export async function updateTraySetting(enabled) {
 export async function pinNotes(ids, pinned) {
   return await invoke('pin_notes', { ids, pinned });
 }
+
+/**
+ * Set or remove the background color of multiple notes
+ * @param {string[]} ids - Array of note IDs
+ * @param {string|null} color - Hex color string (e.g. "#F28B82") or null to remove
+ */
+export async function colorNotes(ids, color) {
+  return await invoke('color_notes', { ids, color: color ?? null });
+}

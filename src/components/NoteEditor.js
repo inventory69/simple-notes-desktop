@@ -7,6 +7,7 @@ import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { dialogService } from '../services/DialogService.js';
 import noteService from '../services/noteService.js';
+import { colorPicker } from '../utils/ColorPicker.js';
 import { UndoStack } from '../utils/UndoStack.js';
 
 /** Autosave debounce delay in milliseconds (matches Android app: 3 seconds) */
@@ -30,6 +31,7 @@ export class NoteEditor {
 
     this.undoBtn = document.getElementById('undo-btn');
     this.addItemHeaderBtn = document.getElementById('add-checklist-item-btn');
+    this.colorBtn = document.getElementById('note-color-btn');
 
     this.editorView = null;
     this.currentNote = null;
@@ -88,6 +90,17 @@ export class NoteEditor {
 
     // Header add-item button (checklist only)
     this.addItemHeaderBtn.addEventListener('click', () => this.addChecklistItem());
+
+    // Color button
+    this.colorBtn?.addEventListener('click', () => {
+      if (!this.currentNote) return;
+      colorPicker.show(this.colorBtn, this.currentNote.color ?? null, async (color) => {
+        this.currentNote.color = color;
+        this._updateColorBtn();
+        this.updateSyncStatus('Saving...');
+        await this.save();
+      });
+    });
 
     // Ctrl+Z / Ctrl+Shift+Z keyboard shortcut
     document.addEventListener('keydown', (e) => {
@@ -755,6 +768,7 @@ export class NoteEditor {
     }
 
     this._updateUndoButton();
+    this._updateColorBtn();
     this.updateSyncStatus('Saved');
   }
 
@@ -773,10 +787,26 @@ export class NoteEditor {
     this.container.classList.add('hidden');
     this.placeholderDiv.classList.remove('hidden');
     if (this.undoBtn) this.undoBtn.disabled = true;
+    this._updateColorBtn();
 
     if (this.editorView) {
       this.editorView.destroy();
       this.editorView = null;
+    }
+  }
+
+  /** Setzt den Color-Button-Zustand basierend auf der aktuellen Notizfarbe. */
+  _updateColorBtn() {
+    if (!this.colorBtn) return;
+    const color = this.currentNote?.color;
+    if (color) {
+      this.colorBtn.style.setProperty('--btn-color', color);
+      this.colorBtn.classList.add('has-color');
+      this.colorBtn.title = `Note color: ${color}`;
+    } else {
+      this.colorBtn.style.removeProperty('--btn-color');
+      this.colorBtn.classList.remove('has-color');
+      this.colorBtn.title = 'Note color';
     }
   }
 

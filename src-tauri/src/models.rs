@@ -180,6 +180,9 @@ pub struct NoteMetadata {
     pub checklist_sort_option: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_pinned: Option<bool>,
+    /// Android v2.5.0: Hintergrundfarbe der Notiz, Hex `#RRGGBB`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
 }
 
 impl From<&Note> for NoteMetadata {
@@ -193,6 +196,7 @@ impl From<&Note> for NoteMetadata {
             checklist_items: note.checklist_items.clone(),
             checklist_sort_option: note.checklist_sort_option.clone(),
             is_pinned: note.is_pinned,
+            color: note.color.clone(),
         }
     }
 }
@@ -324,6 +328,7 @@ mod tests {
         assert_eq!(meta.updated_at, note.updated_at);
         assert_eq!(meta.note_type, note.note_type);
         assert_eq!(meta.is_pinned, note.is_pinned);
+        assert_eq!(meta.color, note.color);
     }
 
     #[test]
