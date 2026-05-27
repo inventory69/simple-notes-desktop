@@ -99,6 +99,16 @@ class NoteService {
           this.notes.unshift(updatedNote);
         }
 
+        // Re-sort to match server ordering: pinned first, then updatedAt desc.
+        // Mirrors the sort in list_notes (lib.rs) so the sidebar stays in sync
+        // without a full network reload after every save.
+        this.notes.sort((a, b) => {
+          const aPin = a.isPinned ? 1 : 0;
+          const bPin = b.isPinned ? 1 : 0;
+          if (bPin !== aPin) return bPin - aPin;
+          return b.updatedAt - a.updatedAt;
+        });
+
         this.currentNote = updatedNote;
         this.notify();
 
