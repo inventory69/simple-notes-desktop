@@ -292,6 +292,18 @@
               <input type="text" id="device-id" readonly />
             </div>
             
+            <!-- Updates Section (nur auf Windows sichtbar, gesteuert per JS) -->
+            <div id="updates-section" class="settings-section hidden">
+              <h3>Updates</h3>
+              <div class="form-group">
+                <div class="update-check-row">
+                  <button id="check-updates-btn" class="btn-secondary" type="button">Check for Updates</button>
+                  <span id="update-status" class="update-status hidden"></span>
+                </div>
+                <button id="install-update-btn" class="btn-primary update-install-btn hidden" type="button">Install Update</button>
+              </div>
+            </div>
+
             <!-- About Section -->
             <div class="settings-section">
               <h3>About</h3>

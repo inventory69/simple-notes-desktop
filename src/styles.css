@@ -339,6 +339,39 @@ body {
   color: var(--text-color);
 }
 
+.update-check-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.update-status {
+  font-size: 0.875rem;
+  color: var(--color-fg);
+  opacity: 0.75;
+}
+
+.update-status.update-available {
+  color: var(--color-primary);
+  opacity: 1;
+  font-weight: 500;
+}
+
+.update-status.update-current {
+  color: var(--color-success);
+  opacity: 1;
+}
+
+.update-status.update-error {
+  color: var(--color-danger);
+  opacity: 1;
+}
+
+.update-install-btn {
+  margin-top: 0.75rem;
+}
+
 .about-info {
   display: flex;
   flex-direction: column;

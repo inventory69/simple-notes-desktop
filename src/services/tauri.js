@@ -143,3 +143,31 @@ export async function pinNotes(ids, pinned) {
 export async function colorNotes(ids, color) {
   return await invoke('color_notes', { ids, color: color ?? null });
 }
+
+/**
+ * Get the current operating system platform
+ * @returns {Promise<'windows'|'linux'|'macos'|'unknown'>}
+ */
+export async function getPlatform() {
+  return await invoke('get_platform');
+}
+
+/**
+ * Check whether an in-app update is available (Windows only).
+ * Returns the new version string if an update is available, or null if up-to-date.
+ * On Linux/macOS always returns null — updates are handled by the package manager.
+ * @returns {Promise<string|null>} New version string or null
+ */
+export async function checkForUpdates() {
+  return await invoke('check_for_updates');
+}
+
+/**
+ * Download and install the available update (Windows only).
+ * The app will exit after a successful install; the NSIS installer
+ * starts the new version automatically.
+ * @returns {Promise<void>}
+ */
+export async function installUpdate() {
+  return await invoke('install_update');
+}

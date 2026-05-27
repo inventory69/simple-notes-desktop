@@ -49,7 +49,23 @@
       "rpm": {
         "release": "1"
       }
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "startMenuFolder": "Simple Notes Desktop"
+      }
     }
   },
-  "plugins": {}
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDBFMzNFREFFNTk0RDlGMUIKUldRYm4wMVpydTB6RGtja0JyT1o3RnNDYjZncnBxUFN1WklGWDBFVG5QQyt5T2xEbXRncU9HZ0EK",
+      "endpoints": [
+        "https://github.com/inventory69/simple-notes-desktop/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
 }

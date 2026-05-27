@@ -130,6 +130,27 @@ jobs:
             echo 'EOF_RELEASE_BODY'
           } >> $GITHUB_OUTPUT
 
+      # Signing-Keys nur für Windows-Builds setzen.
+      # Der private Key liegt als GitHub Secret; der public Key steht in tauri.conf.json.
+      # Nur der Windows-Build erzeugt das latest.json Update-Manifest (Linux nutzt AUR/deb/rpm).
+      # Tauri-Signierkeys für Windows-Build setzen.
+      # Minisign-Keys haben zwei Zeilen ("untrusted comment:…" + Base64), daher
+      # Heredoc-Syntax statt echo "KEY=VALUE" um GITHUB_ENV-Korruption zu vermeiden.
+      - name: Set Windows signing keys
+        if: matrix.os_name == 'windows'
+        shell: bash
+        run: |
+          {
+            echo "TAURI_SIGNING_PRIVATE_KEY<<TAURI_KEY_EOF"
+            echo "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}"
+            echo "TAURI_KEY_EOF"
+          } >> "$GITHUB_ENV"
+          {
+            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD<<TAURI_PWD_EOF"
+            echo "${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}"
+            echo "TAURI_PWD_EOF"
+          } >> "$GITHUB_ENV"
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -145,6 +166,7 @@ jobs:
           releaseDraft: true
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
           includeDebug: false
+          updaterJsonPreferNsis: true
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --verbose
 
       - name: Upload build artifacts

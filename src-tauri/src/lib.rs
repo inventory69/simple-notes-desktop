@@ -323,6 +323,83 @@ fn get_desktop_environment() -> Option<String> {
     None
 }
 
+/// Aktuelles Betriebssystem zurückgeben (für plattformspezifische UI-Logik im Frontend)
+#[tauri::command]
+fn get_platform() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        "unknown"
+    }
+}
+
+/// Prüft ob ein In-App-Update verfügbar ist.
+/// Gibt die neue Versionsnummer zurück oder None wenn aktuell.
+/// Auf Linux ist diese Funktion deaktiviert — Updates laufen über den Paketmanager.
+#[cfg(target_os = "windows")]
+#[tauri::command]
+async fn check_for_updates(app: AppHandle) -> Result<Option<String>> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app
+        .updater()
+        .map_err(|e| AppError::StorageError(e.to_string()))?;
+    let update = updater
+        .check()
+        .await
+        .map_err(|e| AppError::StorageError(e.to_string()))?;
+    Ok(update.map(|u| u.version))
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+async fn check_for_updates(_app: AppHandle) -> Result<Option<String>> {
+    // Auf Linux/macOS übernimmt der Paketmanager die Updates
+    Ok(None)
+}
+
+/// Lädt das Update herunter und installiert es (nur Windows).
+/// Nach erfolgreicher Installation wird die App beendet;
+/// der Installer startet die neue Version automatisch.
+#[cfg(target_os = "windows")]
+#[tauri::command]
+async fn install_update(app: AppHandle) -> Result<()> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app
+        .updater()
+        .map_err(|e| AppError::StorageError(e.to_string()))?;
+    if let Some(update) = updater
+        .check()
+        .await
+        .map_err(|e| AppError::StorageError(e.to_string()))?
+    {
+        update
+            .download_and_install(|_, _| {}, || {})
+            .await
+            .map_err(|e| AppError::StorageError(e.to_string()))?;
+        // Installer wurde gestartet; App beenden damit der Installer die Binary ersetzen kann
+        app.exit(0);
+        Ok(())
+    } else {
+        // Update zwischen Check und Install verschwunden (Race Condition, Release zurückgezogen etc.)
+        Err(AppError::StorageError(
+            "Update no longer available. Please click 'Check for Updates' again.".to_string(),
+        ))
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+async fn install_update(_app: AppHandle) -> Result<()> {
+    Err(AppError::StorageError(
+        "In-app updates are not available on this platform. Please use your package manager."
+            .to_string(),
+    ))
+}
+
 /// Update the minimize-to-tray runtime setting without restarting
 #[tauri::command]
 async fn update_tray_setting(enabled: bool, state: State<'_, TraySettings>) -> Result<()> {
@@ -429,7 +506,7 @@ fn restore_window(window: &tauri::WebviewWindow) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 // Position-Restore deaktiviert: Wayland erlaubt Apps nicht,
@@ -459,7 +536,13 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 restore_window(&window);
             }
-        }))
+        }));
+
+    // Windows-only: In-App-Updater — Linux-Nutzer verwenden AUR/deb/rpm
+    #[cfg(target_os = "windows")]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+
+    builder
         .manage(WebDavState(Mutex::new(None)))
         .manage(DeviceIdState(Mutex::new(None)))
         .manage(TraySettings(Mutex::new(false)))
@@ -584,6 +667,9 @@ pub fn run() {
             update_tray_setting,
             pin_notes,
             color_notes,
+            get_platform,
+            check_for_updates,
+            install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

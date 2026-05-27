@@ -23,6 +23,11 @@ function setupDOM() {
         <input type="text" id="device-id" readonly />
         <span id="app-version">Loading...</span>
         <a href="#" id="github-link">GitHub</a>
+        <div id="updates-section" class="hidden">
+          <button id="check-updates-btn">Check for Updates</button>
+          <span id="update-status" class="hidden"></span>
+          <button id="install-update-btn" class="hidden">Install Update</button>
+        </div>
         <button id="save-settings-btn">Save</button>
         <button id="cancel-settings-btn">Cancel</button>
       </div>
@@ -49,6 +54,9 @@ describe('SettingsDialog', () => {
     tauri.getDeviceId.mockResolvedValue('tauri-abc123');
     tauri.saveSettings.mockResolvedValue();
     tauri.updateTraySetting.mockResolvedValue();
+    tauri.getPlatform.mockResolvedValue('linux');
+    tauri.checkForUpdates.mockResolvedValue(null);
+    tauri.installUpdate.mockResolvedValue();
 
     // Dynamic import to get fresh module with fresh DOM
     const mod = await import('../components/SettingsDialog.js');

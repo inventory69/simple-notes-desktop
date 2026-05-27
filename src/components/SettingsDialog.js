@@ -18,10 +18,17 @@ export class SettingsDialog {
     this.cancelBtn = document.getElementById('cancel-settings-btn');
     this.appVersionEl = document.getElementById('app-version');
     this.githubLink = document.getElementById('github-link');
+    this.updatesSection = document.getElementById('updates-section');
+    this.checkUpdatesBtn = document.getElementById('check-updates-btn');
+    this.updateStatus = document.getElementById('update-status');
+    this.installUpdateBtn = document.getElementById('install-update-btn');
     this.onSaveCallback = null;
     this.onReconnectCallback = null;
     this.originalTheme = null; // Store original theme for cancel
     this._currentTheme = null;
+    this._platform = null;
+    this._pendingUpdateVersion = null;
+    this._appVersion = null;
     this._mql = window.matchMedia('(prefers-color-scheme: dark)');
     this._mqlListener = () => {
       if (this._currentTheme === 'system') {
@@ -60,14 +67,95 @@ export class SettingsDialog {
       }
     });
 
+    // Update button handlers
+    this.checkUpdatesBtn.addEventListener('click', () => this._handleCheckUpdates());
+    this.installUpdateBtn.addEventListener('click', () => this._handleInstallUpdate());
+
+    // Plattform ermitteln — async, wird lange vor dem ersten settings-open fertig
+    tauri
+      .getPlatform()
+      .then((platform) => {
+        this._platform = platform;
+        if (platform === 'windows') {
+          this.updatesSection.classList.remove('hidden');
+        }
+      })
+      .catch((err) => {
+        // Update-Sektion bleibt hidden (sicherer Standardzustand)
+        console.error('Failed to detect platform:', err);
+      });
+
     // Load app version on init
     this.loadAppVersion();
+  }
+
+  async _handleCheckUpdates() {
+    this.checkUpdatesBtn.disabled = true;
+    this.updateStatus.textContent = 'Checking…';
+    this.updateStatus.className = 'update-status';
+    this.installUpdateBtn.classList.add('hidden');
+
+    try {
+      const newVersion = await tauri.checkForUpdates();
+      if (newVersion) {
+        this._pendingUpdateVersion = newVersion;
+        this.updateStatus.textContent = `Update available: v${newVersion}`;
+        this.updateStatus.className = 'update-status update-available';
+        this.installUpdateBtn.classList.remove('hidden');
+      } else {
+        this._pendingUpdateVersion = null;
+        const current = this._appVersion || this.appVersionEl.textContent || '';
+        this.updateStatus.textContent = `Up to date (${current})`;
+        this.updateStatus.className = 'update-status update-current';
+      }
+    } catch (error) {
+      this._pendingUpdateVersion = null;
+      this.updateStatus.textContent = `Error: ${error.message || error}`;
+      this.updateStatus.className = 'update-status update-error';
+    } finally {
+      this.checkUpdatesBtn.disabled = false;
+    }
+  }
+
+  async _handleInstallUpdate() {
+    this.installUpdateBtn.disabled = true;
+    this.installUpdateBtn.textContent = 'Installing…';
+    this.checkUpdatesBtn.disabled = true;
+    this.updateStatus.textContent = 'Downloading and installing update…';
+    this.updateStatus.className = 'update-status';
+
+    try {
+      await tauri.installUpdate();
+      // App wird beendet — dieser Code sollte nicht erreicht werden
+    } catch (error) {
+      this.updateStatus.textContent = `${error.message || error}`;
+      this.updateStatus.className = 'update-status update-error';
+    } finally {
+      // Knöpfe immer freigeben — falls App nicht beendet wird (z. B. Update weggefallen)
+      this.installUpdateBtn.disabled = false;
+      this.installUpdateBtn.textContent = 'Install Update';
+      this.checkUpdatesBtn.disabled = false;
+    }
+  }
+
+  /** Update-Status beim (Wieder-)Öffnen des Dialogs wiederherstellen */
+  _restoreUpdateState() {
+    if (this._pendingUpdateVersion) {
+      this.updateStatus.textContent = `Update available: v${this._pendingUpdateVersion}`;
+      this.updateStatus.className = 'update-status update-available';
+      this.installUpdateBtn.classList.remove('hidden');
+    } else {
+      this.updateStatus.textContent = '';
+      this.updateStatus.className = 'update-status hidden';
+      this.installUpdateBtn.classList.add('hidden');
+    }
   }
 
   async loadAppVersion() {
     try {
       const version = await tauri.getAppVersion();
-      this.appVersionEl.textContent = `v${version}`;
+      this._appVersion = `v${version}`;
+      this.appVersionEl.textContent = this._appVersion;
     } catch (error) {
       console.error('Failed to load app version:', error);
       this.appVersionEl.textContent = 'Unknown';
@@ -91,6 +179,9 @@ export class SettingsDialog {
       this.autostartCheckbox.checked = settings.autostart || false;
       this.syncFolderInput.value = settings.sync_folder || '';
       this.deviceIdInput.value = deviceId;
+
+      // Update-Status korrekt anzeigen (verhindert stale Zustand aus vorheriger Session)
+      this._restoreUpdateState();
 
       this.dialog.classList.remove('hidden');
     } catch (error) {
