@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-05-28
+
+### Fixed
+
+- Checklist: sidebar preview now applies the note's sort option (Unchecked First, Checked First, Alphabetical, Manual) instead of always sorting by raw order (`fix(checklist)`)
+  - Applies the same sort logic as the editor, including Android-parity `originalOrder` tiebreaker for Manual mode
+- Checklist: typing in an item after autosave no longer silently updates the wrong entry — server response no longer replaces the editor's live item list (`fix(checklist)`)
+- Colored notes: selected-state highlight now uses a neutral darken/lighten tint (18% black / 20% white) instead of a fixed blue blend, keeping the note color visible under selection (`fix(ui)`)
+- Notes list: relative timestamps ("5m ago", "2h ago") now refresh every 60 s in-place without triggering a full list re-render (no scroll-position resets) (`fix(ui)`)
+- Windows: `latest.json` was missing from some releases because a stray newline in the signing-password env var caused `tauri-action` to skip the updater upload; fixed by switching from heredoc to direct assignment (`ci`)
+
 ## [0.6.1] - 2026-05-28
 
 ### Added
