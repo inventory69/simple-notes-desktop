@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-05-28
+
+### Added
+
+- Windows: in-app updater — "Check for Updates" button in Settings downloads and installs the latest release silently via NSIS passive mode; no admin rights required (`currentUser` install mode)
+  - Update check and install driven by `tauri-plugin-updater`; Linux/macOS always returns "up to date" (package manager handles updates on those platforms)
+  - Installer config: `installMode = currentUser` places the app in `%LOCALAPPDATA%\Programs`; settings in `%APPDATA%` survive an uninstall+reinstall cycle
+
+### Fixed
+
+- Linux: KDE Wayland taskbar shows generic icon instead of app icon — fixed by overriding the `xdg_toplevel` app_id to `simple-notes-desktop` via `gdk_wayland_window_set_application_id()` at window creation time
+  - AUR: `.desktop` file renamed to `simple-notes-desktop.desktop` (freedesktop convention) to match the new app_id
+  - `StartupWMClass` in the `.desktop` template corrected to `simple-notes-desktop` for X11 startup notification matching
+
 ## [0.6.0] - 2026-05-27
 
 ### Added
