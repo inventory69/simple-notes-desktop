@@ -132,17 +132,12 @@ jobs:
 
       # Signing-Keys für alle Plattformen setzen (createUpdaterArtifacts: true erfordert
       # TAURI_SIGNING_PRIVATE_KEY wenn ein pubkey konfiguriert ist).
-      # Minisign-Keys haben zwei Zeilen ("untrusted comment:…" + Base64), daher
-      # Heredoc-Syntax. head -2 schneidet etwaige Extra-Leerzeilen am Ende ab, die
-      # durch GitHub-Secret-Speicherung entstehen und die Base64-Dekodierung korrumpieren.
+      # Tauri 2 speichert den privaten Key als einzeiligen Base64-String, daher
+      # einfache KEY=VALUE-Zuweisung (kein Heredoc nötig).
       - name: Set signing key
         shell: bash
         run: |
-          {
-            echo "TAURI_SIGNING_PRIVATE_KEY<<TAURI_KEY_EOF"
-            echo "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" | head -2
-            echo "TAURI_KEY_EOF"
-          } >> "$GITHUB_ENV"
+          echo "TAURI_SIGNING_PRIVATE_KEY=${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" >> "$GITHUB_ENV"
           echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}" >> "$GITHUB_ENV"
 
       - name: Build Tauri app
