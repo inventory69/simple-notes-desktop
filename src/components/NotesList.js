@@ -48,6 +48,14 @@ export class NotesList {
         this.exitSelectionMode();
       }
     });
+
+    setInterval(() => this._refreshTimestamps(), 60000);
+  }
+
+  _refreshTimestamps() {
+    for (const el of this.container.querySelectorAll('.note-item-date[data-ts]')) {
+      el.textContent = this.formatDate(Number(el.dataset.ts));
+    }
   }
 
   // F6: Enter selection mode
@@ -459,7 +467,7 @@ export class NotesList {
             <div class="note-item-title">${this.escapeHtml(note.title)}</div>
           </div>
           <div class="note-item-preview">${previewLines.map((line) => `<div class="preview-line">${this.escapeHtml(line)}</div>`).join('')}</div>
-          <div class="note-item-meta">${pinIcon}${date}</div>
+          <div class="note-item-meta">${pinIcon}<span class="note-item-date" data-ts="${note.updatedAt}">${date}</span></div>
         </div>
       </div>
     `;
