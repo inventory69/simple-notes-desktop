@@ -206,10 +206,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir pages
-          gh release download "${{ github.ref_name }}" \
-            --pattern "latest.json" \
-            --repo "${{ github.repository }}" \
-            --dir pages
+          # releases/tags/{tag} only returns published releases — use list API to find drafts too
+          ASSET_ID=$(gh api "repos/${{ github.repository }}/releases" \
+            --jq ".[] | select(.tag_name == \"${{ github.ref_name }}\") | .assets[] | select(.name == \"latest.json\") | .id")
+          gh api "repos/${{ github.repository }}/releases/assets/${ASSET_ID}" \
+            -H "Accept: application/octet-stream" > pages/latest.json
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
