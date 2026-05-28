@@ -60,7 +60,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk4MENCMUUxRURERUY0NzAKUldSdzlON3Q0YkVNbUhIS250b1NUdnNWVURyL0x3cCt6aktVTDRZcEc1ZnBjUjN1S0RuNC9WbXIK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEUxQjkyRkVBRDFCNzA3MDYKUldRR0I3ZlI2aSs1NGFwRkMxNHkrZ0JTdE81WjFiMGpCK2tBYTEvVHRjLzF4SVEyR1krWXh0THEK",
       "endpoints": [
         "https://github.com/inventory69/simple-notes-desktop/releases/latest/download/latest.json"
       ],
