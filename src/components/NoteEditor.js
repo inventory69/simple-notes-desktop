@@ -1002,7 +1002,10 @@ export class NoteEditor {
       // would overwrite this.currentNote with the old note, leaving the editor pointing
       // at stale data and causing ghost saves of unintended notes.
       if (this.currentNote?.id === noteToSave.id) {
-        this.currentNote = { ...updatedNote };
+        // Keep the live client checklistItems — they may contain unsaved empty items that
+        // _sanitizeForSave stripped. Replacing them with the server copy would desync
+        // the DOM event listeners (whose originalIndex was captured at render time).
+        this.currentNote = { ...updatedNote, checklistItems: this.currentNote.checklistItems };
         this._isDirty = false;
         this.updateSyncStatus('Saved');
       }
