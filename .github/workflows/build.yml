@@ -130,19 +130,17 @@ jobs:
             echo 'EOF_RELEASE_BODY'
           } >> $GITHUB_OUTPUT
 
-      # Signing-Keys nur für Windows-Builds setzen.
-      # Der private Key liegt als GitHub Secret; der public Key steht in tauri.conf.json.
-      # Nur der Windows-Build erzeugt das latest.json Update-Manifest (Linux nutzt AUR/deb/rpm).
-      # Tauri-Signierkeys für Windows-Build setzen.
+      # Signing-Keys für alle Plattformen setzen (createUpdaterArtifacts: true erfordert
+      # TAURI_SIGNING_PRIVATE_KEY wenn ein pubkey konfiguriert ist).
       # Minisign-Keys haben zwei Zeilen ("untrusted comment:…" + Base64), daher
-      # Heredoc-Syntax statt echo "KEY=VALUE" um GITHUB_ENV-Korruption zu vermeiden.
-      - name: Set Windows signing keys
-        if: matrix.os_name == 'windows'
+      # Heredoc-Syntax. head -2 schneidet etwaige Extra-Leerzeilen am Ende ab, die
+      # durch GitHub-Secret-Speicherung entstehen und die Base64-Dekodierung korrumpieren.
+      - name: Set signing key
         shell: bash
         run: |
           {
             echo "TAURI_SIGNING_PRIVATE_KEY<<TAURI_KEY_EOF"
-            echo "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}"
+            echo "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" | head -2
             echo "TAURI_KEY_EOF"
           } >> "$GITHUB_ENV"
           echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}" >> "$GITHUB_ENV"
