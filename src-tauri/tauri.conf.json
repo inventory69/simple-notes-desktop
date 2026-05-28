@@ -62,6 +62,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEUxQjkyRkVBRDFCNzA3MDYKUldRR0I3ZlI2aSs1NGFwRkMxNHkrZ0JTdE81WjFiMGpCK2tBYTEvVHRjLzF4SVEyR1krWXh0THEK",
       "endpoints": [
+        "https://inventory69.github.io/simple-notes-desktop/latest.json",
         "https://github.com/inventory69/simple-notes-desktop/releases/latest/download/latest.json"
       ],
       "windows": {
