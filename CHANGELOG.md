@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-05-28
+
+### Fixed
+
+- Windows: update check now retries up to 3 times on transient network errors (`fix(ui)`)
+  - GitHub releases route through two CDN redirects to Azure Blob Storage; the Azure edge connection occasionally resets on Windows before a response arrives — retries work around this
+  - "Check for Updates" button shows "Checking… (retry 2/3)" progress; startup toast retries silently in the background without blocking app launch
+- Windows: `latest.json` is now served from GitHub Pages (Cloudflare CDN) as the primary updater endpoint, eliminating the Azure Blob Storage redirect chain (`fix(ci)`)
+  - GitHub Releases URL kept as fallback
+  - CI automatically deploys `latest.json` to Pages after each release via a new `deploy-pages` workflow job
+
 ## [0.6.3] - 2026-05-28
 
 ### Added

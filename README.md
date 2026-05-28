@@ -211,6 +211,6 @@ MIT License — see [LICENSE](LICENSE)
 
 <div align="center">
 
-**v0.6.3** · Built with ❤️ using [Tauri](https://tauri.app/) + [CodeMirror](https://codemirror.net/)
+**v0.6.4** · Built with ❤️ using [Tauri](https://tauri.app/) + [CodeMirror](https://codemirror.net/)
 
 </div>
