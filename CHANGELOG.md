@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-05-28
+
+### Added
+
+- Windows: startup update notification — a small toast in the bottom-right corner appears once at launch when a newer version is available, with an Install button (`feat(ui)`)
+  - Toggle in Settings → Updates: "Show update notifications" (on by default)
+  - Silent on network error at startup; the manual "Check for Updates" button still shows errors
+
+### Fixed
+
+- Windows: network errors during update check now show a readable message instead of a raw reqwest error (`fix(ui)`)
+  - Signature mismatch errors (root cause of the v0.6.1→v0.6.2 update failure) now explicitly say "reinstall manually from GitHub" rather than crashing silently
+  - Both updater commands now use a 30 s timeout via `updater_builder()` instead of the library default
+
 ## [0.6.2] - 2026-05-28
 
 ### Fixed
