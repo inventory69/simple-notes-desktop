@@ -57,20 +57,27 @@ class App {
     // Check for saved credentials and auto-connect
     await this.checkAutoConnect();
 
-    // Startup-Update-Check (Windows-only, nur wenn update_notifications aktiv)
-    await this.checkForUpdateAtStartup();
+    // Startup-Update-Check fire-and-forget (Windows-only, wenn update_notifications aktiv)
+    this._startupUpdateCheck();
   }
 
-  async checkForUpdateAtStartup() {
-    try {
-      const settings = await tauri.getSettings();
-      if (settings.update_notifications === false) return;
-      const version = await tauri.checkForUpdates();
-      if (version) {
-        this.updateToast.show(version);
+  _startupUpdateCheck() {
+    // Nicht awaiten — läuft im Hintergrund, damit init() nicht blockiert
+    this._doStartupUpdateCheck().catch(() => {});
+  }
+
+  async _doStartupUpdateCheck() {
+    const settings = await tauri.getSettings();
+    if (settings.update_notifications === false) return;
+    // Bis zu 3 Versuche mit 3s Pause — GitHub CDN / Azure manchmal instabil
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const version = await tauri.checkForUpdates();
+        if (version) this.updateToast.show(version);
+        return;
+      } catch (_e) {
+        if (attempt < 2) await new Promise((r) => setTimeout(r, 3000));
       }
-    } catch (_e) {
-      // Stiller Fehler — kein Toast bei Netzwerkproblemen beim Startup-Check
     }
   }
 

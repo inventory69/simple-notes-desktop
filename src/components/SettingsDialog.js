@@ -96,26 +96,35 @@ export class SettingsDialog {
     this.updateStatus.className = 'update-status';
     this.installUpdateBtn.classList.add('hidden');
 
-    try {
-      const newVersion = await tauri.checkForUpdates();
-      if (newVersion) {
-        this._pendingUpdateVersion = newVersion;
-        this.updateStatus.textContent = `Update available: v${newVersion}`;
-        this.updateStatus.className = 'update-status update-available';
-        this.installUpdateBtn.classList.remove('hidden');
-      } else {
-        this._pendingUpdateVersion = null;
-        const current = this._appVersion || this.appVersionEl.textContent || '';
-        this.updateStatus.textContent = `Up to date (${current})`;
-        this.updateStatus.className = 'update-status update-current';
+    let lastError;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const newVersion = await tauri.checkForUpdates();
+        if (newVersion) {
+          this._pendingUpdateVersion = newVersion;
+          this.updateStatus.textContent = `Update available: v${newVersion}`;
+          this.updateStatus.className = 'update-status update-available';
+          this.installUpdateBtn.classList.remove('hidden');
+        } else {
+          this._pendingUpdateVersion = null;
+          const current = this._appVersion || this.appVersionEl.textContent || '';
+          this.updateStatus.textContent = `Up to date (${current})`;
+          this.updateStatus.className = 'update-status update-current';
+        }
+        this.checkUpdatesBtn.disabled = false;
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt < 2) {
+          this.updateStatus.textContent = `Checking… (retry ${attempt + 2}/3)`;
+          await new Promise((r) => setTimeout(r, 2000));
+        }
       }
-    } catch (error) {
-      this._pendingUpdateVersion = null;
-      this.updateStatus.textContent = `Error: ${error.message || error}`;
-      this.updateStatus.className = 'update-status update-error';
-    } finally {
-      this.checkUpdatesBtn.disabled = false;
     }
+    this._pendingUpdateVersion = null;
+    this.updateStatus.textContent = `Error: ${lastError.message || lastError}`;
+    this.updateStatus.className = 'update-status update-error';
+    this.checkUpdatesBtn.disabled = false;
   }
 
   async _handleInstallUpdate() {
