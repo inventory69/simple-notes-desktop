@@ -1611,10 +1611,15 @@ body {
   background-color: var(--nc-d, var(--nc-l, transparent));
 }
 
-/* Selektierter Zustand: dezenter Overlay über die Notizfarbe */
+/* Selektierter Zustand: Notizfarbe abdunkeln statt blauem Overlay */
 .note-item.has-color.selected,
 .note-item.has-color.multi-selected {
-  background-color: color-mix(in srgb, var(--color-selected) 70%, var(--nc-l, transparent) 30%);
+  background-color: color-mix(in srgb, var(--nc-l, transparent) 82%, #000000 18%);
+}
+
+[data-theme="dark"] .note-item.has-color.selected,
+[data-theme="dark"] .note-item.has-color.multi-selected {
+  background-color: color-mix(in srgb, var(--nc-d, var(--nc-l, transparent)) 80%, #ffffff 20%);
 }
 
 /* Color-Picker-Popup */
