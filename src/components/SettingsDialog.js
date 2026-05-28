@@ -19,6 +19,7 @@ export class SettingsDialog {
     this.appVersionEl = document.getElementById('app-version');
     this.githubLink = document.getElementById('github-link');
     this.updatesSection = document.getElementById('updates-section');
+    this.updateNotificationsCheckbox = document.getElementById('update-notifications-checkbox');
     this.checkUpdatesBtn = document.getElementById('check-updates-btn');
     this.updateStatus = document.getElementById('update-status');
     this.installUpdateBtn = document.getElementById('install-update-btn');
@@ -178,6 +179,7 @@ export class SettingsDialog {
       this.trayCheckbox.checked = settings.minimize_to_tray || false;
       this.autostartCheckbox.checked = settings.autostart || false;
       this.syncFolderInput.value = settings.sync_folder || '';
+      this.updateNotificationsCheckbox.checked = settings.update_notifications !== false;
       this.deviceIdInput.value = deviceId;
 
       // Update-Status korrekt anzeigen (verhindert stale Zustand aus vorheriger Session)
@@ -210,6 +212,7 @@ export class SettingsDialog {
         minimize_to_tray: this.trayCheckbox.checked,
         autostart: this.autostartCheckbox.checked,
         sync_folder: syncFolderValue || 'notes',
+        update_notifications: this.updateNotificationsCheckbox.checked,
       };
 
       await tauri.saveSettings(settings);

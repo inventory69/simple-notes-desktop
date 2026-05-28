@@ -24,6 +24,7 @@ function setupDOM() {
         <span id="app-version">Loading...</span>
         <a href="#" id="github-link">GitHub</a>
         <div id="updates-section" class="hidden">
+          <input type="checkbox" id="update-notifications-checkbox" />
           <button id="check-updates-btn">Check for Updates</button>
           <span id="update-status" class="hidden"></span>
           <button id="install-update-btn" class="hidden">Install Update</button>
@@ -50,6 +51,7 @@ describe('SettingsDialog', () => {
       minimize_to_tray: false,
       autostart: false,
       sync_folder: 'notes',
+      update_notifications: true,
     });
     tauri.getDeviceId.mockResolvedValue('tauri-abc123');
     tauri.saveSettings.mockResolvedValue();
@@ -158,13 +160,15 @@ describe('SettingsDialog', () => {
 
       await dialog.handleSave();
 
-      expect(tauri.saveSettings).toHaveBeenCalledWith({
-        theme: 'dark',
-        autosave: false,
-        minimize_to_tray: true,
-        autostart: true,
-        sync_folder: 'notes',
-      });
+      expect(tauri.saveSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          theme: 'dark',
+          autosave: false,
+          minimize_to_tray: true,
+          autostart: true,
+          sync_folder: 'notes',
+        }),
+      );
     });
 
     it('should update tray runtime setting after saving', async () => {

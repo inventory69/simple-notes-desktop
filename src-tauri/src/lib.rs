@@ -261,6 +261,7 @@ async fn get_settings(app: AppHandle) -> Result<Settings> {
         "minimize_to_tray",
         "autostart",
         "sync_folder",
+        "update_notifications",
     ] {
         if let Some(val) = store.get(key) {
             map.insert(key.to_string(), val.clone());
@@ -337,6 +338,29 @@ fn get_platform() -> &'static str {
     }
 }
 
+/// Übersetzt rohe Updater-Fehlermeldungen in nutzbare Hinweise.
+#[cfg(target_os = "windows")]
+fn humanize_updater_error(e: impl ToString) -> AppError {
+    let msg = e.to_string();
+    let lower = msg.to_lowercase();
+    if lower.contains("error sending request")
+        || lower.contains("dns error")
+        || lower.contains("connection refused")
+        || lower.contains("timed out")
+        || lower.contains("failed to connect")
+    {
+        AppError::StorageError(
+            "Network error while contacting the update server. Please check your connection and try again.".to_string(),
+        )
+    } else if lower.contains("different key") || lower.contains("signature") {
+        AppError::StorageError(
+            "Update signature mismatch — please reinstall manually from GitHub.".to_string(),
+        )
+    } else {
+        AppError::StorageError(msg)
+    }
+}
+
 /// Prüft ob ein In-App-Update verfügbar ist.
 /// Gibt die neue Versionsnummer zurück oder None wenn aktuell.
 /// Auf Linux ist diese Funktion deaktiviert — Updates laufen über den Paketmanager.
@@ -345,12 +369,11 @@ fn get_platform() -> &'static str {
 async fn check_for_updates(app: AppHandle) -> Result<Option<String>> {
     use tauri_plugin_updater::UpdaterExt;
     let updater = app
-        .updater()
+        .updater_builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
         .map_err(|e| AppError::StorageError(e.to_string()))?;
-    let update = updater
-        .check()
-        .await
-        .map_err(|e| AppError::StorageError(e.to_string()))?;
+    let update = updater.check().await.map_err(humanize_updater_error)?;
     Ok(update.map(|u| u.version))
 }
 
@@ -369,17 +392,15 @@ async fn check_for_updates(_app: AppHandle) -> Result<Option<String>> {
 async fn install_update(app: AppHandle) -> Result<()> {
     use tauri_plugin_updater::UpdaterExt;
     let updater = app
-        .updater()
+        .updater_builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
         .map_err(|e| AppError::StorageError(e.to_string()))?;
-    if let Some(update) = updater
-        .check()
-        .await
-        .map_err(|e| AppError::StorageError(e.to_string()))?
-    {
+    if let Some(update) = updater.check().await.map_err(humanize_updater_error)? {
         update
             .download_and_install(|_, _| {}, || {})
             .await
-            .map_err(|e| AppError::StorageError(e.to_string()))?;
+            .map_err(humanize_updater_error)?;
         // Installer wurde gestartet; App beenden damit der Installer die Binary ersetzen kann
         app.exit(0);
         Ok(())

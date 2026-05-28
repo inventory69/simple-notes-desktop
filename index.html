@@ -296,6 +296,13 @@
             <div id="updates-section" class="settings-section hidden">
               <h3>Updates</h3>
               <div class="form-group">
+                <label class="checkbox-label">
+                  <input type="checkbox" id="update-notifications-checkbox" />
+                  Show update notifications
+                </label>
+                <p class="form-hint">Show a popup when an update is available</p>
+              </div>
+              <div class="form-group">
                 <div class="update-check-row">
                   <button id="check-updates-btn" class="btn-secondary" type="button">Check for Updates</button>
                   <span id="update-status" class="update-status hidden"></span>
@@ -344,6 +351,15 @@
           </svg>
         </button>
         <!-- 11 Farbkreise werden per JS gerendert -->
+      </div>
+    </div>
+
+    <!-- Update Toast (unten rechts, Windows-only) -->
+    <div id="update-toast" class="update-toast hidden" role="alert" aria-live="polite">
+      <span id="update-toast-text"></span>
+      <div class="update-toast-actions">
+        <button id="update-toast-install" class="btn-primary" type="button">Install</button>
+        <button id="update-toast-dismiss" class="update-toast-dismiss" type="button" aria-label="Dismiss">✕</button>
       </div>
     </div>
 

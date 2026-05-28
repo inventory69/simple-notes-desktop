@@ -17,6 +17,7 @@ pub struct Settings {
     pub minimize_to_tray: bool, // Minimize to system tray instead of closing
     pub autostart: bool,        // Start with system boot
     pub sync_folder: String,    // WebDAV sync folder name (default: "notes")
+    pub update_notifications: bool, // Show popup when an update is available (Windows only)
 }
 
 impl Default for Settings {
@@ -27,6 +28,7 @@ impl Default for Settings {
             minimize_to_tray: false,
             autostart: false,
             sync_folder: "notes".to_string(),
+            update_notifications: true,
         }
     }
 }
@@ -43,6 +45,7 @@ mod tests {
         assert!(!settings.minimize_to_tray);
         assert!(!settings.autostart);
         assert_eq!(settings.sync_folder, "notes");
+        assert!(settings.update_notifications);
     }
 
     #[test]
@@ -53,6 +56,7 @@ mod tests {
             minimize_to_tray: true,
             autostart: true,
             sync_folder: "my-notes".to_string(),
+            update_notifications: false,
         };
 
         let json = serde_json::to_string(&settings).unwrap();
@@ -63,6 +67,7 @@ mod tests {
         assert!(parsed.minimize_to_tray);
         assert!(parsed.autostart);
         assert_eq!(parsed.sync_folder, "my-notes");
+        assert!(!parsed.update_notifications);
     }
 
     #[test]
@@ -76,6 +81,7 @@ mod tests {
         assert!(!result.minimize_to_tray);
         assert!(!result.autostart);
         assert_eq!(result.sync_folder, "notes");
+        assert!(result.update_notifications); // default true
     }
 
     #[test]
@@ -89,6 +95,7 @@ mod tests {
                 minimize_to_tray: tray,
                 autostart,
                 sync_folder: "notes".to_string(),
+                update_notifications: true,
             };
 
             let json = serde_json::to_string(&settings).unwrap();
@@ -115,6 +122,7 @@ mod tests {
             minimize_to_tray: true,
             autostart: true,
             sync_folder: "notes".to_string(),
+            update_notifications: false,
         };
 
         let json = serde_json::to_string(&settings).unwrap();
@@ -124,6 +132,7 @@ mod tests {
         assert!(json.contains("\"theme\":\"dark\""));
         assert!(json.contains("\"autosave\":false"));
         assert!(json.contains("\"sync_folder\":\"notes\""));
+        assert!(json.contains("\"update_notifications\":false"));
     }
 
     #[test]
@@ -150,6 +159,7 @@ mod tests {
             minimize_to_tray: true,
             autostart: false,
             sync_folder: "custom".to_string(),
+            update_notifications: false,
         };
 
         let cloned = settings.clone();
@@ -157,6 +167,7 @@ mod tests {
         assert_eq!(cloned.minimize_to_tray, settings.minimize_to_tray);
         assert_eq!(cloned.autostart, settings.autostart);
         assert_eq!(cloned.sync_folder, settings.sync_folder);
+        assert_eq!(cloned.update_notifications, settings.update_notifications);
     }
 
     #[test]
@@ -181,6 +192,7 @@ mod tests {
             "minimize_to_tray",
             "autostart",
             "sync_folder",
+            "update_notifications",
         ]
         .iter()
         .map(|s| s.to_string())

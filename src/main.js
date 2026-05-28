@@ -3,6 +3,7 @@ import { ConnectionDialog } from './components/ConnectionDialog.js';
 import { NoteEditor } from './components/NoteEditor.js';
 import { NotesList } from './components/NotesList.js';
 import { SettingsDialog } from './components/SettingsDialog.js';
+import { UpdateToast } from './components/UpdateToast.js';
 import { dialogService } from './services/DialogService.js';
 import noteService from './services/noteService.js';
 import * as tauri from './services/tauri.js';
@@ -16,6 +17,7 @@ class App {
     this.notesList = new NotesList();
     this.noteEditor = new NoteEditor();
     this.settingsDialog = new SettingsDialog();
+    this.updateToast = new UpdateToast();
 
     this.mainContainer = document.getElementById('main-container');
     this.newNoteBtn = document.getElementById('new-note-btn');
@@ -54,6 +56,22 @@ class App {
 
     // Check for saved credentials and auto-connect
     await this.checkAutoConnect();
+
+    // Startup-Update-Check (Windows-only, nur wenn update_notifications aktiv)
+    await this.checkForUpdateAtStartup();
+  }
+
+  async checkForUpdateAtStartup() {
+    try {
+      const settings = await tauri.getSettings();
+      if (settings.update_notifications === false) return;
+      const version = await tauri.checkForUpdates();
+      if (version) {
+        this.updateToast.show(version);
+      }
+    } catch (_e) {
+      // Stiller Fehler — kein Toast bei Netzwerkproblemen beim Startup-Check
+    }
   }
 
   async clampWindowToMonitor() {
