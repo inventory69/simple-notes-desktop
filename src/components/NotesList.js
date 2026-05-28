@@ -473,7 +473,7 @@ export class NotesList {
    */
   getPreviewLines(note) {
     if (note.noteType === 'CHECKLIST' && note.checklistItems) {
-      return this.getChecklistPreviewLines(note.checklistItems);
+      return this.getChecklistPreviewLines(note.checklistItems, note.checklistSortOption);
     }
 
     if (!note.content || !note.content.trim()) {
@@ -497,13 +497,31 @@ export class NotesList {
    * @param {Array} items - Checklist items
    * @returns {string[]} Array of preview lines
    */
-  getChecklistPreviewLines(items) {
+  getChecklistPreviewLines(items, sortOption) {
     if (!items || items.length === 0) {
       return ['Empty checklist'];
     }
 
-    // Sort by order field
-    const sorted = [...items].sort((a, b) => a.order - b.order);
+    const sorted = [...items];
+    switch (sortOption) {
+      case 'ALPHABETICAL_ASC':
+        sorted.sort((a, b) => a.text.localeCompare(b.text));
+        break;
+      case 'ALPHABETICAL_DESC':
+        sorted.sort((a, b) => b.text.localeCompare(a.text));
+        break;
+      case 'CHECKED_FIRST':
+        sorted.sort((a, b) => {
+          if (a.isChecked !== b.isChecked) return a.isChecked ? -1 : 1;
+          return a.order - b.order;
+        });
+        break;
+      default: // UNCHECKED_FIRST, MANUAL, null/undefined
+        sorted.sort((a, b) => {
+          if (a.isChecked !== b.isChecked) return a.isChecked ? 1 : -1;
+          return (a.originalOrder ?? a.order) - (b.originalOrder ?? b.order);
+        });
+    }
 
     const total = sorted.length;
     const checked = sorted.filter((item) => item.isChecked).length;
