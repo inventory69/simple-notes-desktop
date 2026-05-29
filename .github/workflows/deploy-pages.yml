@@ -2,7 +2,7 @@ name: Deploy Pages
 
 on:
   release:
-    types: [published]
+    types: [published, released]
   workflow_dispatch:
     inputs:
       tag:
