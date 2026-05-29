@@ -15,6 +15,6 @@ pkgbase = simple-notes-desktop-bin
 	conflicts = simple-notes-desktop-git
 	options = !strip
 	source = simple-notes-desktop-bin-0.6.4.deb::https://github.com/inventory69/simple-notes-desktop/releases/download/v0.6.4/Simple.Notes.Desktop_0.6.4_amd64.deb
-	sha256sums = SKIP
+	sha256sums = 09753fe504fac30a8a93c130e076d8289e1bcd8b01e118fb12eee5848dd4a268
 
 pkgname = simple-notes-desktop-bin
