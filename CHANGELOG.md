@@ -7,11 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-01
+
 ### Added
 
-- Folder support: notes can be organised into folders, matching Android app v2.7.0 (`feat(ui)`)
+- Folder support: notes can be organised into folders, matching Android app v2.7.0 (`feat(folders)`)
   - **Requires Android app ≥ 2.7.0** — notes moved into folders are stored in subdirectories on the WebDAV server and will not be visible to older Android versions
-  - A one-time compatibility notice is shown before the first folder is created
+  - Folders appear in the sidebar as cards with note-count badges; right-click for rename, delete, or color
+  - Deleting a non-empty folder offers a "Keep notes (move to Root)" checkbox
+  - Multi-select toolbar gains a "Move" button to batch-move selected notes into any folder or back to root
+  - A one-time compatibility notice is shown before the first folder is ever created
+- Resizable sidebar: drag handle between the sidebar and editor area lets you adjust sidebar width (150–520 px); chosen width is remembered across sessions (`feat(ui)`)
+- Dialogs can now be dismissed by clicking on the backdrop outside the dialog box (`feat(ui)`)
+- Batch color picker pre-selects the shared color when all selected notes have the same color, and toggles closed if the picker is already open (`feat(ui)`)
+
+### Changed
+
+- Editor title and action buttons wrap to a second row on narrow windows; responds dynamically to sidebar width changes without a fixed breakpoint (`feat(ui)`)
 
 ## [0.6.4] - 2026-05-28
 
