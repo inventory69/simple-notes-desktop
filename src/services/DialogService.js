@@ -32,6 +32,7 @@ class DialogService {
     this.dialog = null;
     this.resolvePromise = null;
     this.keydownHandler = null;
+    this._backdropClickHandler = null;
     this.init();
   }
 
@@ -221,6 +222,7 @@ class DialogService {
       // Attach handlers
       this.confirmBtn.onclick = handleConfirm;
       this.cancelBtn.onclick = handleCancel;
+      this._attachBackdropHandler(handleCancel);
       document.addEventListener('keydown', handleKeydown);
 
       // Store for cleanup
@@ -282,6 +284,7 @@ class DialogService {
       // Attach handlers
       this.confirmBtn.onclick = handleConfirm;
       this.cancelBtn.onclick = handleCancel;
+      if (showCancel) this._attachBackdropHandler(handleCancel);
       document.addEventListener('keydown', handleKeydown);
 
       // Store for cleanup
@@ -289,11 +292,22 @@ class DialogService {
     });
   }
 
+  _attachBackdropHandler(handleCancel) {
+    this._backdropClickHandler = (e) => {
+      if (e.target === this.dialog) handleCancel();
+    };
+    this.dialog.addEventListener('click', this._backdropClickHandler);
+  }
+
   _cleanup() {
     this.dialog.classList.add('hidden');
     if (this.keydownHandler) {
       document.removeEventListener('keydown', this.keydownHandler);
       this.keydownHandler = null;
+    }
+    if (this._backdropClickHandler) {
+      this.dialog.removeEventListener('click', this._backdropClickHandler);
+      this._backdropClickHandler = null;
     }
   }
 
@@ -424,6 +438,7 @@ class DialogService {
 
       this.confirmBtn.onclick = handleConfirm;
       this.cancelBtn.onclick = handleCancel;
+      this._attachBackdropHandler(handleCancel);
       document.addEventListener('keydown', handleKeydown);
       this.keydownHandler = handleKeydown;
     });
@@ -490,6 +505,7 @@ class DialogService {
 
       this.confirmBtn.onclick = handleConfirm;
       this.cancelBtn.onclick = handleCancel;
+      this._attachBackdropHandler(handleCancel);
       document.addEventListener('keydown', handleKeydown);
       this.keydownHandler = handleKeydown;
     });
@@ -570,6 +586,7 @@ class DialogService {
 
       this.confirmBtn.onclick = handleConfirm;
       this.cancelBtn.onclick = handleCancel;
+      this._attachBackdropHandler(handleCancel);
       document.addEventListener('keydown', handleKeydown);
       this.keydownHandler = handleKeydown;
     });
