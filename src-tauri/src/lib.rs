@@ -1,10 +1,12 @@
 mod error;
+mod folders;
 mod markdown;
 mod models;
 mod storage;
 mod webdav;
 
 use error::{AppError, Result};
+use folders::{validate_folder_name, Folder, FolderMeta};
 use models::{Note, NoteMetadata};
 use std::sync::Mutex;
 use storage::{Credentials, Settings};
@@ -94,11 +96,11 @@ async fn list_notes(state: State<'_, WebDavState>) -> Result<Vec<NoteMetadata>> 
     };
 
     let client = client.ok_or(AppError::NotConnected)?;
-    let ids = client.list_json_files().await?;
+    let note_locations = client.list_notes_with_folders().await?;
 
     let mut notes = Vec::new();
-    for id in ids {
-        match client.get_note(&id).await {
+    for (id, folder) in note_locations {
+        match client.get_note(&id, folder.as_deref()).await {
             Ok(note) => notes.push(NoteMetadata::from(&note)),
             Err(e) => eprintln!("[list_notes] failed to load {}: {}", id, e),
         }
@@ -115,14 +117,18 @@ async fn list_notes(state: State<'_, WebDavState>) -> Result<Vec<NoteMetadata>> 
 }
 
 #[tauri::command]
-async fn get_note(id: String, state: State<'_, WebDavState>) -> Result<Note> {
+async fn get_note(
+    id: String,
+    folder_name: Option<String>,
+    state: State<'_, WebDavState>,
+) -> Result<Note> {
     let client = {
         let client_lock = lock_recover(&state.0);
         client_lock.clone()
     };
 
     let client = client.ok_or(AppError::NotConnected)?;
-    client.get_note(&id).await
+    client.get_note(&id, folder_name.as_deref()).await
 }
 
 #[tauri::command]
@@ -168,14 +174,18 @@ async fn create_note(
 }
 
 #[tauri::command]
-async fn delete_note(id: String, state: State<'_, WebDavState>) -> Result<()> {
+async fn delete_note(
+    id: String,
+    folder_name: Option<String>,
+    state: State<'_, WebDavState>,
+) -> Result<()> {
     let client = {
         let client_lock = lock_recover(&state.0);
         client_lock.clone()
     };
 
     let client = client.ok_or(AppError::NotConnected)?;
-    let note = client.get_note(&id).await?;
+    let note = client.get_note(&id, folder_name.as_deref()).await?;
     client.delete_note(&note).await
 }
 
@@ -434,6 +444,7 @@ async fn update_tray_setting(enabled: bool, state: State<'_, TraySettings>) -> R
 async fn color_notes(
     ids: Vec<String>,
     color: Option<String>,
+    folder_name: Option<String>,
     state: State<'_, WebDavState>,
 ) -> Result<()> {
     let client = {
@@ -443,7 +454,7 @@ async fn color_notes(
     let client = client.ok_or(AppError::NotConnected)?;
 
     for id in ids {
-        match client.get_note(&id).await {
+        match client.get_note(&id, folder_name.as_deref()).await {
             Ok(mut note) => {
                 note.color = color.clone();
                 note.updated_at = chrono::Utc::now().timestamp_millis();
@@ -459,7 +470,12 @@ async fn color_notes(
 
 /// Mehrere Notizen auf einmal an-/abpinnen
 #[tauri::command]
-async fn pin_notes(ids: Vec<String>, pinned: bool, state: State<'_, WebDavState>) -> Result<()> {
+async fn pin_notes(
+    ids: Vec<String>,
+    pinned: bool,
+    folder_name: Option<String>,
+    state: State<'_, WebDavState>,
+) -> Result<()> {
     let client = {
         let lock = lock_recover(&state.0);
         lock.clone()
@@ -467,7 +483,7 @@ async fn pin_notes(ids: Vec<String>, pinned: bool, state: State<'_, WebDavState>
     let client = client.ok_or(AppError::NotConnected)?;
 
     for id in ids {
-        match client.get_note(&id).await {
+        match client.get_note(&id, folder_name.as_deref()).await {
             Ok(mut note) => {
                 // None statt Some(false) beim Lösen — Android-kompatibel
                 note.is_pinned = if pinned { Some(true) } else { None };
@@ -477,6 +493,318 @@ async fn pin_notes(ids: Vec<String>, pinned: bool, state: State<'_, WebDavState>
                 }
             }
             Err(e) => eprintln!("[pin_notes] get failed for {}: {}", id, e),
+        }
+    }
+    Ok(())
+}
+
+// ── Ordner-Commands ──────────────────────────────────────────────────────────
+
+/// Hilfsfunktion: Aktive (nicht tombstoned) Ordner als Folder-Liste sortiert nach Name.
+/// Vereinigt `folders.json`-Einträge mit auf dem Server entdeckten Ordnern.
+async fn build_folder_list(client: &WebDavClient) -> Vec<Folder> {
+    let meta = client.read_folders_meta().await;
+    let discovered = client.discover_folders().await;
+
+    let mut names: Vec<(String, Option<String>)> = Vec::new();
+
+    // Zuerst Meta-Einträge (nicht gelöscht)
+    for m in &meta {
+        if !m.deleted {
+            names.push((m.name.clone(), m.color.clone()));
+        }
+    }
+
+    // Dann auf dem Server entdeckte Ordner hinzufügen, die noch nicht in Meta sind
+    for d in &discovered {
+        let already = meta.iter().any(|m| m.name.eq_ignore_ascii_case(d));
+        if !already {
+            let name_exists = names.iter().any(|(n, _)| n.eq_ignore_ascii_case(d));
+            if !name_exists {
+                names.push((d.clone(), None));
+            }
+        }
+    }
+
+    names.sort_by_key(|(a, _)| a.to_lowercase());
+    names
+        .into_iter()
+        .map(|(name, color)| Folder { name, color })
+        .collect()
+}
+
+/// Alle Ordner auflisten
+#[tauri::command]
+async fn list_folders(state: State<'_, WebDavState>) -> Result<Vec<Folder>> {
+    let client = {
+        let lock = lock_recover(&state.0);
+        lock.clone()
+    };
+    let client = client.ok_or(AppError::NotConnected)?;
+    Ok(build_folder_list(&client).await)
+}
+
+/// Neuen Ordner erstellen (oder reaktivieren wenn tombstoned)
+#[tauri::command]
+async fn create_folder(
+    name: String,
+    color: Option<String>,
+    state: State<'_, WebDavState>,
+) -> Result<Vec<Folder>> {
+    if !validate_folder_name(&name) {
+        return Err(AppError::WebDav(format!("Invalid folder name: {}", name)));
+    }
+
+    let client = {
+        let lock = lock_recover(&state.0);
+        lock.clone()
+    };
+    let client = client.ok_or(AppError::NotConnected)?;
+
+    let now = chrono::Utc::now().timestamp_millis();
+    let new_name = name.clone();
+    let new_color = color.clone();
+
+    client
+        .write_folders_meta_merged(move |mut existing| {
+            if let Some(pos) = existing
+                .iter()
+                .position(|m| m.name.eq_ignore_ascii_case(&new_name))
+            {
+                // Reaktivieren
+                existing[pos].deleted = false;
+                existing[pos].color = new_color.clone();
+                existing[pos].updated_at = now;
+            } else {
+                existing.push(FolderMeta {
+                    name: new_name.clone(),
+                    color: new_color.clone(),
+                    updated_at: now,
+                    deleted: false,
+                });
+            }
+            existing
+        })
+        .await?;
+
+    // Verzeichnisse anlegen
+    client.ensure_folder_dirs(&name).await;
+
+    Ok(build_folder_list(&client).await)
+}
+
+/// Ordner umbenennen: Notizen verschieben + Meta aktualisieren
+#[tauri::command]
+async fn rename_folder(
+    old_name: String,
+    new_name: String,
+    state: State<'_, WebDavState>,
+) -> Result<Vec<Folder>> {
+    if !validate_folder_name(&new_name) {
+        return Err(AppError::WebDav(format!(
+            "Invalid folder name: {}",
+            new_name
+        )));
+    }
+
+    let client = {
+        let lock = lock_recover(&state.0);
+        lock.clone()
+    };
+    let client = client.ok_or(AppError::NotConnected)?;
+
+    // Alle Notizen im alten Ordner verschieben
+    let note_locations = client.list_notes_with_folders().await?;
+    for (id, folder) in note_locations {
+        if folder
+            .as_deref()
+            .map(|f| f.eq_ignore_ascii_case(&old_name))
+            .unwrap_or(false)
+        {
+            if let Err(e) = client
+                .move_note_file(&id, Some(&old_name), Some(&new_name))
+                .await
+            {
+                eprintln!("[rename_folder] move {} failed: {}", id, e);
+            }
+        }
+    }
+
+    // Meta: alten Ordner tombstonen + neuen hinzufügen/reaktivieren (Farbe übernehmen)
+    let now = chrono::Utc::now().timestamp_millis();
+    let old_name_c = old_name.clone();
+    let new_name_c = new_name.clone();
+
+    client
+        .write_folders_meta_merged(move |mut existing| {
+            let old_color = existing
+                .iter()
+                .find(|m| m.name.eq_ignore_ascii_case(&old_name_c))
+                .and_then(|m| m.color.clone());
+
+            // Alten Eintrag tombstonen
+            for m in existing.iter_mut() {
+                if m.name.eq_ignore_ascii_case(&old_name_c) {
+                    m.deleted = true;
+                    m.updated_at = now;
+                }
+            }
+
+            // Neuen Eintrag hinzufügen oder reaktivieren
+            if let Some(pos) = existing
+                .iter()
+                .position(|m| m.name.eq_ignore_ascii_case(&new_name_c))
+            {
+                existing[pos].deleted = false;
+                existing[pos].color = old_color;
+                existing[pos].updated_at = now;
+            } else {
+                existing.push(FolderMeta {
+                    name: new_name_c.clone(),
+                    color: old_color,
+                    updated_at: now,
+                    deleted: false,
+                });
+            }
+            existing
+        })
+        .await?;
+
+    // Neues Verzeichnis sicherstellen
+    client.ensure_folder_dirs(&new_name).await;
+
+    Ok(build_folder_list(&client).await)
+}
+
+/// Ordner löschen: Notizen behalten (→ Root verschieben) oder mitlöschen
+#[tauri::command]
+async fn delete_folder(
+    name: String,
+    keep_notes: bool,
+    state: State<'_, WebDavState>,
+) -> Result<Vec<Folder>> {
+    let client = {
+        let lock = lock_recover(&state.0);
+        lock.clone()
+    };
+    let client = client.ok_or(AppError::NotConnected)?;
+
+    // Notizen im Ordner behandeln
+    let note_locations = client.list_notes_with_folders().await?;
+    for (id, folder) in note_locations {
+        if folder
+            .as_deref()
+            .map(|f| f.eq_ignore_ascii_case(&name))
+            .unwrap_or(false)
+        {
+            if keep_notes {
+                if let Err(e) = client.move_note_file(&id, Some(&name), None).await {
+                    eprintln!("[delete_folder] move {} to root failed: {}", id, e);
+                }
+            } else {
+                match client.get_note(&id, Some(&name)).await {
+                    Ok(note) => {
+                        if let Err(e) = client.delete_note(&note).await {
+                            eprintln!("[delete_folder] delete {} failed: {}", id, e);
+                        }
+                    }
+                    Err(e) => eprintln!("[delete_folder] get {} failed: {}", id, e),
+                }
+            }
+        }
+    }
+
+    // Ordner tombstonen
+    let now = chrono::Utc::now().timestamp_millis();
+    let name_c = name.clone();
+    client
+        .write_folders_meta_merged(move |mut existing| {
+            if let Some(pos) = existing
+                .iter()
+                .position(|m| m.name.eq_ignore_ascii_case(&name_c))
+            {
+                existing[pos].deleted = true;
+                existing[pos].updated_at = now;
+            } else {
+                existing.push(FolderMeta {
+                    name: name_c.clone(),
+                    color: None,
+                    updated_at: now,
+                    deleted: true,
+                });
+            }
+            existing
+        })
+        .await?;
+
+    Ok(build_folder_list(&client).await)
+}
+
+/// Ordner-Farbe setzen oder entfernen
+#[tauri::command]
+async fn set_folder_color(
+    name: String,
+    color: Option<String>,
+    state: State<'_, WebDavState>,
+) -> Result<Vec<Folder>> {
+    let client = {
+        let lock = lock_recover(&state.0);
+        lock.clone()
+    };
+    let client = client.ok_or(AppError::NotConnected)?;
+
+    let now = chrono::Utc::now().timestamp_millis();
+    let name_c = name.clone();
+    let color_c = color.clone();
+
+    client
+        .write_folders_meta_merged(move |mut existing| {
+            if let Some(pos) = existing
+                .iter()
+                .position(|m| m.name.eq_ignore_ascii_case(&name_c))
+            {
+                existing[pos].color = color_c.clone();
+                existing[pos].updated_at = now;
+            } else {
+                existing.push(FolderMeta {
+                    name: name_c.clone(),
+                    color: color_c.clone(),
+                    updated_at: now,
+                    deleted: false,
+                });
+            }
+            existing
+        })
+        .await?;
+
+    Ok(build_folder_list(&client).await)
+}
+
+/// Notizen in einen anderen Ordner verschieben
+#[tauri::command]
+async fn move_notes(
+    ids: Vec<String>,
+    source_folder: Option<String>,
+    target_folder: Option<String>,
+    state: State<'_, WebDavState>,
+) -> Result<()> {
+    let client = {
+        let lock = lock_recover(&state.0);
+        lock.clone()
+    };
+    let client = client.ok_or(AppError::NotConnected)?;
+
+    // Ziel-Verzeichnis anlegen (einmal)
+    if let Some(ref f) = target_folder {
+        client.ensure_folder_dirs(f).await;
+    }
+
+    for id in ids {
+        if let Err(e) = client
+            .move_note_file(&id, source_folder.as_deref(), target_folder.as_deref())
+            .await
+        {
+            eprintln!("[move_notes] move {} failed: {}", id, e);
         }
     }
     Ok(())
@@ -740,6 +1068,12 @@ pub fn run() {
             get_platform,
             check_for_updates,
             install_update,
+            list_folders,
+            create_folder,
+            rename_folder,
+            delete_folder,
+            set_folder_color,
+            move_notes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
