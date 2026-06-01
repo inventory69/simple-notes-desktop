@@ -22,10 +22,11 @@ export async function listNotes() {
 /**
  * Get a specific note by ID
  * @param {string} id - Note ID
+ * @param {string|null} folderName - Folder name (null = root)
  * @returns {Promise<Object>} Note object
  */
-export async function getNote(id) {
-  return await invoke('get_note', { id });
+export async function getNote(id, folderName = null) {
+  return await invoke('get_note', { id, folderName });
 }
 
 /**
@@ -50,9 +51,10 @@ export async function createNote(title, noteType) {
 /**
  * Delete a note
  * @param {string} id - Note ID to delete
+ * @param {string|null} folderName - Folder name (null = root)
  */
-export async function deleteNote(id) {
-  return await invoke('delete_note', { id });
+export async function deleteNote(id, folderName = null) {
+  return await invoke('delete_note', { id, folderName });
 }
 
 /**
@@ -130,18 +132,82 @@ export async function updateTraySetting(enabled) {
  * Pin or unpin multiple notes
  * @param {string[]} ids - Array of note IDs
  * @param {boolean} pinned - true = pin, false = unpin
+ * @param {string|null} folderName - Current folder context (null = root)
  */
-export async function pinNotes(ids, pinned) {
-  return await invoke('pin_notes', { ids, pinned });
+export async function pinNotes(ids, pinned, folderName = null) {
+  return await invoke('pin_notes', { ids, pinned, folderName });
 }
 
 /**
  * Set or remove the background color of multiple notes
  * @param {string[]} ids - Array of note IDs
  * @param {string|null} color - Hex color string (e.g. "#F28B82") or null to remove
+ * @param {string|null} folderName - Current folder context (null = root)
  */
-export async function colorNotes(ids, color) {
-  return await invoke('color_notes', { ids, color: color ?? null });
+export async function colorNotes(ids, color, folderName = null) {
+  return await invoke('color_notes', { ids, color: color ?? null, folderName });
+}
+
+/**
+ * List all folders
+ * @returns {Promise<Array<{name: string, color: string|null}>>}
+ */
+export async function listFolders() {
+  return await invoke('list_folders');
+}
+
+/**
+ * Create a new folder
+ * @param {string} name - Folder name
+ * @param {string|null} color - Optional hex color
+ * @returns {Promise<Array>} Updated folder list
+ */
+export async function createFolder(name, color = null) {
+  return await invoke('create_folder', { name, color });
+}
+
+/**
+ * Rename a folder (moves all contained notes)
+ * @param {string} oldName
+ * @param {string} newName
+ * @returns {Promise<Array>} Updated folder list
+ */
+export async function renameFolder(oldName, newName) {
+  return await invoke('rename_folder', { oldName, newName });
+}
+
+/**
+ * Delete a folder
+ * @param {string} name - Folder name
+ * @param {boolean} keepNotes - true = move notes to root; false = delete notes too
+ * @returns {Promise<Array>} Updated folder list
+ */
+export async function deleteFolder(name, keepNotes) {
+  return await invoke('delete_folder', { name, keepNotes });
+}
+
+/**
+ * Set or remove folder color
+ * @param {string} name - Folder name
+ * @param {string|null} color - Hex color or null
+ * @returns {Promise<Array>} Updated folder list
+ */
+export async function setFolderColor(name, color) {
+  return await invoke('set_folder_color', { name, color: color ?? null });
+}
+
+/**
+ * Move notes to a different folder
+ * @param {string[]} ids - Note IDs to move
+ * @param {string|null} sourceFolder - Current folder (null = root)
+ * @param {string|null} targetFolder - Target folder (null = root)
+ */
+export async function moveNotes(ids, sourceFolder, targetFolder) {
+  return await invoke('move_notes', {
+    ids,
+    sourceFolder: sourceFolder ?? null,
+    targetFolder: targetFolder ?? null,
+  });
 }
 
 /**
