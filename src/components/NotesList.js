@@ -154,7 +154,14 @@ export class NotesList {
   colorSelected() {
     if (this.selectedIds.size === 0) return;
     const btn = document.getElementById('batch-color-btn');
-    colorPicker.show(btn, null, async (color) => {
+    if (colorPicker.isVisible()) {
+      colorPicker.hide();
+      return;
+    }
+    const selectedNotes = noteService.getNotes().filter((n) => this.selectedIds.has(n.id));
+    const colors = selectedNotes.map((n) => n.color ?? null);
+    const sharedColor = colors.length > 0 && colors.every((c) => c === colors[0]) ? colors[0] : null;
+    colorPicker.show(btn, sharedColor, async (color) => {
       const ids = this.getSelectedIds();
       try {
         await noteService.colorNotes(ids, color);
