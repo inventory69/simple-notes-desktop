@@ -109,6 +109,16 @@ pub struct Note {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_pinned: Option<bool>,
 
+    /// Android v2.7.0: Ordner der Notiz (entspricht dem physischen Unterverzeichnis auf dem Server).
+    /// None = Root-Ebene. KRITISCH: Der Pfad auf dem Server ist maßgebend — dieser Wert wird beim
+    /// Laden immer aus dem Verzeichnis-Pfad gesetzt, nicht aus dem JSON-Inhalt.
+    #[serde(
+        rename = "folderName",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub folder_name: Option<String>,
+
     /// Cross-App-Kompatibilität: Auffangbecken für alle weiteren Notiz-Felder, die
     /// die Desktop-App nicht modelliert (inkl. künftiger Android-Schema-Erweiterungen).
     /// Werden beim Round-Trip 1:1 erhalten — der Kern des Datenverlust-Fix.
@@ -135,6 +145,7 @@ impl Note {
             labels: None,
             imported_at: None,
             is_pinned: None,
+            folder_name: None,
             extra: serde_json::Map::new(),
         }
     }
@@ -184,6 +195,13 @@ pub struct NoteMetadata {
     /// Android v2.5.0: Hintergrundfarbe der Notiz, Hex `#RRGGBB`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// Android v2.7.0: Ordner der Notiz (physisches Unterverzeichnis).
+    #[serde(
+        rename = "folderName",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub folder_name: Option<String>,
 }
 
 impl From<&Note> for NoteMetadata {
@@ -199,6 +217,7 @@ impl From<&Note> for NoteMetadata {
             checklist_sort_option: note.checklist_sort_option.clone(),
             is_pinned: note.is_pinned,
             color: note.color.clone(),
+            folder_name: note.folder_name.clone(),
         }
     }
 }
@@ -332,6 +351,46 @@ mod tests {
         assert_eq!(meta.note_type, note.note_type);
         assert_eq!(meta.is_pinned, note.is_pinned);
         assert_eq!(meta.color, note.color);
+        assert_eq!(meta.folder_name, note.folder_name);
+    }
+
+    #[test]
+    fn test_note_folder_name_round_trip() {
+        let json = r#"{
+            "id": "abc",
+            "title": "T",
+            "content": "C",
+            "createdAt": 1700000000000,
+            "updatedAt": 1700000000001,
+            "deviceId": "tauri-xyz",
+            "folderName": "Work"
+        }"#;
+        let note: Note = serde_json::from_str(json).unwrap();
+        assert_eq!(note.folder_name.as_deref(), Some("Work"));
+
+        let out = serde_json::to_value(&note).unwrap();
+        assert_eq!(out["folderName"], "Work");
+        // folderName must NOT appear in extra
+        assert!(
+            !note.extra.contains_key("folderName"),
+            "folderName must not be in extra"
+        );
+    }
+
+    #[test]
+    fn test_note_folder_name_absent_when_none() {
+        let note = Note::new("T".to_string(), "tauri-x".to_string());
+        assert_eq!(note.folder_name, None);
+        let out = serde_json::to_value(&note).unwrap();
+        assert!(!out.as_object().unwrap().contains_key("folderName"));
+    }
+
+    #[test]
+    fn test_note_metadata_carries_folder_name() {
+        let mut note = Note::new("My Note".to_string(), "tauri-abc".to_string());
+        note.folder_name = Some("Work".to_string());
+        let meta: NoteMetadata = (&note).into();
+        assert_eq!(meta.folder_name.as_deref(), Some("Work"));
     }
 
     #[test]

@@ -56,6 +56,11 @@ pub fn generate_markdown(note: &Note) -> String {
         md.push_str(&format!("\npinned: {}", is_pinned));
     }
 
+    // Android v2.7.0: Ordner-Zeile nach pinned (Note.toMarkdown Reihenfolge)
+    if let Some(ref folder) = note.folder_name {
+        md.push_str(&format!("\nfolder: \"{}\"", folder));
+    }
+
     md.push_str(&format!("\n---\n\n# {}\n\n", note.title));
 
     match note.note_type {
@@ -151,5 +156,40 @@ mod tests {
         assert!(!md.contains("labels:"));
         assert!(!md.contains("imported:"));
         assert!(!md.contains("pinned:"));
+    }
+
+    #[test]
+    fn test_generate_markdown_folder_line_present_when_set() {
+        let mut note = Note::new("Work Note".to_string(), "tauri-abc".to_string());
+        note.folder_name = Some("Work".to_string());
+        let md = generate_markdown(&note);
+        assert!(
+            md.contains("\nfolder: \"Work\""),
+            "folder line missing: {md}"
+        );
+    }
+
+    #[test]
+    fn test_generate_markdown_folder_line_absent_when_none() {
+        let note = Note::new("Root Note".to_string(), "tauri-abc".to_string());
+        let md = generate_markdown(&note);
+        assert!(
+            !md.contains("folder:"),
+            "folder line should be absent: {md}"
+        );
+    }
+
+    #[test]
+    fn test_generate_markdown_folder_line_after_pinned() {
+        let mut note = Note::new("Test".to_string(), "tauri-abc".to_string());
+        note.is_pinned = Some(true);
+        note.folder_name = Some("Work".to_string());
+        let md = generate_markdown(&note);
+        let pinned_pos = md.find("pinned:").unwrap();
+        let folder_pos = md.find("folder:").unwrap();
+        assert!(
+            folder_pos > pinned_pos,
+            "folder: must appear after pinned: in frontmatter"
+        );
     }
 }
