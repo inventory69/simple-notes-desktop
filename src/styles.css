@@ -1491,9 +1491,29 @@ body {
   box-shadow: 0 0 0 3px rgba(77, 159, 255, 0.2);
 }
 
+select.dialog-input {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  padding-right: 2.5rem;
+  cursor: pointer;
+}
+
 [data-theme="dark"] .dialog-input {
   background-color: #2a2a2a;
   border-color: #444;
+  color: #e0e0e0;
+}
+
+[data-theme="dark"] select.dialog-input {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+}
+
+[data-theme="dark"] select.dialog-input option {
+  background-color: #333;
+  color: #e0e0e0;
 }
 
 .btn-warning {
@@ -1746,4 +1766,123 @@ body {
 
 [data-theme="dark"] .update-toast {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+/* ── Folder UI ──────────────────────────────────────────────────────────────── */
+
+/* Back-Header im Ordner-View */
+.folder-back-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+  color: var(--color-primary);
+  font-weight: 600;
+  font-size: 0.95em;
+  border-bottom: 1px solid var(--color-border);
+  user-select: none;
+  background: var(--color-sidebar-bg);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.folder-back-header:hover {
+  background: var(--color-hover);
+}
+
+/* Ordner-Karte in der Root-Ansicht */
+.folder-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--color-border);
+  user-select: none;
+  transition: background 0.1s;
+  background: var(--color-sidebar-bg);
+}
+
+.folder-card:hover {
+  background: var(--color-hover);
+}
+
+.folder-card.has-color {
+  background: color-mix(in srgb, var(--nc-l) 18%, var(--color-sidebar-bg));
+}
+
+[data-theme="dark"] .folder-card.has-color {
+  background: color-mix(in srgb, var(--nc-d) 22%, var(--color-sidebar-bg));
+}
+
+.folder-card-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.folder-icon {
+  flex-shrink: 0;
+  color: var(--color-primary);
+}
+
+.folder-color-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+.folder-card-name {
+  flex: 1;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.folder-card-count {
+  font-size: 0.8em;
+  color: var(--color-fg);
+  opacity: 0.5;
+  margin-left: 4px;
+  flex-shrink: 0;
+}
+
+.folder-menu-btn {
+  flex-shrink: 0;
+  opacity: 0;
+  font-size: 1rem;
+  padding: 2px 6px;
+}
+
+.folder-card:hover .folder-menu-btn {
+  opacity: 1;
+}
+
+/* Folder options dropdown menu — reuse .sort-menu */
+.folder-options-menu .sort-menu-item-danger {
+  color: var(--color-danger);
+}
+
+/* Dialog input shared style */
+.dialog-input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 1rem;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  margin-top: 0.25rem;
+}
+
+.dialog-input:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -1px;
 }
