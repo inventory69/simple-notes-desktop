@@ -1,18 +1,20 @@
 import * as tauri from './tauri.js';
 
 /**
- * Note Service - Manages notes and syncing
+ * Note Service - Manages notes, folders and syncing
  */
 class NoteService {
   constructor() {
     this.notes = [];
     this.currentNote = null;
+    this.folders = [];
+    this.currentFolder = null; // null = root view
     this.listeners = new Set();
     this._saveQueues = new Map(); // note id → last in-flight save Promise
   }
 
   /**
-   * Subscribe to note changes
+   * Subscribe to note/folder changes
    * @param {Function} listener - Callback function
    */
   subscribe(listener) {
@@ -44,12 +46,62 @@ class NoteService {
   }
 
   /**
+   * Load all folders from server
+   */
+  async loadFolders() {
+    try {
+      this.folders = await tauri.listFolders();
+      this.notify();
+      return this.folders;
+    } catch (error) {
+      console.error('Failed to load folders:', error);
+      throw error;
+    }
+  }
+
+  /** Get the current folder list */
+  getFolders() {
+    return this.folders;
+  }
+
+  /** Get the currently viewed folder name (null = root) */
+  getCurrentFolder() {
+    return this.currentFolder;
+  }
+
+  /**
+   * Set the current folder view and notify.
+   * @param {string|null} name - Folder name or null for root
+   */
+  setCurrentFolder(name) {
+    this.currentFolder = name ?? null;
+    this.notify();
+  }
+
+  /**
+   * Returns a map of folderName → note count from the cached note list.
+   * null key = root notes.
+   * @returns {Map<string|null, number>}
+   */
+  getFolderNoteCounts() {
+    const counts = new Map();
+    for (const note of this.notes) {
+      const key = note.folderName ?? null;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }
+
+  /**
    * Get a specific note
    * @param {string} id - Note ID
    */
   async getNote(id) {
     try {
-      const note = await tauri.getNote(id);
+      // Look up cached note's folderName so we query the right server path
+      const cached = this.notes.find((n) => n.id === id);
+      const folderName = cached?.folderName ?? null;
+      const note = await tauri.getNote(id, folderName);
       this.currentNote = note;
       this.notify();
       return note;
@@ -100,8 +152,6 @@ class NoteService {
         }
 
         // Re-sort to match server ordering: pinned first, then updatedAt desc.
-        // Mirrors the sort in list_notes (lib.rs) so the sidebar stays in sync
-        // without a full network reload after every save.
         this.notes.sort((a, b) => {
           const aPin = a.isPinned ? 1 : 0;
           const bPin = b.isPinned ? 1 : 0;
@@ -120,7 +170,6 @@ class NoteService {
     try {
       return await next;
     } finally {
-      // Clean up the queue entry once this save is the last one in the chain
       if (this._saveQueues.get(note.id) === next) {
         this._saveQueues.delete(note.id);
       }
@@ -146,9 +195,9 @@ class NoteService {
    */
   async deleteNote(id) {
     try {
-      await tauri.deleteNote(id);
+      const cached = this.notes.find((n) => n.id === id);
+      await tauri.deleteNote(id, cached?.folderName ?? null);
 
-      // Remove from local cache
       this.notes = this.notes.filter((n) => n.id !== id);
 
       if (this.currentNote?.id === id) {
@@ -172,7 +221,8 @@ class NoteService {
 
     for (const id of ids) {
       try {
-        await tauri.deleteNote(id);
+        const cached = this.notes.find((n) => n.id === id);
+        await tauri.deleteNote(id, cached?.folderName ?? null);
         results.success.push(id);
       } catch (error) {
         console.error(`Failed to delete note ${id}:`, error);
@@ -180,7 +230,6 @@ class NoteService {
       }
     }
 
-    // Update local state for successful deletions
     this.notes = this.notes.filter((n) => !results.success.includes(n.id));
 
     if (this.currentNote && results.success.includes(this.currentNote.id)) {
@@ -197,7 +246,7 @@ class NoteService {
    * @param {boolean} pinned - true = pin, false = unpin
    */
   async pinNotes(ids, pinned) {
-    await tauri.pinNotes(ids, pinned);
+    await tauri.pinNotes(ids, pinned, this.currentFolder);
     await this.loadNotes();
     this.notify();
   }
@@ -208,33 +257,103 @@ class NoteService {
    * @param {string|null} color - Hex color string or null to remove
    */
   async colorNotes(ids, color) {
-    await tauri.colorNotes(ids, color);
+    await tauri.colorNotes(ids, color, this.currentFolder);
     await this.loadNotes();
     this.notify();
   }
 
   /**
-   * Search notes by query
+   * Create a folder
+   * @param {string} name - Folder name
+   * @param {string|null} color - Optional hex color
+   */
+  async createFolder(name, color = null) {
+    this.folders = await tauri.createFolder(name, color);
+    await this.loadNotes();
+    this.notify();
+  }
+
+  /**
+   * Rename a folder
+   * @param {string} oldName
+   * @param {string} newName
+   */
+  async renameFolder(oldName, newName) {
+    this.folders = await tauri.renameFolder(oldName, newName);
+    // If we were viewing the renamed folder, follow it
+    if (this.currentFolder?.toLowerCase() === oldName.toLowerCase()) {
+      this.currentFolder = newName;
+    }
+    await this.loadNotes();
+    this.notify();
+  }
+
+  /**
+   * Delete a folder
+   * @param {string} name
+   * @param {boolean} keepNotes - true = move to root, false = delete
+   */
+  async deleteFolder(name, keepNotes) {
+    this.folders = await tauri.deleteFolder(name, keepNotes);
+    // If we were viewing the deleted folder, go back to root
+    if (this.currentFolder?.toLowerCase() === name.toLowerCase()) {
+      this.currentFolder = null;
+    }
+    await this.loadNotes();
+    this.notify();
+  }
+
+  /**
+   * Set or remove folder color
+   * @param {string} name
+   * @param {string|null} color
+   */
+  async setFolderColor(name, color) {
+    this.folders = await tauri.setFolderColor(name, color);
+    this.notify();
+  }
+
+  /**
+   * Move notes to a different folder
+   * @param {string[]} ids - Note IDs
+   * @param {string|null} targetFolder - Target folder (null = root)
+   */
+  async moveNotes(ids, targetFolder) {
+    await tauri.moveNotes(ids, this.currentFolder, targetFolder);
+    await this.loadNotes();
+    await this.loadFolders();
+    this.notify();
+  }
+
+  /**
+   * Search notes by query within the current folder view.
    * @param {string} query - Search query
    */
   searchNotes(query) {
     if (!query.trim()) {
-      return this.notes;
+      return this.getNotesInCurrentFolder();
     }
 
     const lowerQuery = query.toLowerCase();
-    return this.notes.filter((note) => {
-      // Title match
+    return this.getNotesInCurrentFolder().filter((note) => {
       if (note.title.toLowerCase().includes(lowerQuery)) return true;
-
-      // Content match (TEXT notes)
       if (note.content?.toLowerCase().includes(lowerQuery)) return true;
-
-      // F1: Checklist items match
       if (note.checklistItems?.some((item) => item.text.toLowerCase().includes(lowerQuery))) return true;
-
       return false;
     });
+  }
+
+  /**
+   * Returns notes matching the current folder view.
+   * currentFolder === null → root notes (folderName is null/undefined)
+   * currentFolder !== null → notes with that folderName
+   */
+  getNotesInCurrentFolder() {
+    const current = this.currentFolder;
+    if (current === null) {
+      return this.notes.filter((n) => !n.folderName);
+    }
+    return this.notes.filter((n) => n.folderName?.toLowerCase() === current.toLowerCase());
   }
 
   /**
