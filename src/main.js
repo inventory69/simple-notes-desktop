@@ -46,6 +46,7 @@ class App {
 
     // Set up event listeners
     this.setupEventListeners();
+    this.setupSidebarResize();
 
     // Detect desktop environment for theming
     await this.detectDesktopEnvironment();
@@ -81,6 +82,44 @@ class App {
         if (attempt < 2) await new Promise((r) => setTimeout(r, 3000));
       }
     }
+  }
+
+  setupSidebarResize() {
+    const handle = document.getElementById('sidebar-resize-handle');
+    const sidebar = document.querySelector('.sidebar');
+    const root = document.documentElement;
+
+    const saved = localStorage.getItem('sidebarWidth');
+    if (saved) root.style.setProperty('--sidebar-width', `${saved}px`);
+
+    let dragging = false;
+    let startX = 0;
+    let startWidth = 0;
+
+    handle.addEventListener('mousedown', (e) => {
+      dragging = true;
+      startX = e.clientX;
+      startWidth = sidebar.offsetWidth;
+      handle.classList.add('is-dragging');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!dragging) return;
+      const w = Math.max(150, Math.min(520, startWidth + e.clientX - startX));
+      root.style.setProperty('--sidebar-width', `${w}px`);
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (!dragging) return;
+      dragging = false;
+      handle.classList.remove('is-dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      localStorage.setItem('sidebarWidth', sidebar.offsetWidth);
+    });
   }
 
   async clampWindowToMonitor() {
