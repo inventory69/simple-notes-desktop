@@ -339,6 +339,251 @@ class DialogService {
     };
     return icons[type] || icons.info;
   }
+
+  /**
+   * Prompt for a folder name with live validation.
+   * @param {{title: string, defaultValue?: string}} opts
+   * @returns {Promise<string|null>} valid folder name or null if cancelled
+   */
+  promptFolderName({ title, defaultValue = '' }) {
+    return new Promise((resolve) => {
+      this.resolvePromise = resolve;
+      this.titleEl.textContent = title;
+
+      this.messageEl.innerHTML = `
+        <div style="margin-bottom:0.5rem">Folder name:</div>
+        <input type="text" id="dialog-input" class="dialog-input"
+               placeholder="e.g. Work" maxlength="64" value="${defaultValue}">
+        <div id="dialog-folder-error" style="color:var(--color-danger);font-size:0.85em;margin-top:0.25rem;min-height:1.2em"></div>
+      `;
+      this.confirmBtn.textContent = 'OK';
+      this.cancelBtn.textContent = 'Cancel';
+      this.cancelBtn.style.display = '';
+      this.confirmBtn.className = this._getButtonClass('info');
+      this.iconContainer.innerHTML = this._getIcon('info');
+      this.iconContainer.className = 'dialog-icon dialog-icon-info';
+      this.dialog.classList.remove('hidden');
+
+      const inputEl = document.getElementById('dialog-input');
+      const errorEl = document.getElementById('dialog-folder-error');
+
+      const validate = (val) => {
+        if (!val.trim()) {
+          errorEl.textContent = '';
+          return false;
+        }
+        // Basic JS validation matching the Rust rules
+        const trimmed = val.trim();
+        if (trimmed.length > 64) {
+          errorEl.textContent = 'Name must be 64 characters or less.';
+          return false;
+        }
+        if (trimmed === '.' || trimmed === '..') {
+          errorEl.textContent = 'Invalid folder name.';
+          return false;
+        }
+        if (/[/\\:*?"<>|]/.test(trimmed) || [...trimmed].some((c) => c.charCodeAt(0) < 0x20)) {
+          errorEl.textContent = 'Name contains invalid characters.';
+          return false;
+        }
+        errorEl.textContent = '';
+        return true;
+      };
+
+      inputEl.addEventListener('input', () => validate(inputEl.value));
+
+      setTimeout(() => {
+        inputEl.focus();
+        inputEl.select();
+      }, 100);
+
+      const handleConfirm = () => {
+        const val = inputEl.value.trim();
+        if (!validate(val)) {
+          if (!val) errorEl.textContent = 'Folder name cannot be empty.';
+          return;
+        }
+        this._cleanup();
+        resolve(val);
+      };
+
+      const handleCancel = () => {
+        this._cleanup();
+        resolve(null);
+      };
+
+      const handleKeydown = (e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          handleCancel();
+        } else if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          handleConfirm();
+        }
+      };
+
+      this.confirmBtn.onclick = handleConfirm;
+      this.cancelBtn.onclick = handleCancel;
+      document.addEventListener('keydown', handleKeydown);
+      this.keydownHandler = handleKeydown;
+    });
+  }
+
+  /**
+   * Confirm folder deletion with optional "Keep notes" checkbox.
+   * @param {{folderName: string, isNotEmpty: boolean}} opts
+   * @returns {Promise<{confirmed: boolean, keepNotes: boolean}>}
+   */
+  confirmFolderDelete({ folderName, isNotEmpty }) {
+    return new Promise((resolve) => {
+      this.resolvePromise = resolve;
+
+      this.titleEl.textContent = `Delete Folder "${folderName}"`;
+
+      if (isNotEmpty) {
+        this.messageEl.innerHTML = `
+          <div style="margin-bottom:0.75rem">
+            This folder contains notes. What should happen to them?
+          </div>
+          <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer">
+            <input type="checkbox" id="dialog-keep-notes" checked>
+            <span>Keep notes (move to Root)</span>
+          </label>
+          <div style="margin-top:0.5rem;font-size:0.85em;color:var(--color-fg);opacity:0.7">
+            Uncheck to delete all notes in this folder from the server.
+          </div>
+        `;
+      } else {
+        this.messageEl.textContent = `Remove folder "${folderName}"? The folder is empty.`;
+      }
+
+      this.confirmBtn.textContent = 'Delete Folder';
+      this.confirmBtn.className = this._getButtonClass('danger');
+      this.cancelBtn.textContent = 'Cancel';
+      this.cancelBtn.style.display = '';
+      this.iconContainer.innerHTML = this._getIcon('danger');
+      this.iconContainer.className = 'dialog-icon dialog-icon-danger';
+      this.dialog.classList.remove('hidden');
+
+      setTimeout(() => this.confirmBtn.focus(), 100);
+
+      const handleConfirm = () => {
+        const keepNotes = isNotEmpty ? (document.getElementById('dialog-keep-notes')?.checked ?? true) : true;
+        this._cleanup();
+        resolve({ confirmed: true, keepNotes });
+      };
+
+      const handleCancel = () => {
+        this._cleanup();
+        resolve({ confirmed: false, keepNotes: true });
+      };
+
+      const handleKeydown = (e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          handleCancel();
+        } else if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          handleConfirm();
+        }
+      };
+
+      this.confirmBtn.onclick = handleConfirm;
+      this.cancelBtn.onclick = handleCancel;
+      document.addEventListener('keydown', handleKeydown);
+      this.keydownHandler = handleKeydown;
+    });
+  }
+
+  /**
+   * Choose a target folder for moving notes.
+   * @param {{folders: Array, currentFolder: string|null}} opts
+   * @returns {Promise<string|null|undefined>} folder name, null = root, undefined = cancelled
+   */
+  chooseFolder({ folders, currentFolder: _currentFolder }) {
+    return new Promise((resolve) => {
+      this.resolvePromise = resolve;
+
+      this.titleEl.textContent = 'Move to Folder';
+
+      const options = [
+        { value: '__root__', label: 'Root (no folder)' },
+        ...folders.map((f) => ({ value: f.name, label: f.name })),
+        { value: '__new__', label: '+ New folder…' },
+      ];
+
+      this.messageEl.innerHTML = `
+        <div style="margin-bottom:0.5rem">Choose destination:</div>
+        <select id="dialog-folder-select" class="dialog-input" style="width:100%">
+          ${options.map((o) => `<option value="${this._escapeAttr(o.value)}">${this._escapeHtml(o.label)}</option>`).join('')}
+        </select>
+      `;
+      this.confirmBtn.textContent = 'Move';
+      this.confirmBtn.className = this._getButtonClass('info');
+      this.cancelBtn.textContent = 'Cancel';
+      this.cancelBtn.style.display = '';
+      this.iconContainer.innerHTML = this._getIcon('info');
+      this.iconContainer.className = 'dialog-icon dialog-icon-info';
+      this.dialog.classList.remove('hidden');
+
+      setTimeout(() => document.getElementById('dialog-folder-select')?.focus(), 100);
+
+      const handleConfirm = async () => {
+        const sel = document.getElementById('dialog-folder-select');
+        const val = sel?.value;
+        if (val === '__new__') {
+          this._cleanup();
+          // Prompt for new folder name
+          const newName = await this.promptFolderName({ title: 'New Folder' });
+          if (!newName) {
+            resolve(undefined);
+            return;
+          }
+          // Create the folder then return it as target
+          try {
+            const { createFolder } = await import('./tauri.js');
+            await createFolder(newName, null);
+          } catch (_) {
+            /* ignore — noteService will reload */
+          }
+          resolve(newName);
+          return;
+        }
+        this._cleanup();
+        resolve(val === '__root__' ? null : val);
+      };
+
+      const handleCancel = () => {
+        this._cleanup();
+        resolve(undefined);
+      };
+
+      const handleKeydown = (e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          handleCancel();
+        } else if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          handleConfirm();
+        }
+      };
+
+      this.confirmBtn.onclick = handleConfirm;
+      this.cancelBtn.onclick = handleCancel;
+      document.addEventListener('keydown', handleKeydown);
+      this.keydownHandler = handleKeydown;
+    });
+  }
+
+  _escapeAttr(str) {
+    return String(str).replace(/"/g, '&quot;');
+  }
+
+  _escapeHtml(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
 }
 
 // Singleton export
