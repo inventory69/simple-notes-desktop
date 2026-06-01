@@ -349,6 +349,14 @@ class App {
 
   async handleNewFolder() {
     try {
+      if (noteService.getFolders().length === 0) {
+        const confirmed = await dialogService.confirm({
+          title: 'Compatibility Notice',
+          message:
+            'Notes moved into folders will not be visible in older versions of the Android app. Folder support requires Android app version 2.7.0 or later.\n\nContinue?',
+        });
+        if (!confirmed) return;
+      }
       const name = await dialogService.promptFolderName({ title: 'New Folder' });
       if (!name) return;
       await noteService.createFolder(name, null);
