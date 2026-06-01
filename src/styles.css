@@ -912,10 +912,12 @@ body {
   display: flex;
   align-items: center;
   gap: 1rem;
+  flex-wrap: wrap;
 }
 
 .note-title {
-  flex: 1;
+  flex: 1 1 180px;
+  min-width: 0;
   font-size: 1.5rem;
   font-weight: 600;
   border: none;
@@ -927,7 +929,8 @@ body {
 .editor-actions {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.5rem;
+  flex-shrink: 0;
 }
 
 .sync-status {
