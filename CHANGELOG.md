@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Folder support: notes can be organised into folders, matching Android app v2.7.0 (`feat(ui)`)
+  - **Requires Android app ≥ 2.7.0** — notes moved into folders are stored in subdirectories on the WebDAV server and will not be visible to older Android versions
+  - A one-time compatibility notice is shown before the first folder is created
+
 ## [0.6.4] - 2026-05-28
 
 ### Fixed

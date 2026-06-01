@@ -131,10 +131,24 @@ describe('NoteService', () => {
 
       await noteService.deleteNote('1');
 
-      expect(tauri.deleteNote).toHaveBeenCalledWith('1');
+      // Now passes (id, folderName) — note has no folderName so null
+      expect(tauri.deleteNote).toHaveBeenCalledWith('1', null);
       expect(noteService.notes.length).toBe(1);
       expect(noteService.notes[0].id).toBe('2');
       expect(noteService.currentNote).toBeNull();
+    });
+
+    it('should pass folderName from cached note to tauri.deleteNote', async () => {
+      noteService.notes = [
+        { id: '1', title: 'Note 1', folderName: 'Work' },
+        { id: '2', title: 'Note 2' },
+      ];
+      noteService.currentNote = { id: '1', title: 'Note 1', folderName: 'Work' };
+      tauri.deleteNote.mockResolvedValue();
+
+      await noteService.deleteNote('1');
+
+      expect(tauri.deleteNote).toHaveBeenCalledWith('1', 'Work');
     });
 
     it('should not clear currentNote if different note deleted', async () => {
@@ -148,6 +162,7 @@ describe('NoteService', () => {
 
   describe('searchNotes', () => {
     beforeEach(() => {
+      noteService.currentFolder = null; // root view
       noteService.notes = [
         { id: '1', title: 'JavaScript Tutorial', content: 'Learn JS' },
         { id: '2', title: 'Python Guide', content: 'Learn Python' },
@@ -155,7 +170,7 @@ describe('NoteService', () => {
       ];
     });
 
-    it('should return all notes for empty query', () => {
+    it('should return all root notes for empty query', () => {
       const results = noteService.searchNotes('');
       expect(results.length).toBe(3);
     });
@@ -181,6 +196,87 @@ describe('NoteService', () => {
     it('should return multiple matches', () => {
       const results = noteService.searchNotes('Learn');
       expect(results.length).toBe(3);
+    });
+  });
+
+  describe('folder state', () => {
+    beforeEach(() => {
+      noteService.currentFolder = null;
+      noteService.notes = [
+        { id: '1', title: 'Root Note' },
+        { id: '2', title: 'Work Note', folderName: 'Work' },
+        { id: '3', title: 'Home Note', folderName: 'Home' },
+      ];
+    });
+
+    it('getCurrentFolder returns null by default', () => {
+      expect(noteService.getCurrentFolder()).toBeNull();
+    });
+
+    it('setCurrentFolder updates and notifies', () => {
+      const listener = vi.fn();
+      noteService.subscribe(listener);
+      noteService.setCurrentFolder('Work');
+      expect(noteService.getCurrentFolder()).toBe('Work');
+      expect(listener).toHaveBeenCalled();
+    });
+
+    it('getNotesInCurrentFolder returns root notes when currentFolder is null', () => {
+      noteService.currentFolder = null;
+      const notes = noteService.getNotesInCurrentFolder();
+      expect(notes.length).toBe(1);
+      expect(notes[0].id).toBe('1');
+    });
+
+    it('getNotesInCurrentFolder returns folder notes when folder is set', () => {
+      noteService.currentFolder = 'Work';
+      const notes = noteService.getNotesInCurrentFolder();
+      expect(notes.length).toBe(1);
+      expect(notes[0].id).toBe('2');
+    });
+
+    it('getFolderNoteCounts counts notes per folder', () => {
+      const counts = noteService.getFolderNoteCounts();
+      expect(counts.get(null)).toBe(1);
+      expect(counts.get('Work')).toBe(1);
+      expect(counts.get('Home')).toBe(1);
+    });
+
+    it('searchNotes respects currentFolder', () => {
+      noteService.currentFolder = 'Work';
+      const results = noteService.searchNotes('');
+      expect(results.length).toBe(1);
+      expect(results[0].id).toBe('2');
+    });
+  });
+
+  describe('moveNotes', () => {
+    beforeEach(() => {
+      noteService.currentFolder = null;
+      noteService.notes = [];
+      noteService.folders = [];
+    });
+
+    it('calls tauri.moveNotes with currentFolder as source', async () => {
+      noteService.currentFolder = 'Work';
+      tauri.moveNotes.mockResolvedValue();
+      tauri.listNotes.mockResolvedValue([]);
+      tauri.listFolders.mockResolvedValue([]);
+
+      await noteService.moveNotes(['id-1', 'id-2'], 'Home');
+
+      expect(tauri.moveNotes).toHaveBeenCalledWith(['id-1', 'id-2'], 'Work', 'Home');
+    });
+
+    it('calls tauri.moveNotes with null source when at root', async () => {
+      noteService.currentFolder = null;
+      tauri.moveNotes.mockResolvedValue();
+      tauri.listNotes.mockResolvedValue([]);
+      tauri.listFolders.mockResolvedValue([]);
+
+      await noteService.moveNotes(['id-1'], null);
+
+      expect(tauri.moveNotes).toHaveBeenCalledWith(['id-1'], null, null);
     });
   });
 

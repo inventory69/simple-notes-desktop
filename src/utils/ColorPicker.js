@@ -59,6 +59,10 @@ class ColorPicker {
     }, 0);
   }
 
+  isVisible() {
+    return this.popup != null && !this.popup.classList.contains('hidden');
+  }
+
   hide() {
     this.popup?.classList.add('hidden');
     if (this._outsideClickHandler) {

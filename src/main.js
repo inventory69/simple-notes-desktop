@@ -34,6 +34,8 @@ class App {
     this.batchPinBtn = document.getElementById('batch-pin-btn');
     this.batchUnpinBtn = document.getElementById('batch-unpin-btn');
     this.batchColorBtn = document.getElementById('batch-color-btn');
+    this.batchMoveBtn = document.getElementById('batch-move-btn');
+    this.newFolderBtn = document.getElementById('new-folder-btn');
     this.selectionCount = this.batchActionsBar?.querySelector('.selection-count');
 
     this.init();
@@ -44,6 +46,7 @@ class App {
 
     // Set up event listeners
     this.setupEventListeners();
+    this.setupSidebarResize();
 
     // Detect desktop environment for theming
     await this.detectDesktopEnvironment();
@@ -79,6 +82,44 @@ class App {
         if (attempt < 2) await new Promise((r) => setTimeout(r, 3000));
       }
     }
+  }
+
+  setupSidebarResize() {
+    const handle = document.getElementById('sidebar-resize-handle');
+    const sidebar = document.querySelector('.sidebar');
+    const root = document.documentElement;
+
+    const saved = localStorage.getItem('sidebarWidth');
+    if (saved) root.style.setProperty('--sidebar-width', `${saved}px`);
+
+    let dragging = false;
+    let startX = 0;
+    let startWidth = 0;
+
+    handle.addEventListener('mousedown', (e) => {
+      dragging = true;
+      startX = e.clientX;
+      startWidth = sidebar.offsetWidth;
+      handle.classList.add('is-dragging');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!dragging) return;
+      const w = Math.max(150, Math.min(520, startWidth + e.clientX - startX));
+      root.style.setProperty('--sidebar-width', `${w}px`);
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (!dragging) return;
+      dragging = false;
+      handle.classList.remove('is-dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      localStorage.setItem('sidebarWidth', sidebar.offsetWidth);
+    });
   }
 
   async clampWindowToMonitor() {
@@ -201,6 +242,12 @@ class App {
     this.batchColorBtn?.addEventListener('click', () => {
       this.notesList.colorSelected();
     });
+    this.batchMoveBtn?.addEventListener('click', () => {
+      this.notesList.moveSelected();
+    });
+
+    // New folder button
+    this.newFolderBtn?.addEventListener('click', () => this.handleNewFolder());
 
     // F1: Global keyboard shortcuts
     document.addEventListener('keydown', (e) => {
@@ -283,18 +330,41 @@ class App {
     // Clear editor and selection state before loading new folder
     this.noteEditor.clear();
     this.notesList.clearSelection();
+    noteService.setCurrentFolder(null);
 
     // Show main container
     this.mainContainer.classList.remove('hidden');
 
-    // Load notes
+    // Load notes and folders in parallel
     try {
-      await noteService.loadNotes();
+      await Promise.all([noteService.loadNotes(), noteService.loadFolders()]);
     } catch (error) {
       console.error('Failed to load notes:', error);
       await dialogService.error({
         title: 'Load Failed',
         message: 'Failed to load notes from server',
+      });
+    }
+  }
+
+  async handleNewFolder() {
+    try {
+      if (noteService.getFolders().length === 0) {
+        const confirmed = await dialogService.confirm({
+          title: 'Compatibility Notice',
+          message:
+            'Notes moved into folders will not be visible in older versions of the Android app. Folder support requires Android app version 2.7.0 or later.\n\nContinue?',
+        });
+        if (!confirmed) return;
+      }
+      const name = await dialogService.promptFolderName({ title: 'New Folder' });
+      if (!name) return;
+      await noteService.createFolder(name, null);
+    } catch (error) {
+      console.error('Failed to create folder:', error);
+      await dialogService.error({
+        title: 'Creation Failed',
+        message: 'Failed to create folder',
       });
     }
   }
@@ -309,6 +379,10 @@ class App {
       if (!title) return;
 
       const note = await noteService.createNote(title, 'TEXT');
+      // Place note in the currently viewed folder if inside one
+      if (noteService.getCurrentFolder()) {
+        note.folderName = noteService.getCurrentFolder();
+      }
       await noteService.saveNote(note);
       this.noteEditor.loadNote(note);
     } catch (error) {
@@ -330,6 +404,9 @@ class App {
       if (!title) return;
 
       const note = await noteService.createNote(title, 'CHECKLIST');
+      if (noteService.getCurrentFolder()) {
+        note.folderName = noteService.getCurrentFolder();
+      }
       await noteService.saveNote(note);
       this.noteEditor.loadNote(note);
     } catch (error) {
@@ -349,7 +426,7 @@ class App {
       // Capture the open note's identity and timestamp BEFORE the refresh
       const openNote = this.noteEditor.currentNote;
 
-      await noteService.loadNotes();
+      await Promise.all([noteService.loadNotes(), noteService.loadFolders()]);
 
       this.syncBtn.disabled = false;
       this.syncBtn.classList.remove('spinning');
@@ -397,7 +474,9 @@ class App {
       this.mainContainer.classList.add('hidden');
       this.noteEditor.clear();
       noteService.notes = [];
+      noteService.folders = [];
       noteService.currentNote = null;
+      noteService.currentFolder = null;
       noteService.notify();
 
       // Show connection dialog

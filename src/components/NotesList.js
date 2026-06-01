@@ -4,7 +4,7 @@ import { colorPicker } from '../utils/ColorPicker.js';
 import { getColorPair, NOTE_COLORS } from '../utils/noteColors.js';
 
 /**
- * Notes List Component with Multi-Select support (F6)
+ * Notes List Component with Multi-Select support (F6) and Folders (F-FOLDERS)
  */
 export class NotesList {
   constructor() {
@@ -24,12 +24,13 @@ export class NotesList {
     this.sortOption = localStorage.getItem('noteListSortOption') || 'UPDATED_AT';
     this.sortDirection = localStorage.getItem('noteListSortDirection') || 'DESC';
     this._sortMenuCloseHandler = null;
+    this._renderedFolder = undefined;
 
     this.init();
   }
 
   init() {
-    // Subscribe to note changes
+    // Subscribe to note/folder changes
     noteService.subscribe(() => this.render());
 
     // Search input
@@ -46,6 +47,10 @@ export class NotesList {
       if (e.key === 'Escape' && this.selectionMode) {
         e.stopPropagation();
         this.exitSelectionMode();
+      }
+      // Escape inside a folder → go back to root
+      if (e.key === 'Escape' && !this.selectionMode && noteService.getCurrentFolder() !== null) {
+        noteService.setCurrentFolder(null);
       }
     });
 
@@ -85,7 +90,6 @@ export class NotesList {
     }
     this.lastSelectedId = id;
 
-    // Exit selection mode if no items selected
     if (this.selectedIds.size === 0) {
       this.exitSelectionMode();
       return;
@@ -102,7 +106,9 @@ export class NotesList {
       return;
     }
 
-    const rawNotes = this.searchInput.value ? noteService.searchNotes(this.searchInput.value) : noteService.getNotes();
+    const rawNotes = this.searchInput.value
+      ? noteService.searchNotes(this.searchInput.value)
+      : noteService.getNotesInCurrentFolder();
     const notes = this.applySortOption(rawNotes);
 
     const lastIndex = notes.findIndex((n) => n.id === this.lastSelectedId);
@@ -148,7 +154,14 @@ export class NotesList {
   colorSelected() {
     if (this.selectedIds.size === 0) return;
     const btn = document.getElementById('batch-color-btn');
-    colorPicker.show(btn, null, async (color) => {
+    if (colorPicker.isVisible()) {
+      colorPicker.hide();
+      return;
+    }
+    const selectedNotes = noteService.getNotes().filter((n) => this.selectedIds.has(n.id));
+    const colors = selectedNotes.map((n) => n.color ?? null);
+    const sharedColor = colors.length > 0 && colors.every((c) => c === colors[0]) ? colors[0] : null;
+    colorPicker.show(btn, sharedColor, async (color) => {
       const ids = this.getSelectedIds();
       try {
         await noteService.colorNotes(ids, color);
@@ -160,7 +173,7 @@ export class NotesList {
     });
   }
 
-  // F6: Delete selected notes (uses F4's confirmDeletion dialog)
+  // F6: Delete selected notes
   async deleteSelected() {
     const count = this.selectedIds.size;
     if (count === 0) return;
@@ -181,6 +194,28 @@ export class NotesList {
     this.exitSelectionMode();
   }
 
+  // Move selected notes to a folder
+  async moveSelected() {
+    if (this.selectedIds.size === 0) return;
+    const ids = this.getSelectedIds();
+    const folders = noteService.getFolders();
+
+    const target = await dialogService.chooseFolder({
+      folders,
+      currentFolder: noteService.getCurrentFolder(),
+    });
+
+    if (target === undefined) return; // cancelled
+
+    try {
+      await noteService.moveNotes(ids, target);
+    } catch (e) {
+      console.error('[NotesList] moveSelected failed:', e);
+      await dialogService.error({ title: 'Move Failed', message: e.message || 'Could not move notes.' });
+    }
+    this.exitSelectionMode();
+  }
+
   // F6: Notify parent about selection changes
   notifySelectionChange() {
     if (this.onSelectionChangeCallback) {
@@ -192,31 +227,250 @@ export class NotesList {
   }
 
   render(searchQuery = '') {
-    const rawNotes = searchQuery ? noteService.searchNotes(searchQuery) : noteService.getNotes();
-    const notes = this.applySortOption(rawNotes);
+    const currentFolder = noteService.getCurrentFolder();
+    if (currentFolder !== this._renderedFolder) {
+      this.container.scrollTop = 0;
+      this._renderedFolder = currentFolder;
+    }
+    const html = [];
 
-    if (notes.length === 0) {
-      this.container.innerHTML = '<div style="padding: 1rem; text-align: center; color: #999;">No notes found</div>';
+    if (searchQuery) {
+      // Searching: flat results within current folder
+      const rawNotes = noteService.searchNotes(searchQuery);
+      const notes = this.applySortOption(rawNotes);
+      if (notes.length === 0) {
+        this.container.innerHTML = '<div style="padding: 1rem; text-align: center; color: #999;">No notes found</div>';
+        return;
+      }
+      for (const note of notes) {
+        html.push(this.renderNoteItem(note));
+      }
+      this.container.innerHTML = html.join('');
+      this._attachNoteHandlers();
       return;
     }
 
-    // Abschnitts-Header "Pinned" / "Notes" wenn mindestens eine gepinnte Notiz vorhanden
-    const hasPinned = notes.some((n) => n.isPinned);
-    const html = [];
-    let normalHeaderInserted = false;
-    if (hasPinned) {
-      html.push('<div class="notes-section-header">Pinned</div>');
+    if (currentFolder === null) {
+      // Root view: Pinned → Folders → Notes
+      this._renderRootView(html);
+    } else {
+      // Folder view: back header → Pinned → Notes
+      this._renderFolderView(html, currentFolder);
     }
-    for (const note of notes) {
-      if (hasPinned && !note.isPinned && !normalHeaderInserted) {
-        html.push('<div class="notes-section-header">Notes</div>');
-        normalHeaderInserted = true;
+
+    this.container.innerHTML = html.join('');
+    this._attachNoteHandlers();
+    this._attachFolderHandlers();
+  }
+
+  _renderRootView(html) {
+    const rootNotes = noteService.getNotesInCurrentFolder();
+    const sortedNotes = this.applySortOption(rootNotes);
+    const folders = noteService.getFolders();
+    const counts = noteService.getFolderNoteCounts();
+
+    const pinnedNotes = sortedNotes.filter((n) => n.isPinned);
+    const unpinnedNotes = sortedNotes.filter((n) => !n.isPinned);
+
+    if (pinnedNotes.length > 0) {
+      html.push('<div class="notes-section-header">Pinned</div>');
+      for (const note of pinnedNotes) {
+        html.push(this.renderNoteItem(note));
       }
+    }
+
+    if (folders.length > 0) {
+      html.push('<div class="notes-section-header">Folders</div>');
+      for (const folder of folders) {
+        html.push(this.renderFolderCard(folder, counts.get(folder.name) ?? 0));
+      }
+    }
+
+    if (unpinnedNotes.length > 0) {
+      if (pinnedNotes.length > 0 || folders.length > 0) {
+        html.push('<div class="notes-section-header">Notes</div>');
+      }
+      for (const note of unpinnedNotes) {
+        html.push(this.renderNoteItem(note));
+      }
+    }
+
+    if (pinnedNotes.length === 0 && folders.length === 0 && unpinnedNotes.length === 0) {
+      html.push('<div style="padding: 1rem; text-align: center; color: #999;">No notes found</div>');
+    }
+  }
+
+  _renderFolderView(html, folderName) {
+    const folderNotes = noteService.getNotesInCurrentFolder();
+    const sortedNotes = this.applySortOption(folderNotes);
+
+    // Back header
+    html.push(`
+      <div class="folder-back-header" id="folder-back-btn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="15 18 9 12 15 6"></polyline>
+        </svg>
+        <span>${this.escapeHtml(folderName)}</span>
+      </div>
+    `);
+
+    const pinnedNotes = sortedNotes.filter((n) => n.isPinned);
+    const unpinnedNotes = sortedNotes.filter((n) => !n.isPinned);
+
+    if (pinnedNotes.length > 0) {
+      html.push('<div class="notes-section-header">Pinned</div>');
+      for (const note of pinnedNotes) {
+        html.push(this.renderNoteItem(note));
+      }
+    }
+
+    if (pinnedNotes.length > 0 && unpinnedNotes.length > 0) {
+      html.push('<div class="notes-section-header">Notes</div>');
+    }
+
+    for (const note of unpinnedNotes) {
       html.push(this.renderNoteItem(note));
     }
-    this.container.innerHTML = html.join('');
 
-    // Add click handlers
+    if (pinnedNotes.length === 0 && unpinnedNotes.length === 0) {
+      html.push('<div style="padding: 1rem; text-align: center; color: #999;">This folder is empty</div>');
+    }
+  }
+
+  renderFolderCard(folder, count) {
+    const colorPair = folder.color ? getColorPair(folder.color) : null;
+    const colorStyle = colorPair ? `style="--nc-l:${colorPair.light};--nc-d:${colorPair.dark}"` : '';
+    const colorClass = colorPair ? ' has-color' : '';
+
+    const colorSwatch = folder.color
+      ? `<span class="folder-color-swatch" style="background:${folder.color}"></span>`
+      : '';
+
+    return `
+      <div class="folder-card${colorClass}" data-folder="${this.escapeHtml(folder.name)}" ${colorStyle}>
+        <div class="folder-card-main">
+          <svg class="folder-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+          </svg>
+          ${colorSwatch}
+          <span class="folder-card-name">${this.escapeHtml(folder.name)}</span>
+          <span class="folder-card-count">${count}</span>
+        </div>
+        <button class="folder-menu-btn btn-icon-small" data-folder="${this.escapeHtml(folder.name)}" title="Folder options" type="button" aria-label="Folder options">⋯</button>
+      </div>
+    `;
+  }
+
+  _attachFolderHandlers() {
+    // Back button
+    const backBtn = this.container.querySelector('#folder-back-btn');
+    if (backBtn) {
+      backBtn.addEventListener('click', () => noteService.setCurrentFolder(null));
+    }
+
+    // Folder cards — click to enter, menu button for options
+    this.container.querySelectorAll('.folder-card').forEach((card) => {
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('.folder-menu-btn')) return;
+        const folderName = card.dataset.folder;
+        noteService.setCurrentFolder(folderName);
+      });
+    });
+
+    this.container.querySelectorAll('.folder-menu-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._showFolderMenu(btn, btn.dataset.folder);
+      });
+    });
+  }
+
+  _showFolderMenu(anchorBtn, folderName) {
+    // Remove any existing menu
+    for (const m of document.querySelectorAll('.folder-options-menu')) m.remove();
+
+    const menu = document.createElement('div');
+    menu.className = 'sort-menu folder-options-menu';
+    menu.innerHTML = `
+      <div class="sort-menu-item" data-action="rename">Rename</div>
+      <div class="sort-menu-item" data-action="color">Set color</div>
+      <div class="sort-menu-separator"></div>
+      <div class="sort-menu-item sort-menu-item-danger" data-action="delete">Delete folder</div>
+    `;
+
+    const rect = anchorBtn.getBoundingClientRect();
+    menu.style.position = 'fixed';
+    menu.style.top = `${rect.bottom + 4}px`;
+    menu.style.right = `${window.innerWidth - rect.right}px`;
+    document.body.appendChild(menu);
+
+    const folder = noteService.getFolders().find((f) => f.name === folderName);
+
+    menu.addEventListener('click', async (e) => {
+      const item = e.target.closest('.sort-menu-item');
+      if (!item) return;
+      menu.remove();
+      closeHandler && document.removeEventListener('click', closeHandler);
+
+      switch (item.dataset.action) {
+        case 'rename':
+          await this._handleRenameFolder(folderName);
+          break;
+        case 'color':
+          await this._handleSetFolderColor(folderName, anchorBtn, folder?.color ?? null);
+          break;
+        case 'delete':
+          await this._handleDeleteFolder(folderName);
+          break;
+      }
+    });
+
+    let closeHandler;
+    closeHandler = (e) => {
+      if (!menu.contains(e.target) && e.target !== anchorBtn) {
+        menu.remove();
+        document.removeEventListener('click', closeHandler);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closeHandler), 0);
+  }
+
+  async _handleRenameFolder(oldName) {
+    const newName = await dialogService.promptFolderName({
+      title: 'Rename Folder',
+      defaultValue: oldName,
+    });
+    if (!newName || newName === oldName) return;
+    try {
+      await noteService.renameFolder(oldName, newName);
+    } catch (e) {
+      await dialogService.error({ title: 'Rename Failed', message: e.message || String(e) });
+    }
+  }
+
+  async _handleSetFolderColor(folderName, anchorBtn, currentColor) {
+    colorPicker.show(anchorBtn, currentColor, async (color) => {
+      try {
+        await noteService.setFolderColor(folderName, color);
+      } catch (e) {
+        await dialogService.error({ title: 'Color Failed', message: e.message || String(e) });
+      }
+    });
+  }
+
+  async _handleDeleteFolder(folderName) {
+    const counts = noteService.getFolderNoteCounts();
+    const noteCount = counts.get(folderName) ?? 0;
+    const result = await dialogService.confirmFolderDelete({ folderName, isNotEmpty: noteCount > 0 });
+    if (!result.confirmed) return;
+    try {
+      await noteService.deleteFolder(folderName, result.keepNotes);
+    } catch (e) {
+      await dialogService.error({ title: 'Delete Failed', message: e.message || String(e) });
+    }
+  }
+
+  _attachNoteHandlers() {
     this.container.querySelectorAll('.note-item').forEach((item) => {
       item.addEventListener('click', (e) => {
         const id = item.dataset.id;
@@ -230,7 +484,6 @@ export class NotesList {
           return;
         }
 
-        // Ctrl+Click enters selection mode
         if (e.ctrlKey || e.metaKey) {
           this.enterSelectionMode();
           this.toggleSelection(id);
@@ -295,7 +548,6 @@ export class NotesList {
         });
         break;
       case 'NOTE_TYPE':
-        // ASC: Text (0) vor Checklist (1); sekundär immer updatedAt desc
         rest.sort((a, b) => {
           const ta = a.noteType === 'TEXT' ? 0 : 1;
           const tb = b.noteType === 'TEXT' ? 0 : 1;
@@ -304,7 +556,6 @@ export class NotesList {
         });
         break;
       case 'COLOR': {
-        // ASC: Palettenreihenfolge (Red→Gray→farblos); sekundär immer updatedAt desc
         const colorIdx = (hex) => {
           if (!hex) return NOTE_COLORS.length;
           const i = NOTE_COLORS.findIndex((c) => c.light.toLowerCase() === hex.toLowerCase());
@@ -325,7 +576,6 @@ export class NotesList {
   }
 
   showSortMenu() {
-    // Stale outside-click Handler aus vorherigem Öffnen/Schließen-Zyklus entfernen
     if (this._sortMenuCloseHandler) {
       document.removeEventListener('click', this._sortMenuCloseHandler);
       this._sortMenuCloseHandler = null;
@@ -362,7 +612,6 @@ export class NotesList {
         )
         .join('');
 
-    // Unterhalb des Sort-Buttons positionieren
     const rect = this.sortBtn.getBoundingClientRect();
     menu.style.position = 'fixed';
     menu.style.top = `${rect.bottom + 4}px`;
@@ -428,7 +677,6 @@ export class NotesList {
     if (isSelected) classes += ' multi-selected';
     if (colorPair) classes += ' has-color';
 
-    // F1: Note Type Icon
     const typeIcon =
       note.noteType === 'CHECKLIST'
         ? `<svg class="note-type-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -475,9 +723,6 @@ export class NotesList {
 
   /**
    * Generate up to 3 preview lines for a note.
-   * - TEXT notes: first 3 non-empty lines of stripped plaintext content
-   * - CHECKLIST notes: first 3 items as ☐/☑ lines, with optional summary below
-   * @returns {string[]} Array of 1-3 preview lines (plain text, escaped later)
    */
   getPreviewLines(note) {
     if (note.noteType === 'CHECKLIST' && note.checklistItems) {
@@ -488,23 +733,14 @@ export class NotesList {
       return ['Empty note'];
     }
 
-    // Split into lines, trim each, filter out empty lines
     const lines = note.content
       .split('\n')
       .map((line) => line.trim())
       .filter((line) => line.length > 0);
 
-    // Take up to 3 lines, truncate each to 120 chars
-    return lines.slice(0, 3).map((line) => (line.length > 120 ? `${line.substring(0, 120)}\u2026` : line));
+    return lines.slice(0, 3).map((line) => (line.length > 120 ? `${line.substring(0, 120)}…` : line));
   }
 
-  /**
-   * Generate checklist preview lines.
-   * Shows first 3 items as ☐/☑ lines.
-   * If there are more than 3 items, shows "X/X completed" as final summary.
-   * @param {Array} items - Checklist items
-   * @returns {string[]} Array of preview lines
-   */
   getChecklistPreviewLines(items, sortOption) {
     if (!items || items.length === 0) {
       return ['Empty checklist'];
@@ -524,7 +760,7 @@ export class NotesList {
           return a.order - b.order;
         });
         break;
-      default: // UNCHECKED_FIRST, MANUAL, null/undefined
+      default:
         sorted.sort((a, b) => {
           if (a.isChecked !== b.isChecked) return a.isChecked ? 1 : -1;
           return (a.originalOrder ?? a.order) - (b.originalOrder ?? b.order);
@@ -534,14 +770,12 @@ export class NotesList {
     const total = sorted.length;
     const checked = sorted.filter((item) => item.isChecked).length;
 
-    // Take first 3 items
     const previewItems = sorted.slice(0, 3).map((item) => {
-      const icon = item.isChecked ? '\u2611' : '\u2610';
-      const text = item.text.length > 100 ? `${item.text.substring(0, 100)}\u2026` : item.text;
+      const icon = item.isChecked ? '☑' : '☐';
+      const text = item.text.length > 100 ? `${item.text.substring(0, 100)}…` : item.text;
       return `${icon} ${text}`;
     });
 
-    // If there are more than 3 items, add a summary line
     if (total > 3) {
       previewItems.push(`${checked}/${total} completed`);
     }
@@ -599,7 +833,6 @@ export class NotesList {
     this.onSelectCallback = callback;
   }
 
-  // F6: Selection change callback
   onSelectionChange(callback) {
     this.onSelectionChangeCallback = callback;
   }

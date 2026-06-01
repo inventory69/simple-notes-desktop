@@ -1,4 +1,5 @@
 use crate::error::{AppError, Result};
+use crate::folders::{parse_folders_json, sanitize_folder_name, FolderMeta};
 use crate::markdown;
 use crate::models::Note;
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -12,6 +13,12 @@ static UUID_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
         r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.json",
     )
     .expect("UUID pattern is valid")
+});
+
+/// Regex zum Extrahieren von WebDAV `<d:href>` (Namespace-Prefix-Varianten: d/D)
+static HREF_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"<[Dd]:[Hh][Rr][Ee][Ff]>([^<]+)</[Dd]:[Hh][Rr][Ee][Ff]>")
+        .expect("HREF pattern is valid")
 });
 
 /// PROPFIND and MKCOL are not in reqwest's built-in Method constants — define them once here
@@ -65,6 +72,85 @@ impl WebDavClient {
         })
     }
 
+    // ── URL-Builder ─────────────────────────────────────────────────────────────
+
+    /// JSON-URL einer Notiz: `{base}/{sync_folder}/{enc(folder)/}{id}.json`
+    fn note_json_url(&self, folder: Option<&str>, id: &str) -> String {
+        match folder {
+            Some(f) => format!(
+                "{}/{}/{}/{}.json",
+                self.base_url,
+                self.sync_folder,
+                urlencoding::encode(f),
+                id
+            ),
+            None => format!("{}/{}/{}.json", self.base_url, self.sync_folder, id),
+        }
+    }
+
+    /// Markdown-URL einer Notiz: `{base}/{sync_folder}-md/{enc(folder)/}{title}.md`
+    fn note_md_url(&self, folder: Option<&str>, safe_title: &str) -> String {
+        match folder {
+            Some(f) => format!(
+                "{}/{}-md/{}/{}.md",
+                self.base_url,
+                self.sync_folder,
+                urlencoding::encode(f),
+                safe_title
+            ),
+            None => format!(
+                "{}/{}-md/{}.md",
+                self.base_url, self.sync_folder, safe_title
+            ),
+        }
+    }
+
+    /// URL zum JSON-Unterverzeichnis eines Ordners: `{base}/{sync_folder}/{enc(folder)}/`
+    fn folder_json_dir_url(&self, folder: &str) -> String {
+        format!(
+            "{}/{}/{}/",
+            self.base_url,
+            self.sync_folder,
+            urlencoding::encode(folder)
+        )
+    }
+
+    /// URL zum Markdown-Unterverzeichnis eines Ordners: `{base}/{sync_folder}-md/{enc(folder)}/`
+    fn folder_md_dir_url(&self, folder: &str) -> String {
+        format!(
+            "{}/{}-md/{}/",
+            self.base_url,
+            self.sync_folder,
+            urlencoding::encode(folder)
+        )
+    }
+
+    /// URL zur zentralen `folders.json`: `{base}/{sync_folder}/folders.json`
+    fn folders_file_url(&self) -> String {
+        format!("{}/{}/folders.json", self.base_url, self.sync_folder)
+    }
+
+    // ── MKCOL-Helfer ────────────────────────────────────────────────────────────
+
+    /// Erstellt das JSON-Unterverzeichnis und das MD-Unterverzeichnis eines Ordners.
+    /// Fehler (z.B. 405 Method Not Allowed wenn das Verzeichnis bereits existiert) werden ignoriert.
+    pub async fn ensure_folder_dirs(&self, folder: &str) {
+        let _ = self
+            .client
+            .request(MKCOL.clone(), self.folder_json_dir_url(folder))
+            .header("Authorization", &self.auth_header)
+            .send()
+            .await;
+        let _ = self
+            .client
+            .request(MKCOL.clone(), self.folder_md_dir_url(folder))
+            .header("Authorization", &self.auth_header)
+            .send()
+            .await;
+    }
+
+    // ── Verbindungstest & Verzeichnisse ─────────────────────────────────────────
+
     /// Testet die Verbindung zum Server
     pub async fn test_connection(&self) -> Result<bool> {
         let url = format!("{}/{}/", self.base_url, self.sync_folder);
@@ -113,91 +199,113 @@ impl WebDavClient {
         Ok(())
     }
 
-    /// Listet alle JSON-Dateien in /{sync_folder}/
-    pub async fn list_json_files(&self) -> Result<Vec<String>> {
-        let url = format!("{}/{}/", self.base_url, self.sync_folder);
+    // ── Notiz-Listing ────────────────────────────────────────────────────────────
 
-        let body = r#"<?xml version="1.0" encoding="utf-8"?>
-<d:propfind xmlns:d="DAV:">
-  <d:prop>
-    <d:displayname/>
-    <d:getcontenttype/>
-  </d:prop>
-</d:propfind>"#;
+    /// Listet alle Notizen mit ihrer Ordner-Zuordnung.
+    /// Gibt `(id, folder_name)` zurück — folder_name ist None für Root-Notizen.
+    pub async fn list_notes_with_folders(&self) -> Result<Vec<(String, Option<String>)>> {
+        let root_url = format!("{}/{}/", self.base_url, self.sync_folder);
+        let text = self.propfind_text(&root_url, "1").await?;
 
-        #[cfg(debug_assertions)]
-        eprintln!("[WebDAV] PROPFIND: {}", url);
+        let mut result: Vec<(String, Option<String>)> = Vec::new();
 
-        let response = self
-            .client
-            .request(PROPFIND.clone(), &url)
-            .header("Authorization", &self.auth_header)
-            .header("Depth", "1")
-            .header("Content-Type", "application/xml")
-            .body(body)
-            .send()
-            .await
-            .map_err(|e| AppError::NetworkError(e.to_string()))?;
-
-        if !response.status().is_success() && response.status() != StatusCode::MULTI_STATUS {
-            return Err(AppError::WebDav(format!(
-                "PROPFIND failed: {}",
-                response.status()
-            )));
-        }
-
-        let text = response
-            .text()
-            .await
-            .map_err(|e| AppError::NetworkError(e.to_string()))?;
-
-        #[cfg(debug_assertions)]
-        eprintln!("[WebDAV] PROPFIND response length: {} bytes", text.len());
-        #[cfg(debug_assertions)]
-        eprintln!(
-            "[WebDAV] Response preview: {}",
-            &text[..text.len().min(500)]
-        );
-
-        // Parse alle .json Dateien aus der WebDAV Response
-        let mut ids: Vec<String> = Vec::new();
-
-        // Decode URL-encoded content first
+        // Schritt 1: Root-Notizen aus dem Depth-1 PROPFIND (nur direkte Kinder)
         let decoded_text = urlencoding::decode(&text).unwrap_or_else(|_| text.clone().into());
-
-        // Suche nach UUID.json Pattern im gesamten Text
         for cap in UUID_PATTERN.captures_iter(&decoded_text) {
-            if let Some(uuid_match) = cap.get(1) {
-                let id = uuid_match.as_str().to_lowercase();
-                if !ids.contains(&id) {
-                    #[cfg(debug_assertions)]
-                    eprintln!("[WebDAV] Found note ID: {}", id);
-                    ids.push(id);
-                }
+            let id = cap[1].to_lowercase();
+            if !result.iter().any(|(i, _)| i == &id) {
+                result.push((id, None));
             }
         }
-
-        // Auch in URL-encoded Variante suchen
         for cap in UUID_PATTERN.captures_iter(&text) {
-            if let Some(uuid_match) = cap.get(1) {
-                let id = uuid_match.as_str().to_lowercase();
-                if !ids.contains(&id) {
-                    #[cfg(debug_assertions)]
-                    eprintln!("[WebDAV] Found note ID (encoded): {}", id);
-                    ids.push(id);
+            let id = cap[1].to_lowercase();
+            if !result.iter().any(|(i, _)| i == &id) {
+                result.push((id, None));
+            }
+        }
+
+        // Schritt 2: Unterordner aus href-Werten extrahieren
+        let subdirs = self.extract_subdirs_from_propfind(&text);
+
+        for folder_name in subdirs {
+            let subdir_url = self.folder_json_dir_url(&folder_name);
+            match self.propfind_text(&subdir_url, "1").await {
+                Ok(sub_text) => {
+                    let sub_decoded =
+                        urlencoding::decode(&sub_text).unwrap_or_else(|_| sub_text.clone().into());
+                    for cap in UUID_PATTERN.captures_iter(&sub_decoded) {
+                        let id = cap[1].to_lowercase();
+                        if !result.iter().any(|(i, _)| i == &id) {
+                            result.push((id, Some(folder_name.clone())));
+                        }
+                    }
+                    for cap in UUID_PATTERN.captures_iter(&sub_text) {
+                        let id = cap[1].to_lowercase();
+                        if !result.iter().any(|(i, _)| i == &id) {
+                            result.push((id, Some(folder_name.clone())));
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[WebDAV] PROPFIND subdir {} failed: {}", folder_name, e);
                 }
             }
         }
 
-        #[cfg(debug_assertions)]
-        eprintln!("[WebDAV] Total found: {} note IDs", ids.len());
-
-        Ok(ids)
+        Ok(result)
     }
 
-    /// Lädt eine einzelne Notiz
-    pub async fn get_note(&self, id: &str) -> Result<Note> {
-        let url = format!("{}/{}/{}.json", self.base_url, self.sync_folder, id);
+    /// Extrahiert direkte Unterordner-Namen aus einer PROPFIND-Antwort auf das Root-Verzeichnis.
+    fn extract_subdirs_from_propfind(&self, text: &str) -> Vec<String> {
+        let mut subdirs: Vec<String> = Vec::new();
+
+        for cap in HREF_PATTERN.captures_iter(text) {
+            let href = cap[1].trim();
+            if !href.ends_with('/') {
+                continue;
+            }
+
+            // URL-decode und letztes Pfadsegment ermitteln
+            let decoded = urlencoding::decode(href.trim_end_matches('/'))
+                .unwrap_or_else(|_| href.trim_end_matches('/').into())
+                .into_owned();
+
+            let last_seg = match decoded.rsplit('/').next() {
+                Some(s) if !s.is_empty() => s,
+                _ => continue,
+            };
+
+            // Root-Ordner selbst und sync_folder überspringen
+            if last_seg == self.sync_folder {
+                continue;
+            }
+
+            // Validieren und bereinigen
+            if let Some(folder_name) = sanitize_folder_name(last_seg) {
+                if !subdirs.contains(&folder_name) {
+                    subdirs.push(folder_name);
+                }
+            }
+        }
+
+        subdirs
+    }
+
+    /// Gibt alle Ordner-Namen zurück, die als physische Verzeichnisse auf dem Server existieren.
+    pub async fn discover_folders(&self) -> Vec<String> {
+        let root_url = format!("{}/{}/", self.base_url, self.sync_folder);
+        match self.propfind_text(&root_url, "1").await {
+            Ok(text) => self.extract_subdirs_from_propfind(&text),
+            Err(_) => Vec::new(),
+        }
+    }
+
+    // ── Einzel-Notiz ────────────────────────────────────────────────────────────
+
+    /// Lädt eine einzelne Notiz aus dem angegebenen Ordner.
+    /// `folder` = None → Root-Ebene; der path ist maßgebend für `note.folder_name`.
+    pub async fn get_note(&self, id: &str, folder: Option<&str>) -> Result<Note> {
+        let url = self.note_json_url(folder, id);
 
         let response = self
             .client
@@ -217,6 +325,9 @@ impl WebDavClient {
                 // Fix noteType basierend auf checklistItems (für alte Notizen ohne noteType-Feld)
                 note.fix_note_type();
 
+                // Pfad ist maßgebend — überschreibt was im JSON-Body steht
+                note.folder_name = folder.map(str::to_owned);
+
                 Ok(note)
             }
             StatusCode::NOT_FOUND => Err(AppError::NoteNotFound(id.to_string())),
@@ -224,18 +335,22 @@ impl WebDavClient {
         }
     }
 
-    /// Speichert eine Notiz (Dual-Write: JSON + Markdown).
+    /// Speichert eine Notiz (Dual-Write: JSON + Markdown), ordner-bewusst.
     ///
-    /// Löscht die alte `.md`-Datei wenn der Titel geändert wurde, damit keine
-    /// verwaisten Markdown-Dateien im `-md/`-Ordner entstehen (TD-01).
+    /// Löscht die alte `.md`-Datei wenn der Titel geändert wurde.
     pub async fn save_note(&self, note: &Note) -> Result<()> {
+        let folder = note.folder_name.as_deref();
+
+        // MKCOL Unterverzeichnisse, falls Notiz in einem Ordner liegt
+        if let Some(f) = folder {
+            self.ensure_folder_dirs(f).await;
+        }
+
         // Titel-Diff: alte .md entfernen wenn der Titel sich geändert hat.
-        // Fehler (z.B. NoteNotFound für neue Notizen) werden ignoriert.
-        if let Ok(existing) = self.get_note(&note.id).await {
+        if let Ok(existing) = self.get_note(&note.id, folder).await {
             if existing.title != note.title {
                 let old_safe = sanitize_filename(&existing.title, &note.id);
-                let old_md_url =
-                    format!("{}/{}-md/{}.md", self.base_url, self.sync_folder, old_safe);
+                let old_md_url = self.note_md_url(folder, &old_safe);
                 let _ = self
                     .client
                     .delete(&old_md_url)
@@ -251,16 +366,13 @@ impl WebDavClient {
     }
 
     async fn save_json(&self, note: &Note) -> Result<()> {
-        let url = format!("{}/{}/{}.json", self.base_url, self.sync_folder, note.id);
+        let url = self.note_json_url(note.folder_name.as_deref(), &note.id);
 
         #[cfg(debug_assertions)]
         eprintln!("[WebDAV] PUT JSON: {}", url);
 
         let json_content =
             serde_json::to_string_pretty(note).map_err(|e| AppError::ParseError(e.to_string()))?;
-
-        #[cfg(debug_assertions)]
-        eprintln!("[WebDAV] JSON content length: {} bytes", json_content.len());
 
         let response = self
             .client
@@ -273,31 +385,21 @@ impl WebDavClient {
             .map_err(|e| AppError::NetworkError(e.to_string()))?;
 
         let status = response.status();
-        #[cfg(debug_assertions)]
-        eprintln!("[WebDAV] PUT JSON response status: {}", status);
-
         if !status.is_success() {
             let error_body = response.text().await.unwrap_or_default();
-            #[cfg(debug_assertions)]
-            eprintln!("[WebDAV] PUT JSON error body: {}", error_body);
             return Err(AppError::WebDav(format!(
                 "PUT JSON failed: {} - {}",
                 status, error_body
             )));
         }
 
-        #[cfg(debug_assertions)]
-        eprintln!("[WebDAV] PUT JSON successful");
         Ok(())
     }
 
     async fn save_markdown(&self, note: &Note) -> Result<()> {
         let markdown_content = markdown::generate_markdown(note);
         let safe_title = sanitize_filename(&note.title, &note.id);
-        let url = format!(
-            "{}/{}-md/{}.md",
-            self.base_url, self.sync_folder, safe_title
-        );
+        let url = self.note_md_url(note.folder_name.as_deref(), &safe_title);
 
         let response = self
             .client
@@ -320,9 +422,11 @@ impl WebDavClient {
         Ok(())
     }
 
-    /// Löscht eine Notiz (beide Dateien)
+    /// Löscht eine Notiz (JSON + Markdown) aus dem in `note.folder_name` angegebenen Ordner.
     pub async fn delete_note(&self, note: &Note) -> Result<()> {
-        let json_url = format!("{}/{}/{}.json", self.base_url, self.sync_folder, note.id);
+        let folder = note.folder_name.as_deref();
+
+        let json_url = self.note_json_url(folder, &note.id);
         let _ = self
             .client
             .delete(&json_url)
@@ -331,10 +435,7 @@ impl WebDavClient {
             .await;
 
         let safe_title = sanitize_filename(&note.title, &note.id);
-        let md_url = format!(
-            "{}/{}-md/{}.md",
-            self.base_url, self.sync_folder, safe_title
-        );
+        let md_url = self.note_md_url(folder, &safe_title);
         let _ = self
             .client
             .delete(&md_url)
@@ -343,6 +444,150 @@ impl WebDavClient {
             .await;
 
         Ok(())
+    }
+
+    /// Verschiebt eine Notiz von `from_folder` nach `to_folder` (Copy-then-Delete).
+    /// Toleriert 404 beim Löschen des alten Pfades.
+    pub async fn move_note_file(
+        &self,
+        id: &str,
+        from_folder: Option<&str>,
+        to_folder: Option<&str>,
+    ) -> Result<()> {
+        // Notiz am alten Pfad laden
+        let mut note = self.get_note(id, from_folder).await?;
+
+        // Ordner aktualisieren
+        note.folder_name = to_folder.map(str::to_owned);
+        // Timestamp aktualisieren, damit Android die neuere Server-Version zieht
+        // und nicht seine lokale Kopie (gleicher Timestamp) erneut hochlädt.
+        note.updated_at = chrono::Utc::now().timestamp_millis();
+
+        // Ziel-Verzeichnisse anlegen (falls Ordner)
+        if let Some(f) = to_folder {
+            self.ensure_folder_dirs(f).await;
+        }
+
+        // Am neuen Pfad speichern (JSON + MD)
+        self.save_json(&note).await?;
+        self.save_markdown(&note).await?;
+
+        // Alten JSON-Pfad löschen (Fehler ignorieren)
+        let old_json = self.note_json_url(from_folder, id);
+        let _ = self
+            .client
+            .delete(&old_json)
+            .header("Authorization", &self.auth_header)
+            .send()
+            .await;
+
+        // Alten MD-Pfad löschen (Fehler ignorieren)
+        let safe_title = sanitize_filename(&note.title, id);
+        let old_md = self.note_md_url(from_folder, &safe_title);
+        let _ = self
+            .client
+            .delete(&old_md)
+            .header("Authorization", &self.auth_header)
+            .send()
+            .await;
+
+        Ok(())
+    }
+
+    // ── Ordner-Metadaten ────────────────────────────────────────────────────────
+
+    /// Lädt `folders.json` vom Server (404 → leere Liste).
+    pub async fn read_folders_meta(&self) -> Vec<FolderMeta> {
+        let url = self.folders_file_url();
+        let resp = self
+            .client
+            .get(&url)
+            .header("Authorization", &self.auth_header)
+            .send()
+            .await;
+
+        let Ok(resp) = resp else {
+            return Vec::new();
+        };
+
+        if resp.status() == StatusCode::NOT_FOUND {
+            return Vec::new();
+        }
+
+        let Ok(text) = resp.text().await else {
+            return Vec::new();
+        };
+
+        parse_folders_json(&text)
+    }
+
+    /// Read-Modify-Write für `folders.json`:
+    /// GET remote → `mutation` anwenden → PUT zurück.
+    /// `mutation` erhält die aktuelle Liste und gibt die veränderte zurück.
+    pub async fn write_folders_meta_merged(
+        &self,
+        mutation: impl FnOnce(Vec<FolderMeta>) -> Vec<FolderMeta>,
+    ) -> Result<Vec<FolderMeta>> {
+        let remote = self.read_folders_meta().await;
+        let updated = mutation(remote);
+        let json = serde_json::to_string_pretty(&updated)
+            .map_err(|e| AppError::ParseError(e.to_string()))?;
+
+        let url = self.folders_file_url();
+        let resp = self
+            .client
+            .put(&url)
+            .header("Authorization", &self.auth_header)
+            .header("Content-Type", "application/json")
+            .body(json)
+            .send()
+            .await
+            .map_err(|e| AppError::NetworkError(e.to_string()))?;
+
+        if !resp.status().is_success() {
+            return Err(AppError::WebDav(format!(
+                "PUT folders.json failed: {}",
+                resp.status()
+            )));
+        }
+
+        Ok(updated)
+    }
+
+    // ── Interner PROPFIND-Helfer ─────────────────────────────────────────────────
+
+    async fn propfind_text(&self, url: &str, depth: &str) -> Result<String> {
+        let body = r#"<?xml version="1.0" encoding="utf-8"?>
+<d:propfind xmlns:d="DAV:">
+  <d:prop>
+    <d:displayname/>
+    <d:getcontenttype/>
+    <d:resourcetype/>
+  </d:prop>
+</d:propfind>"#;
+
+        let response = self
+            .client
+            .request(PROPFIND.clone(), url)
+            .header("Authorization", &self.auth_header)
+            .header("Depth", depth)
+            .header("Content-Type", "application/xml")
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| AppError::NetworkError(e.to_string()))?;
+
+        if !response.status().is_success() && response.status() != StatusCode::MULTI_STATUS {
+            return Err(AppError::WebDav(format!(
+                "PROPFIND failed: {}",
+                response.status()
+            )));
+        }
+
+        response
+            .text()
+            .await
+            .map_err(|e| AppError::NetworkError(e.to_string()))
     }
 }
 
@@ -413,5 +658,126 @@ mod tests {
         assert_eq!(sanitize_filename("  Trimmed  ", id), "Trimmed");
         assert_eq!(sanitize_filename("", id), "untitled-abcdef12");
         assert_eq!(sanitize_filename("   ", id), "untitled-abcdef12");
+    }
+
+    // ── Folder URL-Builder Tests ─────────────────────────────────────────────────
+    // Prüft dass die URL-Builder das korrekte %20-Encoding für Leerzeichen liefern
+    // (Android verwendet URLEncoder…replace("+","%20")).
+
+    fn make_client() -> WebDavClient {
+        WebDavClient {
+            client: Client::builder()
+                .danger_accept_invalid_certs(true)
+                .build()
+                .unwrap(),
+            base_url: "http://server".to_string(),
+            auth_header: "Basic dGVzdA==".to_string(),
+            sync_folder: "notes".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_note_json_url_root() {
+        let c = make_client();
+        let url = c.note_json_url(None, "abc-123");
+        assert_eq!(url, "http://server/notes/abc-123.json");
+    }
+
+    #[test]
+    fn test_note_json_url_folder() {
+        let c = make_client();
+        let url = c.note_json_url(Some("Work"), "abc-123");
+        assert_eq!(url, "http://server/notes/Work/abc-123.json");
+    }
+
+    #[test]
+    fn test_note_json_url_folder_with_space() {
+        let c = make_client();
+        let url = c.note_json_url(Some("My Folder"), "abc-123");
+        // Space must be encoded as %20 (not +)
+        assert!(url.contains("%20"), "space must be %20-encoded: {}", url);
+        assert_eq!(url, "http://server/notes/My%20Folder/abc-123.json");
+    }
+
+    #[test]
+    fn test_note_md_url_root() {
+        let c = make_client();
+        let url = c.note_md_url(None, "My Note");
+        assert_eq!(url, "http://server/notes-md/My Note.md");
+    }
+
+    #[test]
+    fn test_note_md_url_folder() {
+        let c = make_client();
+        let url = c.note_md_url(Some("Work"), "My Note");
+        assert_eq!(url, "http://server/notes-md/Work/My Note.md");
+    }
+
+    #[test]
+    fn test_folder_json_dir_url() {
+        let c = make_client();
+        assert_eq!(c.folder_json_dir_url("Work"), "http://server/notes/Work/");
+        // Space → %20
+        assert_eq!(
+            c.folder_json_dir_url("My Folder"),
+            "http://server/notes/My%20Folder/"
+        );
+    }
+
+    #[test]
+    fn test_folder_md_dir_url() {
+        let c = make_client();
+        assert_eq!(c.folder_md_dir_url("Work"), "http://server/notes-md/Work/");
+    }
+
+    #[test]
+    fn test_folders_file_url() {
+        let c = make_client();
+        assert_eq!(c.folders_file_url(), "http://server/notes/folders.json");
+    }
+
+    #[test]
+    fn test_extract_subdirs_skips_root_and_uuid_files() {
+        let c = make_client();
+        // Simulate a PROPFIND response with hrefs
+        let propfind_body = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/notes/</d:href>
+  </d:response>
+  <d:response>
+    <d:href>/dav/notes/11111111-1111-1111-1111-111111111111.json</d:href>
+  </d:response>
+  <d:response>
+    <d:href>/dav/notes/folders.json</d:href>
+  </d:response>
+  <d:response>
+    <d:href>/dav/notes/Work/</d:href>
+  </d:response>
+  <d:response>
+    <d:href>/dav/notes/My%20Notes/</d:href>
+  </d:response>
+</d:multistatus>"#;
+
+        let subdirs = c.extract_subdirs_from_propfind(propfind_body);
+        assert_eq!(
+            subdirs.len(),
+            2,
+            "should find Work and My Notes: {:?}",
+            subdirs
+        );
+        assert!(subdirs.contains(&"Work".to_string()));
+        assert!(subdirs.contains(&"My Notes".to_string()));
+    }
+
+    #[test]
+    fn test_extract_subdirs_deduplicates() {
+        let c = make_client();
+        let body = r#"
+<d:response><d:href>/dav/notes/Work/</d:href></d:response>
+<d:response><d:href>/dav/notes/Work/</d:href></d:response>
+"#;
+        let subdirs = c.extract_subdirs_from_propfind(body);
+        assert_eq!(subdirs.len(), 1);
     }
 }
