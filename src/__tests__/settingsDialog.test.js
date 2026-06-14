@@ -16,6 +16,10 @@ function setupDOM() {
           <option value="light">Light</option>
           <option value="dark">Dark</option>
         </select>
+        <select id="default-open-mode-select">
+          <option value="edit">Edit mode</option>
+          <option value="preview">Preview</option>
+        </select>
         <input type="checkbox" id="autosave-checkbox" />
         <input type="checkbox" id="tray-checkbox" />
         <input type="checkbox" id="autostart-checkbox" />
@@ -52,6 +56,7 @@ describe('SettingsDialog', () => {
       autostart: false,
       sync_folder: 'notes',
       update_notifications: true,
+      default_open_mode: 'edit',
     });
     tauri.getDeviceId.mockResolvedValue('tauri-abc123');
     tauri.saveSettings.mockResolvedValue();

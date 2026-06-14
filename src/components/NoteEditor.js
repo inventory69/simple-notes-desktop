@@ -73,6 +73,8 @@ export class NoteEditor {
     // True when the user has made changes that haven't been persisted to the server yet
     this._isDirty = false;
 
+    this.defaultOpenMode = 'edit';
+
     this.init();
   }
 
@@ -848,9 +850,13 @@ export class NoteEditor {
       this.mdToolbar?.classList.remove('hidden');
       this.initEditor();
 
-      // Preview hidden by default
-      this.previewDiv.classList.add('hidden');
-      this.editorDiv.style.width = '100%';
+      // Preview hidden by default; enable if default_open_mode is "preview" (existing notes only)
+      if (this.defaultOpenMode === 'preview' && note.content) {
+        this.togglePreview();
+      } else {
+        this.previewDiv.classList.add('hidden');
+        this.editorDiv.style.width = '100%';
+      }
     }
 
     this._updateUndoButton();
@@ -1157,6 +1163,10 @@ export class NoteEditor {
 
   setAutosave(enabled) {
     this.autosave = enabled;
+  }
+
+  setDefaultOpenMode(mode) {
+    this.defaultOpenMode = mode || 'edit';
   }
 
   onDelete(callback) {

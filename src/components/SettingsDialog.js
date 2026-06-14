@@ -23,6 +23,7 @@ export class SettingsDialog {
     this.checkUpdatesBtn = document.getElementById('check-updates-btn');
     this.updateStatus = document.getElementById('update-status');
     this.installUpdateBtn = document.getElementById('install-update-btn');
+    this.defaultOpenModeSelect = document.getElementById('default-open-mode-select');
     this.onSaveCallback = null;
     this.onReconnectCallback = null;
     this.originalTheme = null; // Store original theme for cancel
@@ -189,6 +190,7 @@ export class SettingsDialog {
       this.autostartCheckbox.checked = settings.autostart || false;
       this.syncFolderInput.value = settings.sync_folder || '';
       this.updateNotificationsCheckbox.checked = settings.update_notifications !== false;
+      this.defaultOpenModeSelect.value = settings.default_open_mode || 'edit';
       this.deviceIdInput.value = deviceId;
 
       // Update-Status korrekt anzeigen (verhindert stale Zustand aus vorheriger Session)
@@ -222,6 +224,7 @@ export class SettingsDialog {
         autostart: this.autostartCheckbox.checked,
         sync_folder: syncFolderValue || 'notes',
         update_notifications: this.updateNotificationsCheckbox.checked,
+        default_open_mode: this.defaultOpenModeSelect.value,
       };
 
       await tauri.saveSettings(settings);

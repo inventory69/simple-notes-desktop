@@ -18,6 +18,7 @@ pub struct Settings {
     pub autostart: bool,        // Start with system boot
     pub sync_folder: String,    // WebDAV sync folder name (default: "notes")
     pub update_notifications: bool, // Show popup when an update is available (Windows only)
+    pub default_open_mode: String, // "edit" | "preview" — open text notes in edit vs preview
 }
 
 impl Default for Settings {
@@ -29,6 +30,7 @@ impl Default for Settings {
             autostart: false,
             sync_folder: "notes".to_string(),
             update_notifications: true,
+            default_open_mode: "edit".to_string(),
         }
     }
 }
@@ -57,6 +59,7 @@ mod tests {
             autostart: true,
             sync_folder: "my-notes".to_string(),
             update_notifications: false,
+            default_open_mode: "edit".to_string(),
         };
 
         let json = serde_json::to_string(&settings).unwrap();
@@ -96,6 +99,7 @@ mod tests {
                 autostart,
                 sync_folder: "notes".to_string(),
                 update_notifications: true,
+                default_open_mode: "edit".to_string(),
             };
 
             let json = serde_json::to_string(&settings).unwrap();
@@ -123,6 +127,7 @@ mod tests {
             autostart: true,
             sync_folder: "notes".to_string(),
             update_notifications: false,
+            default_open_mode: "edit".to_string(),
         };
 
         let json = serde_json::to_string(&settings).unwrap();
@@ -160,6 +165,7 @@ mod tests {
             autostart: false,
             sync_folder: "custom".to_string(),
             update_notifications: false,
+            default_open_mode: "edit".to_string(),
         };
 
         let cloned = settings.clone();
@@ -193,6 +199,7 @@ mod tests {
             "autostart",
             "sync_folder",
             "update_notifications",
+            "default_open_mode",
         ]
         .iter()
         .map(|s| s.to_string())

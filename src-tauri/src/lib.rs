@@ -488,6 +488,7 @@ async fn get_settings(app: AppHandle) -> Result<Settings> {
         "autostart",
         "sync_folder",
         "update_notifications",
+        "default_open_mode",
     ] {
         if let Some(val) = store.get(key) {
             map.insert(key.to_string(), val.clone());

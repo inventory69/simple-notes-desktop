@@ -56,6 +56,7 @@ class App {
     const settings = await this.settingsDialog.loadAndApplyTheme();
     if (settings) {
       this.noteEditor.setAutosave(settings.autosave);
+      this.noteEditor.setDefaultOpenMode(settings.default_open_mode);
     }
 
     // Check for saved credentials and auto-connect
@@ -206,6 +207,7 @@ class App {
     // Settings save callback
     this.settingsDialog.onSave((settings) => {
       this.noteEditor.setAutosave(settings.autosave);
+      this.noteEditor.setDefaultOpenMode(settings.default_open_mode);
     });
 
     // Settings reconnect callback (sync folder changed)
