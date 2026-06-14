@@ -363,12 +363,13 @@ export class NoteEditor {
         this._pushSnapshot(); // snapshot after
         this._scheduleLocalUpdate();
         this.scheduleSave();
-        // Re-render only when the sort mode can reorder items; MANUAL leaves the
-        // list unchanged so skipping the rebuild preserves keyboard focus.
-        const sort = this.currentNote.checklistSortOption ?? 'MANUAL';
-        if (sort !== 'MANUAL') {
-          this.renderChecklist();
-        }
+        // Always re-render so the item moves into its group and the separator
+        // updates; restore focus to the same checkbox after the DOM rebuild.
+        const itemId = item.id;
+        this.renderChecklist();
+        this.checklistContainer
+          .querySelector(`.checklist-item[data-item-id="${itemId}"] input[type="checkbox"]`)
+          ?.focus();
       });
 
       // Text input
