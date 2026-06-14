@@ -400,6 +400,7 @@ class App {
       }
       await noteService.saveNote(note);
       this.noteEditor.loadNote(note);
+      this.noteEditor.focusContent();
     } catch (error) {
       console.error('Failed to create note:', error);
       await dialogService.error({
@@ -424,6 +425,7 @@ class App {
       }
       await noteService.saveNote(note);
       this.noteEditor.loadNote(note);
+      this.noteEditor.focusContent();
     } catch (error) {
       console.error('Failed to create checklist:', error);
       await dialogService.error({

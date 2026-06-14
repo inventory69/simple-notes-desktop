@@ -773,6 +773,15 @@ export class NoteEditor {
     this.updateSyncStatus('Saved');
   }
 
+  focusContent() {
+    if (!this.currentNote) return;
+    if (this.currentNote.noteType === 'CHECKLIST') {
+      this.addChecklistItem();
+    } else {
+      this.editorView?.focus();
+    }
+  }
+
   clear() {
     this.currentNote = null;
     this._isDirty = false;
