@@ -851,6 +851,23 @@ body {
   color: #8e9399;
 }
 
+/* Inline markdown in preview lines */
+.note-item-preview .preview-line code {
+  font-family: monospace;
+  font-size: 0.85em;
+  background: rgba(0, 0, 0, 0.07);
+  border-radius: 3px;
+  padding: 0 0.2em;
+}
+
+[data-theme="dark"] .note-item-preview .preview-line code {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.note-item-preview .preview-line a {
+  pointer-events: none;
+}
+
 .note-item-meta {
   font-size: 0.75rem;
   color: #999;

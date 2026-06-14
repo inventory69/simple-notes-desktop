@@ -1,3 +1,5 @@
+import DOMPurify from 'dompurify';
+import { marked } from 'marked';
 import { dialogService } from '../services/DialogService.js';
 import noteService from '../services/noteService.js';
 import { colorPicker } from '../utils/ColorPicker.js';
@@ -383,7 +385,7 @@ export class NotesList {
               <div class="note-item-header">
                 <div class="note-item-title">${this.escapeHtml(note.title)}</div>
               </div>
-              <div class="note-item-preview">${previewLines.map((line) => `<div class="preview-line">${this.escapeHtml(line)}</div>`).join('')}</div>
+              <div class="note-item-preview">${previewLines.map((line) => `<div class="preview-line">${note.noteType === 'CHECKLIST' ? this.escapeHtml(line) : this.renderPreviewLine(line)}</div>`).join('')}</div>
               <div class="trash-countdown">${countdown}</div>
               <div class="trash-actions">
                 <button class="btn-secondary trash-restore-btn" data-id="${note.id}" data-folder="${this.escapeHtml(note.folderName ?? '')}" type="button">Restore</button>
@@ -836,7 +838,7 @@ export class NotesList {
             ${typeIcon}
             <div class="note-item-title">${this.escapeHtml(note.title)}</div>
           </div>
-          <div class="note-item-preview">${previewLines.map((line) => `<div class="preview-line">${this.escapeHtml(line)}</div>`).join('')}</div>
+          <div class="note-item-preview">${previewLines.map((line) => `<div class="preview-line">${note.noteType === 'CHECKLIST' ? this.escapeHtml(line) : this.renderPreviewLine(line)}</div>`).join('')}</div>
           <div class="note-item-meta">${pinIcon}<span class="note-item-date" data-ts="${note.updatedAt}">${date}</span></div>
         </div>
       </div>
@@ -931,6 +933,13 @@ export class NotesList {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+  }
+
+  renderPreviewLine(line) {
+    return DOMPurify.sanitize(marked.parseInline(line), {
+      ALLOWED_TAGS: ['b', 'strong', 'i', 'em', 'del', 's', 'code', 'a', 'span', 'mark'],
+      ALLOWED_ATTR: ['href'],
+    });
   }
 
   clearSelection() {
