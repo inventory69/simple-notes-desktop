@@ -8,6 +8,7 @@ import { marked } from 'marked';
 import { dialogService } from '../services/DialogService.js';
 import noteService from '../services/noteService.js';
 import { colorPicker } from '../utils/ColorPicker.js';
+import { getColorPair } from '../utils/noteColors.js';
 import { UndoStack } from '../utils/UndoStack.js';
 
 /** Autosave debounce delay in milliseconds (matches Android app: 3 seconds) */
@@ -809,6 +810,7 @@ export class NoteEditor {
   _updateColorBtn() {
     if (!this.colorBtn) return;
     const color = this.currentNote?.color;
+    const colorPair = getColorPair(color);
     if (color) {
       this.colorBtn.style.setProperty('--btn-color', color);
       this.colorBtn.classList.add('has-color');
@@ -817,6 +819,15 @@ export class NoteEditor {
       this.colorBtn.style.removeProperty('--btn-color');
       this.colorBtn.classList.remove('has-color');
       this.colorBtn.title = 'Note color';
+    }
+    if (colorPair) {
+      this.container.style.setProperty('--nc-l', colorPair.light);
+      this.container.style.setProperty('--nc-d', colorPair.dark);
+      this.container.classList.add('has-color');
+    } else {
+      this.container.style.removeProperty('--nc-l');
+      this.container.style.removeProperty('--nc-d');
+      this.container.classList.remove('has-color');
     }
   }
 
