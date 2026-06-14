@@ -1,7 +1,7 @@
 use crate::error::{AppError, Result};
 use crate::folders::{parse_folders_json, sanitize_folder_name, FolderMeta};
 use crate::markdown;
-use crate::models::Note;
+use crate::models::{DeletionLedger, DeletionRecord, Note};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use regex::Regex;
 use reqwest::{Client, Method, StatusCode};
@@ -128,6 +128,11 @@ impl WebDavClient {
     /// URL zur zentralen `folders.json`: `{base}/{sync_folder}/folders.json`
     fn folders_file_url(&self) -> String {
         format!("{}/{}/folders.json", self.base_url, self.sync_folder)
+    }
+
+    /// URL zum gemeinsamen Lösch-Ledger: `{base}/{sync_folder}/deletions.json`
+    fn deletions_file_url(&self) -> String {
+        format!("{}/{}/deletions.json", self.base_url, self.sync_folder)
     }
 
     // ── MKCOL-Helfer ────────────────────────────────────────────────────────────
@@ -397,6 +402,19 @@ impl WebDavClient {
     }
 
     async fn save_markdown(&self, note: &Note) -> Result<()> {
+        // Getrashte Notizen haben keinen Markdown-Export (Android-Parität): .md löschen statt PUT.
+        if note.trashed_at.is_some() {
+            let safe_title = sanitize_filename(&note.title, &note.id);
+            let md_url = self.note_md_url(note.folder_name.as_deref(), &safe_title);
+            let _ = self
+                .client
+                .delete(&md_url)
+                .header("Authorization", &self.auth_header)
+                .send()
+                .await;
+            return Ok(());
+        }
+
         let markdown_content = markdown::generate_markdown(note);
         let safe_title = sanitize_filename(&note.title, &note.id);
         let url = self.note_md_url(note.folder_name.as_deref(), &safe_title);
@@ -554,6 +572,79 @@ impl WebDavClient {
         Ok(updated)
     }
 
+    // ── Lösch-Ledger ────────────────────────────────────────────────────────────
+
+    /// Lädt `deletions.json` vom Server (404 oder Parse-Fehler → leeres Ledger).
+    pub async fn read_deletions(&self) -> DeletionLedger {
+        let url = self.deletions_file_url();
+        let resp = self
+            .client
+            .get(&url)
+            .header("Authorization", &self.auth_header)
+            .send()
+            .await;
+
+        let Ok(resp) = resp else {
+            return DeletionLedger::default();
+        };
+
+        if resp.status() == StatusCode::NOT_FOUND {
+            return DeletionLedger::default();
+        }
+
+        let Ok(text) = resp.text().await else {
+            return DeletionLedger::default();
+        };
+
+        serde_json::from_str(&text).unwrap_or_default()
+    }
+
+    /// Read-Modify-Write für `deletions.json`: GET → `mutation` → PUT.
+    async fn write_deletions_merged(
+        &self,
+        mutation: impl FnOnce(DeletionLedger) -> DeletionLedger,
+    ) -> Result<()> {
+        let remote = self.read_deletions().await;
+        let updated = mutation(remote);
+        let json = serde_json::to_string_pretty(&updated)
+            .map_err(|e| AppError::ParseError(e.to_string()))?;
+
+        let url = self.deletions_file_url();
+        let resp = self
+            .client
+            .put(&url)
+            .header("Authorization", &self.auth_header)
+            .header("Content-Type", "application/json")
+            .body(json)
+            .send()
+            .await
+            .map_err(|e| AppError::NetworkError(e.to_string()))?;
+
+        if !resp.status().is_success() {
+            return Err(AppError::WebDav(format!(
+                "PUT deletions.json failed: {}",
+                resp.status()
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Fügt einen Lösch-Eintrag ins gemeinsame Ledger ein (read-modify-write).
+    /// Best-effort: Fehler werden geloggt, aber nicht propagiert.
+    pub async fn append_deletion(&self, id: &str, device_id: &str, now: i64, retention_ms: i64) {
+        let id = id.to_string();
+        let device_id = device_id.to_string();
+        let result = self
+            .write_deletions_merged(move |ledger| {
+                merge_deletion(ledger, &id, &device_id, now, retention_ms)
+            })
+            .await;
+        if let Err(e) = result {
+            eprintln!("[append_deletion] ledger write failed: {}", e);
+        }
+    }
+
     // ── Interner PROPFIND-Helfer ─────────────────────────────────────────────────
 
     async fn propfind_text(&self, url: &str, depth: &str) -> Result<String> {
@@ -589,6 +680,37 @@ impl WebDavClient {
             .await
             .map_err(|e| AppError::NetworkError(e.to_string()))
     }
+}
+
+/// Fügt einen Lösch-Eintrag in ein Ledger ein, dedupliziert nach id (neuestes
+/// `deleted_at` gewinnt) und bereinigt Einträge älter als `retention_ms`.
+fn merge_deletion(
+    mut ledger: DeletionLedger,
+    id: &str,
+    device_id: &str,
+    now: i64,
+    retention_ms: i64,
+) -> DeletionLedger {
+    ledger.version = 1;
+    if let Some(pos) = ledger.deleted_notes.iter().position(|r| r.id == id) {
+        if ledger.deleted_notes[pos].deleted_at >= now {
+            // Vorhandener Eintrag ist neuer oder gleich alt → nur bereinigen
+            ledger
+                .deleted_notes
+                .retain(|r| now - r.deleted_at <= retention_ms);
+            return ledger;
+        }
+        ledger.deleted_notes.remove(pos);
+    }
+    ledger.deleted_notes.push(DeletionRecord {
+        id: id.to_string(),
+        deleted_at: now,
+        device_id: device_id.to_string(),
+    });
+    ledger
+        .deleted_notes
+        .retain(|r| now - r.deleted_at <= retention_ms);
+    ledger
 }
 
 fn sanitize_filename(title: &str, id: &str) -> String {
@@ -779,5 +901,83 @@ mod tests {
 "#;
         let subdirs = c.extract_subdirs_from_propfind(body);
         assert_eq!(subdirs.len(), 1);
+    }
+
+    // ── merge_deletion Tests ─────────────────────────────────────────────────────
+
+    fn make_ledger(records: &[(&str, i64)]) -> crate::models::DeletionLedger {
+        crate::models::DeletionLedger {
+            version: 1,
+            deleted_notes: records
+                .iter()
+                .map(|(id, deleted_at)| crate::models::DeletionRecord {
+                    id: id.to_string(),
+                    deleted_at: *deleted_at,
+                    device_id: "tauri-test".to_string(),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn test_merge_deletion_adds_new_entry() {
+        let ledger = DeletionLedger::default();
+        let result = merge_deletion(ledger, "id-a", "tauri-x", 1000, 30_000);
+        assert_eq!(result.deleted_notes.len(), 1);
+        assert_eq!(result.deleted_notes[0].id, "id-a");
+        assert_eq!(result.deleted_notes[0].deleted_at, 1000);
+        assert_eq!(result.version, 1);
+    }
+
+    #[test]
+    fn test_merge_deletion_dedup_keeps_newest() {
+        // Existing entry at t=500, new entry at t=1000 → replace with newer
+        let ledger = make_ledger(&[("id-a", 500)]);
+        let result = merge_deletion(ledger, "id-a", "tauri-x", 1000, 100_000);
+        assert_eq!(result.deleted_notes.len(), 1);
+        assert_eq!(result.deleted_notes[0].deleted_at, 1000);
+    }
+
+    #[test]
+    fn test_merge_deletion_dedup_keeps_existing_if_newer() {
+        // Existing entry at t=2000, new entry at t=1000 → keep existing (newer)
+        let ledger = make_ledger(&[("id-a", 2000)]);
+        let result = merge_deletion(ledger, "id-a", "tauri-x", 1000, 100_000);
+        assert_eq!(result.deleted_notes.len(), 1);
+        assert_eq!(result.deleted_notes[0].deleted_at, 2000);
+    }
+
+    #[test]
+    fn test_merge_deletion_prunes_expired() {
+        // now=100_000, retention=30_000 → entries with deleted_at < 70_000 must be dropped
+        let ledger = make_ledger(&[("old", 60_000), ("recent", 80_000)]);
+        let result = merge_deletion(ledger, "new", "tauri-x", 100_000, 30_000);
+        let ids: Vec<&str> = result.deleted_notes.iter().map(|r| r.id.as_str()).collect();
+        assert!(!ids.contains(&"old"), "expired entry must be pruned");
+        assert!(ids.contains(&"recent"));
+        assert!(ids.contains(&"new"));
+    }
+
+    #[test]
+    fn test_merge_deletion_prune_only_on_same_id_newer_existing() {
+        // id-a already has a newer entry; only pruning should happen, no duplicate added
+        let ledger = make_ledger(&[("id-a", 5000), ("old", 0)]);
+        let result = merge_deletion(ledger, "id-a", "tauri-x", 1000, 100_000);
+        // id-a kept with deleted_at=5000 (newer), "old" may be pruned if expired (0 < 100_000-100_000=0? no, 100_000-0=100_000 > 100_000 false, so "old" survives here)
+        let a = result
+            .deleted_notes
+            .iter()
+            .find(|r| r.id == "id-a")
+            .unwrap();
+        assert_eq!(a.deleted_at, 5000, "newer existing entry must be preserved");
+        assert_eq!(
+            result
+                .deleted_notes
+                .iter()
+                .filter(|r| r.id == "id-a")
+                .count(),
+            1,
+            "no duplicate"
+        );
     }
 }
