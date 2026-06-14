@@ -1083,6 +1083,17 @@ body {
   font-weight: 600;
 }
 
+/* Markdown highlight CSS variables (light defaults) */
+:root {
+  --cm-marker: #9aa0a6;
+  --cm-code-bg: rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="dark"] {
+  --cm-marker: #6e7681;
+  --cm-code-bg: rgba(255, 255, 255, 0.08);
+}
+
 .cm-editor {
   height: 100%;
   width: 100%;
@@ -1959,4 +1970,51 @@ select.dialog-input {
 
 [data-theme="dark"] .trash-countdown {
   color: var(--color-danger);
+}
+
+/* ── Markdown Toolbar ────────────────────────────────────────────────────── */
+
+.markdown-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0.25rem 0.75rem;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg);
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+
+.markdown-toolbar.hidden {
+  display: none;
+}
+
+.md-toolbar-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0.25rem 0.4rem;
+  border-radius: 4px;
+  color: var(--color-fg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s;
+  flex-shrink: 0;
+}
+
+.md-toolbar-btn:hover {
+  background: var(--color-hover);
+}
+
+.md-toolbar-btn:active {
+  background: var(--color-border);
+}
+
+.md-toolbar-sep {
+  width: 1px;
+  height: 1.25rem;
+  background: var(--color-border);
+  margin: 0 0.25rem;
+  flex-shrink: 0;
 }

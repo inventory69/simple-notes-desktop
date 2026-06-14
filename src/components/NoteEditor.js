@@ -8,6 +8,18 @@ import { marked } from 'marked';
 import { dialogService } from '../services/DialogService.js';
 import noteService from '../services/noteService.js';
 import { colorPicker } from '../utils/ColorPicker.js';
+import { markdownHighlightExtensions } from '../utils/markdownHighlight.js';
+import {
+  applyBold,
+  applyChecklist,
+  applyCode,
+  applyHeading,
+  applyHR,
+  applyItalic,
+  applyLink,
+  applyList,
+  applyStrikethrough,
+} from '../utils/markdownToolbar.js';
 import { getColorPair } from '../utils/noteColors.js';
 import { UndoStack } from '../utils/UndoStack.js';
 
@@ -33,6 +45,17 @@ export class NoteEditor {
     this.undoBtn = document.getElementById('undo-btn');
     this.addItemHeaderBtn = document.getElementById('add-checklist-item-btn');
     this.colorBtn = document.getElementById('note-color-btn');
+
+    this.mdToolbar = document.getElementById('markdown-toolbar');
+    this.mdBtnBold = document.getElementById('md-btn-bold');
+    this.mdBtnItalic = document.getElementById('md-btn-italic');
+    this.mdBtnStrikethrough = document.getElementById('md-btn-strikethrough');
+    this.mdBtnHeading = document.getElementById('md-btn-heading');
+    this.mdBtnCode = document.getElementById('md-btn-code');
+    this.mdBtnLink = document.getElementById('md-btn-link');
+    this.mdBtnList = document.getElementById('md-btn-list');
+    this.mdBtnChecklist = document.getElementById('md-btn-checklist');
+    this.mdBtnHr = document.getElementById('md-btn-hr');
 
     this.editorView = null;
     this.currentNote = null;
@@ -103,6 +126,31 @@ export class NoteEditor {
       });
     });
 
+    // Markdown toolbar button listeners
+    this.mdBtnBold?.addEventListener('click', () => this._mdFormat('bold'));
+    this.mdBtnItalic?.addEventListener('click', () => this._mdFormat('italic'));
+    this.mdBtnStrikethrough?.addEventListener('click', () => this._mdFormat('strikethrough'));
+    this.mdBtnHeading?.addEventListener('click', () => this._mdFormat('heading'));
+    this.mdBtnCode?.addEventListener('click', () => this._mdFormat('code'));
+    this.mdBtnLink?.addEventListener('click', () => this._mdFormat('link'));
+    this.mdBtnList?.addEventListener('click', () => this._mdFormat('list'));
+    this.mdBtnChecklist?.addEventListener('click', () => this._mdFormat('checklist'));
+    this.mdBtnHr?.addEventListener('click', () => this._mdFormat('hr'));
+
+    // Ctrl+B / Ctrl+I shortcuts for bold and italic (text notes only)
+    document.addEventListener('keydown', (e) => {
+      if (!this.currentNote || this.currentNote.noteType !== 'TEXT') return;
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.key === 'b') {
+        e.preventDefault();
+        this._mdFormat('bold');
+      }
+      if (e.key === 'i') {
+        e.preventDefault();
+        this._mdFormat('italic');
+      }
+    });
+
     // Ctrl+Z / Ctrl+Shift+Z keyboard shortcut
     document.addEventListener('keydown', (e) => {
       if (!(e.ctrlKey || e.metaKey)) return;
@@ -124,6 +172,39 @@ export class NoteEditor {
     });
   }
 
+  _mdFormat(action) {
+    if (!this.editorView) return;
+    switch (action) {
+      case 'bold':
+        applyBold(this.editorView);
+        break;
+      case 'italic':
+        applyItalic(this.editorView);
+        break;
+      case 'strikethrough':
+        applyStrikethrough(this.editorView);
+        break;
+      case 'heading':
+        applyHeading(this.editorView);
+        break;
+      case 'code':
+        applyCode(this.editorView);
+        break;
+      case 'link':
+        applyLink(this.editorView);
+        break;
+      case 'list':
+        applyList(this.editorView);
+        break;
+      case 'checklist':
+        applyChecklist(this.editorView);
+        break;
+      case 'hr':
+        applyHR(this.editorView);
+        break;
+    }
+  }
+
   initEditor() {
     if (this.editorView) {
       this.editorView.destroy();
@@ -134,6 +215,7 @@ export class NoteEditor {
       extensions: [
         basicSetup,
         markdown(),
+        ...markdownHighlightExtensions,
         EditorView.lineWrapping,
         EditorView.updateListener.of((update) => {
           if (update.docChanged && this.currentNote) {
@@ -751,6 +833,7 @@ export class NoteEditor {
       this.checklistContainer.classList.remove('hidden');
       this.sortBtn.classList.remove('hidden'); // F2: Show sort button
       this.addItemHeaderBtn.classList.remove('hidden');
+      this.mdToolbar?.classList.add('hidden');
       this._fixPreF04Orders();
       this.renderChecklist();
       // Push initial snapshot so the first undo restores the loaded state
@@ -762,6 +845,7 @@ export class NoteEditor {
       this.previewToggleBtn.classList.remove('hidden');
       this.sortBtn.classList.add('hidden'); // F2: Hide sort button for text notes
       this.addItemHeaderBtn.classList.add('hidden');
+      this.mdToolbar?.classList.remove('hidden');
       this.initEditor();
 
       // Preview hidden by default
@@ -797,6 +881,7 @@ export class NoteEditor {
     }
     this.container.classList.add('hidden');
     this.placeholderDiv.classList.remove('hidden');
+    this.mdToolbar?.classList.add('hidden');
     if (this.undoBtn) this.undoBtn.disabled = true;
     this._updateColorBtn();
 
