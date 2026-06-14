@@ -119,6 +119,12 @@ pub struct Note {
     )]
     pub folder_name: Option<String>,
 
+    /// Android Trash-Feature: Zeitpunkt der Papierkorb-Verschiebung (Epoch ms).
+    /// None = aktive Notiz. Getrashte Notizen behalten ihr JSON am Server (für Sync/Restore),
+    /// nur der Markdown-Export wird gelöscht. Erscheint NICHT im Markdown-Frontmatter.
+    #[serde(rename = "trashedAt", default, skip_serializing_if = "Option::is_none")]
+    pub trashed_at: Option<i64>,
+
     /// Cross-App-Kompatibilität: Auffangbecken für alle weiteren Notiz-Felder, die
     /// die Desktop-App nicht modelliert (inkl. künftiger Android-Schema-Erweiterungen).
     /// Werden beim Round-Trip 1:1 erhalten — der Kern des Datenverlust-Fix.
@@ -146,6 +152,7 @@ impl Note {
             imported_at: None,
             is_pinned: None,
             folder_name: None,
+            trashed_at: None,
             extra: serde_json::Map::new(),
         }
     }
@@ -202,6 +209,9 @@ pub struct NoteMetadata {
         skip_serializing_if = "Option::is_none"
     )]
     pub folder_name: Option<String>,
+    /// Zeitpunkt der Papierkorb-Verschiebung (Epoch ms). None = aktive Notiz.
+    #[serde(rename = "trashedAt", default, skip_serializing_if = "Option::is_none")]
+    pub trashed_at: Option<i64>,
 }
 
 impl From<&Note> for NoteMetadata {
@@ -218,8 +228,31 @@ impl From<&Note> for NoteMetadata {
             is_pinned: note.is_pinned,
             color: note.color.clone(),
             folder_name: note.folder_name.clone(),
+            trashed_at: note.trashed_at,
         }
     }
+}
+
+/// Ein Eintrag im gemeinsamen Lösch-Ledger (`deletions.json`).
+/// camelCase entspricht exakt dem Android-`DeletionTracker`-Format (cross-app contract).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeletionRecord {
+    pub id: String,
+    pub deleted_at: i64,
+    pub device_id: String,
+}
+
+/// Gemeinsames Lösch-Ledger für permanente Notiz-Löschungen (`deletions.json`).
+/// Gelesen und geschrieben von Desktop und Android, damit ein Permanent-Delete
+/// auf einem Gerät nicht auf dem anderen als "versehentlich" gewertet wird.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DeletionLedger {
+    #[serde(default)]
+    pub version: i32,
+    #[serde(default)]
+    pub deleted_notes: Vec<DeletionRecord>,
 }
 
 /// Test-Hilfsmethoden — werden nur beim Compilieren von Tests eingebunden.
@@ -386,6 +419,50 @@ mod tests {
     }
 
     #[test]
+    fn test_note_trashed_at_round_trip() {
+        let json = r#"{
+            "id": "abc",
+            "title": "T",
+            "content": "C",
+            "createdAt": 1700000000000,
+            "updatedAt": 1700000000001,
+            "deviceId": "tauri-xyz",
+            "trashedAt": 1700000000000
+        }"#;
+        let note: Note = serde_json::from_str(json).unwrap();
+        assert_eq!(note.trashed_at, Some(1700000000000));
+        assert!(
+            !note.extra.contains_key("trashedAt"),
+            "trashedAt must not be in extra"
+        );
+        let out = serde_json::to_value(&note).unwrap();
+        assert_eq!(out["trashedAt"], 1700000000000i64);
+        // Must appear exactly once — not also in a flattened extra key
+        let obj = out.as_object().unwrap();
+        assert!(!obj.contains_key("extra"));
+    }
+
+    #[test]
+    fn test_note_trashed_at_absent_when_none() {
+        let note = Note::new("T".to_string(), "tauri-x".to_string());
+        assert_eq!(note.trashed_at, None);
+        let out = serde_json::to_value(&note).unwrap();
+        assert!(!out.as_object().unwrap().contains_key("trashedAt"));
+    }
+
+    #[test]
+    fn test_note_metadata_carries_trashed_at() {
+        let mut note = Note::new("My Note".to_string(), "tauri-abc".to_string());
+        note.trashed_at = Some(1700000000000);
+        let meta: NoteMetadata = (&note).into();
+        assert_eq!(meta.trashed_at, Some(1700000000000));
+
+        let note2 = Note::new("Active".to_string(), "tauri-abc".to_string());
+        let meta2: NoteMetadata = (&note2).into();
+        assert_eq!(meta2.trashed_at, None);
+    }
+
+    #[test]
     fn test_note_metadata_carries_folder_name() {
         let mut note = Note::new("My Note".to_string(), "tauri-abc".to_string());
         note.folder_name = Some("Work".to_string());
@@ -518,5 +595,66 @@ mod tests {
         assert_eq!(item.original_order, None);
         let out = serde_json::to_value(&item).unwrap();
         assert!(!out.as_object().unwrap().contains_key("originalOrder"));
+    }
+
+    // ── DeletionLedger / DeletionRecord JSON-Round-Trip ─────────────────────────
+    // Sichert dass das camelCase-Format exakt dem Android-DeletionTracker entspricht.
+
+    #[test]
+    fn test_deletion_record_json_round_trip() {
+        let json = r#"{
+            "id": "11111111-1111-1111-1111-111111111111",
+            "deletedAt": 1770000000000,
+            "deviceId": "tauri-aabbccdd11223344"
+        }"#;
+        let record: DeletionRecord = serde_json::from_str(json).unwrap();
+        assert_eq!(record.id, "11111111-1111-1111-1111-111111111111");
+        assert_eq!(record.deleted_at, 1770000000000);
+        assert_eq!(record.device_id, "tauri-aabbccdd11223344");
+
+        let out = serde_json::to_value(&record).unwrap();
+        assert_eq!(out["id"], "11111111-1111-1111-1111-111111111111");
+        assert_eq!(out["deletedAt"], 1770000000000i64);
+        assert_eq!(out["deviceId"], "tauri-aabbccdd11223344");
+        // Snake-case variants must NOT appear
+        assert!(!out.as_object().unwrap().contains_key("deleted_at"));
+        assert!(!out.as_object().unwrap().contains_key("device_id"));
+    }
+
+    #[test]
+    fn test_deletion_ledger_json_round_trip() {
+        let json = r#"{
+            "version": 1,
+            "deletedNotes": [
+                { "id": "aaaa", "deletedAt": 1000, "deviceId": "tauri-x" },
+                { "id": "bbbb", "deletedAt": 2000, "deviceId": "android-y" }
+            ]
+        }"#;
+        let ledger: DeletionLedger = serde_json::from_str(json).unwrap();
+        assert_eq!(ledger.version, 1);
+        assert_eq!(ledger.deleted_notes.len(), 2);
+        assert_eq!(ledger.deleted_notes[0].id, "aaaa");
+        assert_eq!(ledger.deleted_notes[1].deleted_at, 2000);
+
+        let out = serde_json::to_value(&ledger).unwrap();
+        assert_eq!(out["version"], 1);
+        assert_eq!(out["deletedNotes"][0]["id"], "aaaa");
+        assert_eq!(out["deletedNotes"][1]["deletedAt"], 2000i64);
+        // snake_case must NOT appear
+        assert!(!out.as_object().unwrap().contains_key("deleted_notes"));
+    }
+
+    #[test]
+    fn test_deletion_ledger_default_is_empty() {
+        let ledger = DeletionLedger::default();
+        assert_eq!(ledger.version, 0);
+        assert!(ledger.deleted_notes.is_empty());
+    }
+
+    #[test]
+    fn test_deletion_ledger_empty_json_parses() {
+        // 404 / empty body case — serde must not panic
+        let ledger: DeletionLedger = serde_json::from_str("{}").unwrap();
+        assert!(ledger.deleted_notes.is_empty());
     }
 }
