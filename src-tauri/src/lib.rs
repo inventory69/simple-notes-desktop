@@ -20,6 +20,8 @@ use tauri_plugin_store::StoreExt;
 use uuid::Uuid;
 use webdav::WebDavClient;
 
+const TRASH_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1000;
+
 /// Global WebDAV Client State
 struct WebDavState(Mutex<Option<WebDavClient>>);
 
@@ -66,6 +68,50 @@ fn get_or_create_device_id(app: &AppHandle, state: &State<DeviceIdState>) -> Res
     Ok(new_id)
 }
 
+// ============ PRIVATE HELPERS ============
+
+async fn fetch_all_notes(client: &WebDavClient) -> Result<Vec<models::Note>> {
+    let note_locations = client.list_notes_with_folders().await?;
+    let mut notes = Vec::new();
+    for (id, folder) in note_locations {
+        match client.get_note(&id, folder.as_deref()).await {
+            Ok(note) => notes.push(note),
+            Err(e) => eprintln!("[fetch_all_notes] failed to load {}: {}", id, e),
+        }
+    }
+    Ok(notes)
+}
+
+/// Löscht eine Notiz permanent vom Server und schreibt einen Eintrag ins Lösch-Ledger.
+/// Der Delete muss gelingen; das Ledger-Write ist best-effort (Fehler werden geloggt).
+async fn purge_note(client: &WebDavClient, note: &Note, device_id: &str, now: i64) -> Result<()> {
+    client.delete_note(note).await?;
+    client
+        .append_deletion(&note.id, device_id, now, TRASH_RETENTION_MS)
+        .await;
+    Ok(())
+}
+
+async fn purge_expired_trash(client: &WebDavClient, device_id: &str) {
+    let now = chrono::Utc::now().timestamp_millis();
+    let notes = match fetch_all_notes(client).await {
+        Ok(n) => n,
+        Err(e) => {
+            eprintln!("[purge_expired_trash] fetch failed: {}", e);
+            return;
+        }
+    };
+    for note in notes {
+        if let Some(trashed_at) = note.trashed_at {
+            if now - trashed_at > TRASH_RETENTION_MS {
+                if let Err(e) = purge_note(client, &note, device_id, now).await {
+                    eprintln!("[purge_expired_trash] purge {} failed: {}", note.id, e);
+                }
+            }
+        }
+    }
+}
+
 // ============ TAURI COMMANDS ============
 
 #[tauri::command]
@@ -74,6 +120,8 @@ async fn connect(
     username: String,
     password: String,
     sync_folder: Option<String>,
+    app: AppHandle,
+    device_id_state: State<'_, DeviceIdState>,
     state: State<'_, WebDavState>,
 ) -> Result<bool> {
     let folder = sync_folder.unwrap_or_else(|| "notes".to_string());
@@ -85,25 +133,56 @@ async fn connect(
         *client_lock = Some(client);
     }
 
+    // Device-ID beim Connect vorinitialisieren (vermeidet Race beim ersten Lösch-Ledger-Write)
+    let _ = get_or_create_device_id(&app, &device_id_state);
+
     Ok(success)
 }
 
 #[tauri::command]
-async fn list_notes(state: State<'_, WebDavState>) -> Result<Vec<NoteMetadata>> {
+async fn list_notes(
+    app: AppHandle,
+    device_id_state: State<'_, DeviceIdState>,
+    state: State<'_, WebDavState>,
+) -> Result<Vec<NoteMetadata>> {
     let client = {
         let client_lock = lock_recover(&state.0);
         client_lock.clone()
     };
 
     let client = client.ok_or(AppError::NotConnected)?;
-    let note_locations = client.list_notes_with_folders().await?;
+    let device_id = get_or_create_device_id(&app, &device_id_state)?;
 
-    let mut notes = Vec::new();
-    for (id, folder) in note_locations {
-        match client.get_note(&id, folder.as_deref()).await {
-            Ok(note) => notes.push(NoteMetadata::from(&note)),
-            Err(e) => eprintln!("[list_notes] failed to load {}: {}", id, e),
+    // Best-effort auto-purge: remove notes older than retention before listing
+    purge_expired_trash(&client, &device_id).await;
+
+    let all_notes = fetch_all_notes(&client).await?;
+
+    // Zombie-Schutz: Notizen, die auf einem anderen Gerät permanent gelöscht wurden,
+    // sollen nicht als "aktiv" aufgelistet werden. Das Lösch-Ledger wird einmal gelesen;
+    // für jeden Treffer (updatedAt ≤ deletedAt) wird die verwaiste Datei bereinigt.
+    let ledger = client.read_deletions().await;
+    let deletion_map: std::collections::HashMap<&str, i64> = ledger
+        .deleted_notes
+        .iter()
+        .map(|r| (r.id.as_str(), r.deleted_at))
+        .collect();
+
+    let mut notes: Vec<NoteMetadata> = Vec::new();
+    for note in &all_notes {
+        if note.trashed_at.is_some() {
+            continue;
         }
+        if let Some(&deleted_at) = deletion_map.get(note.id.as_str()) {
+            if note.updated_at <= deleted_at {
+                // Verwaiste Datei — vom Server entfernen
+                if let Err(e) = client.delete_note(note).await {
+                    eprintln!("[list_notes] zombie cleanup {} failed: {}", note.id, e);
+                }
+                continue;
+            }
+        }
+        notes.push(NoteMetadata::from(note));
     }
 
     notes.sort_by(|a, b| {
@@ -179,14 +258,151 @@ async fn delete_note(
     folder_name: Option<String>,
     state: State<'_, WebDavState>,
 ) -> Result<()> {
+    // Soft-delete: in den Papierkorb verschieben statt permanent löschen (Android-Parität)
     let client = {
         let client_lock = lock_recover(&state.0);
         client_lock.clone()
     };
 
     let client = client.ok_or(AppError::NotConnected)?;
+    let mut note = client.get_note(&id, folder_name.as_deref()).await?;
+    let now = chrono::Utc::now().timestamp_millis();
+    note.trashed_at = Some(now);
+    note.updated_at = now;
+    client.save_note(&note).await
+}
+
+#[tauri::command]
+async fn trash_note(
+    id: String,
+    folder_name: Option<String>,
+    state: State<'_, WebDavState>,
+) -> Result<()> {
+    let client = {
+        let lock = lock_recover(&state.0);
+        lock.clone()
+    };
+    let client = client.ok_or(AppError::NotConnected)?;
+    let mut note = client.get_note(&id, folder_name.as_deref()).await?;
+    let now = chrono::Utc::now().timestamp_millis();
+    note.trashed_at = Some(now);
+    note.updated_at = now;
+    client.save_note(&note).await
+}
+
+#[tauri::command]
+async fn restore_note(
+    id: String,
+    folder_name: Option<String>,
+    state: State<'_, WebDavState>,
+) -> Result<()> {
+    let client = {
+        let lock = lock_recover(&state.0);
+        lock.clone()
+    };
+    let client = client.ok_or(AppError::NotConnected)?;
+    let mut note = client.get_note(&id, folder_name.as_deref()).await?;
+    let now = chrono::Utc::now().timestamp_millis();
+    note.trashed_at = None;
+    note.updated_at = now;
+
+    // Fallback: Falls der Original-Ordner nicht mehr existiert, Notiz nach Root verschieben
+    if let Some(ref fname) = note.folder_name.clone() {
+        let existing_folders = client.discover_folders().await;
+        let folder_exists = existing_folders
+            .iter()
+            .any(|f| f.eq_ignore_ascii_case(fname));
+        if !folder_exists {
+            note.folder_name = None;
+        }
+    }
+
+    client.save_note(&note).await
+}
+
+#[tauri::command]
+async fn delete_note_permanent(
+    id: String,
+    folder_name: Option<String>,
+    app: AppHandle,
+    device_id_state: State<'_, DeviceIdState>,
+    state: State<'_, WebDavState>,
+) -> Result<()> {
+    let client = {
+        let lock = lock_recover(&state.0);
+        lock.clone()
+    };
+    let client = client.ok_or(AppError::NotConnected)?;
+    let device_id = get_or_create_device_id(&app, &device_id_state)?;
     let note = client.get_note(&id, folder_name.as_deref()).await?;
-    client.delete_note(&note).await
+    let now = chrono::Utc::now().timestamp_millis();
+    purge_note(&client, &note, &device_id, now).await
+}
+
+#[tauri::command]
+async fn list_trash(
+    app: AppHandle,
+    device_id_state: State<'_, DeviceIdState>,
+    state: State<'_, WebDavState>,
+) -> Result<Vec<NoteMetadata>> {
+    let client = {
+        let lock = lock_recover(&state.0);
+        lock.clone()
+    };
+    let client = client.ok_or(AppError::NotConnected)?;
+    let device_id = get_or_create_device_id(&app, &device_id_state)?;
+
+    let now = chrono::Utc::now().timestamp_millis();
+    let all_notes = fetch_all_notes(&client).await?;
+
+    // Abgelaufene Tombstones zuerst entfernen und ins Lösch-Ledger schreiben
+    for note in &all_notes {
+        if let Some(trashed_at) = note.trashed_at {
+            if now - trashed_at > TRASH_RETENTION_MS {
+                if let Err(e) = purge_note(&client, note, &device_id, now).await {
+                    eprintln!("[list_trash] purge {} failed: {}", note.id, e);
+                }
+            }
+        }
+    }
+
+    let mut trashed: Vec<NoteMetadata> = all_notes
+        .iter()
+        .filter(|n| {
+            n.trashed_at
+                .map(|t| now - t <= TRASH_RETENTION_MS)
+                .unwrap_or(false)
+        })
+        .map(NoteMetadata::from)
+        .collect();
+
+    trashed.sort_by_key(|n| std::cmp::Reverse(n.trashed_at));
+    Ok(trashed)
+}
+
+#[tauri::command]
+async fn empty_trash(
+    app: AppHandle,
+    device_id_state: State<'_, DeviceIdState>,
+    state: State<'_, WebDavState>,
+) -> Result<()> {
+    let client = {
+        let lock = lock_recover(&state.0);
+        lock.clone()
+    };
+    let client = client.ok_or(AppError::NotConnected)?;
+    let device_id = get_or_create_device_id(&app, &device_id_state)?;
+    let now = chrono::Utc::now().timestamp_millis();
+
+    let all_notes = fetch_all_notes(&client).await?;
+    for note in all_notes {
+        if note.trashed_at.is_some() {
+            if let Err(e) = purge_note(&client, &note, &device_id, now).await {
+                eprintln!("[empty_trash] purge {} failed: {}", note.id, e);
+            }
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1054,6 +1270,11 @@ pub fn run() {
             save_note,
             create_note,
             delete_note,
+            trash_note,
+            restore_note,
+            delete_note_permanent,
+            list_trash,
+            empty_trash,
             get_credentials,
             save_credentials,
             clear_credentials,
