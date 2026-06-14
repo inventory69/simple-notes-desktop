@@ -36,6 +36,7 @@ class App {
     this.batchColorBtn = document.getElementById('batch-color-btn');
     this.batchMoveBtn = document.getElementById('batch-move-btn');
     this.newFolderBtn = document.getElementById('new-folder-btn');
+    this.trashViewBtn = document.getElementById('trash-view-btn');
     this.selectionCount = this.batchActionsBar?.querySelector('.selection-count');
 
     this.init();
@@ -248,6 +249,20 @@ class App {
 
     // New folder button
     this.newFolderBtn?.addEventListener('click', () => this.handleNewFolder());
+
+    // Trash view button
+    this.trashViewBtn?.addEventListener('click', async () => {
+      const entering = !noteService.isTrashMode();
+      noteService.setTrashMode(entering);
+      if (entering) {
+        await noteService.loadTrash();
+      }
+    });
+
+    // Keep trash button active state in sync with trash mode (handles Escape / back button exits)
+    noteService.subscribe(() => {
+      this.trashViewBtn?.classList.toggle('active', noteService.isTrashMode());
+    });
 
     // F1: Global keyboard shortcuts
     document.addEventListener('keydown', (e) => {

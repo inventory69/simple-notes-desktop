@@ -1040,8 +1040,8 @@ export class NoteEditor {
     } catch (error) {
       console.error('Failed to delete note:', error);
       await dialogService.error({
-        title: 'Delete Failed',
-        message: 'Failed to delete note from server. Please check your connection and try again.',
+        title: 'Move to Trash Failed',
+        message: 'Failed to move note to trash. Please check your connection and try again.',
       });
     }
   }

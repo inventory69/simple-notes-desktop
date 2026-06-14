@@ -1911,3 +1911,44 @@ select.dialog-input {
   outline: 2px solid var(--color-primary);
   outline-offset: -1px;
 }
+
+/* ── Trash View ─────────────────────────────────────────────────────────────── */
+
+.trash-header-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-sidebar-bg);
+}
+
+.trash-note-item {
+  cursor: default;
+}
+
+.trash-countdown {
+  font-size: 0.75em;
+  color: var(--color-danger);
+  margin-top: 2px;
+  opacity: 0.85;
+}
+
+.trash-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.trash-actions .btn-secondary {
+  padding: 3px 10px;
+  font-size: 0.8em;
+}
+
+.trash-actions .btn-danger-small {
+  padding: 3px 10px;
+  font-size: 0.8em;
+}
+
+[data-theme="dark"] .trash-countdown {
+  color: var(--color-danger);
+}

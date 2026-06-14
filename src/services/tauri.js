@@ -237,3 +237,23 @@ export async function checkForUpdates() {
 export async function installUpdate() {
   return await invoke('install_update');
 }
+
+export async function trashNote(id, folderName = null) {
+  return await invoke('trash_note', { id, folderName });
+}
+
+export async function restoreNote(id, folderName = null) {
+  return await invoke('restore_note', { id, folderName });
+}
+
+export async function deleteNotePermanent(id, folderName = null) {
+  return await invoke('delete_note_permanent', { id, folderName });
+}
+
+export async function listTrash() {
+  return await invoke('list_trash');
+}
+
+export async function emptyTrash() {
+  return await invoke('empty_trash');
+}

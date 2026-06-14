@@ -135,17 +135,17 @@ class DialogService {
    * @returns {Promise<boolean>} true wenn Nutzer bestätigt
    */
   confirmDeletion(noteCount = 1) {
-    const title = noteCount === 1 ? 'Delete Note' : `Delete ${noteCount} Notes`;
+    const title = noteCount === 1 ? 'Move to Trash' : `Move ${noteCount} Notes to Trash`;
 
     const message =
       noteCount === 1
-        ? 'This note will be immediately deleted from the server. On your Android device, it will remain with the status "Deleted on Server" until you remove it there as well.'
-        : `These ${noteCount} notes will be immediately deleted from the server. On your Android devices, they will remain with the status "Deleted on Server" until you remove them there as well.`;
+        ? 'The note will be moved to trash and permanently deleted after 30 days. You can restore it from the trash view.'
+        : `These ${noteCount} notes will be moved to trash and permanently deleted after 30 days. You can restore them from the trash view.`;
 
     return this.confirm({
       title,
       message,
-      confirmText: 'Delete from Server',
+      confirmText: 'Move to Trash',
       cancelText: 'Cancel',
       type: 'danger',
     });

@@ -48,6 +48,11 @@ export class NotesList {
         e.stopPropagation();
         this.exitSelectionMode();
       }
+      // Escape in trash view → leave trash
+      if (e.key === 'Escape' && !this.selectionMode && noteService.isTrashMode()) {
+        noteService.setTrashMode(false);
+        return;
+      }
       // Escape inside a folder → go back to root
       if (e.key === 'Escape' && !this.selectionMode && noteService.getCurrentFolder() !== null) {
         noteService.setCurrentFolder(null);
@@ -186,8 +191,8 @@ export class NotesList {
 
     if (results.failed.length > 0) {
       await dialogService.warning({
-        title: 'Partial Deletion',
-        message: `${results.success.length} notes deleted. ${results.failed.length} notes could not be deleted.`,
+        title: 'Partial Move to Trash',
+        message: `${results.success.length} notes moved to trash. ${results.failed.length} notes could not be moved.`,
       });
     }
 
@@ -226,7 +231,17 @@ export class NotesList {
     }
   }
 
+  static get TRASH_RETENTION_MS() {
+    return 30 * 24 * 60 * 60 * 1000;
+  }
+
   render(searchQuery = '') {
+    // Trash view takes priority
+    if (noteService.isTrashMode()) {
+      this._renderTrashView();
+      return;
+    }
+
     const currentFolder = noteService.getCurrentFolder();
     if (currentFolder !== this._renderedFolder) {
       this.container.scrollTop = 0;
@@ -335,6 +350,113 @@ export class NotesList {
     if (pinnedNotes.length === 0 && unpinnedNotes.length === 0) {
       html.push('<div style="padding: 1rem; text-align: center; color: #999;">This folder is empty</div>');
     }
+  }
+
+  _renderTrashView() {
+    const notes = noteService.getTrashedNotes();
+    const html = [];
+
+    const emptyDisabled = notes.length === 0 ? ' disabled' : '';
+    html.push(`
+      <div class="folder-back-header" id="trash-back-btn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="15 18 9 12 15 6"></polyline>
+        </svg>
+        <span>Trash</span>
+      </div>
+      <div class="trash-header-actions">
+        <button class="btn-danger-small trash-empty-btn" id="trash-empty-btn"${emptyDisabled} type="button">Empty Trash</button>
+      </div>
+    `);
+
+    if (notes.length === 0) {
+      html.push('<div style="padding: 1rem; text-align: center; color: #999;">Trash is empty</div>');
+    } else {
+      const now = Date.now();
+      for (const note of notes) {
+        const daysLeft = Math.ceil((note.trashedAt + NotesList.TRASH_RETENTION_MS - now) / 86400000);
+        const countdown = daysLeft > 0 ? `Deleted in ${daysLeft} day${daysLeft === 1 ? '' : 's'}` : 'Deleting soon';
+        const previewLines = this.getPreviewLines(note);
+        html.push(`
+          <div class="note-item trash-note-item" data-id="${note.id}" data-folder="${this.escapeHtml(note.folderName ?? '')}">
+            <div class="note-item-content">
+              <div class="note-item-header">
+                <div class="note-item-title">${this.escapeHtml(note.title)}</div>
+              </div>
+              <div class="note-item-preview">${previewLines.map((line) => `<div class="preview-line">${this.escapeHtml(line)}</div>`).join('')}</div>
+              <div class="trash-countdown">${countdown}</div>
+              <div class="trash-actions">
+                <button class="btn-secondary trash-restore-btn" data-id="${note.id}" data-folder="${this.escapeHtml(note.folderName ?? '')}" type="button">Restore</button>
+                <button class="btn-danger-small trash-delete-btn" data-id="${note.id}" data-folder="${this.escapeHtml(note.folderName ?? '')}" type="button">Delete permanently</button>
+              </div>
+            </div>
+          </div>
+        `);
+      }
+    }
+
+    this.container.innerHTML = html.join('');
+    this._attachTrashHandlers();
+  }
+
+  _attachTrashHandlers() {
+    const backBtn = this.container.querySelector('#trash-back-btn');
+    if (backBtn) {
+      backBtn.addEventListener('click', () => noteService.setTrashMode(false));
+    }
+
+    const emptyBtn = this.container.querySelector('#trash-empty-btn');
+    if (emptyBtn) {
+      emptyBtn.addEventListener('click', async () => {
+        const confirmed = await dialogService.confirm({
+          title: 'Empty Trash',
+          message: 'Permanently delete all notes in trash? This cannot be undone.',
+          confirmText: 'Empty Trash',
+          cancelText: 'Cancel',
+          type: 'danger',
+        });
+        if (!confirmed) return;
+        try {
+          await noteService.emptyTrash();
+        } catch (e) {
+          await dialogService.error({ title: 'Empty Trash Failed', message: e.message || String(e) });
+        }
+      });
+    }
+
+    this.container.querySelectorAll('.trash-restore-btn').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.id;
+        const folderName = btn.dataset.folder || null;
+        try {
+          await noteService.restoreNote(id, folderName);
+        } catch (e) {
+          await dialogService.error({ title: 'Restore Failed', message: e.message || String(e) });
+        }
+      });
+    });
+
+    this.container.querySelectorAll('.trash-delete-btn').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.id;
+        const folderName = btn.dataset.folder || null;
+        const confirmed = await dialogService.confirm({
+          title: 'Delete Permanently',
+          message: 'Permanently delete this note? This cannot be undone.',
+          confirmText: 'Delete',
+          cancelText: 'Cancel',
+          type: 'danger',
+        });
+        if (!confirmed) return;
+        try {
+          await noteService.deleteNotePermanent(id, folderName);
+        } catch (e) {
+          await dialogService.error({ title: 'Delete Failed', message: e.message || String(e) });
+        }
+      });
+    });
   }
 
   renderFolderCard(folder, count) {

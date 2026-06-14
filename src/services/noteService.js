@@ -11,6 +11,8 @@ class NoteService {
     this.currentFolder = null; // null = root view
     this.listeners = new Set();
     this._saveQueues = new Map(); // note id → last in-flight save Promise
+    this.trashedNotes = [];
+    this.trashMode = false;
   }
 
   /**
@@ -323,6 +325,39 @@ class NoteService {
     await this.loadNotes();
     await this.loadFolders();
     this.notify();
+  }
+
+  isTrashMode() {
+    return this.trashMode;
+  }
+
+  setTrashMode(on) {
+    this.trashMode = on;
+    this.notify();
+  }
+
+  getTrashedNotes() {
+    return this.trashedNotes;
+  }
+
+  async loadTrash() {
+    this.trashedNotes = await tauri.listTrash();
+    this.notify();
+  }
+
+  async restoreNote(id, folderName) {
+    await tauri.restoreNote(id, folderName ?? null);
+    await Promise.all([this.loadTrash(), this.loadNotes()]);
+  }
+
+  async deleteNotePermanent(id, folderName) {
+    await tauri.deleteNotePermanent(id, folderName ?? null);
+    await this.loadTrash();
+  }
+
+  async emptyTrash() {
+    await tauri.emptyTrash();
+    await this.loadTrash();
   }
 
   /**
