@@ -154,6 +154,23 @@ impl WebDavClient {
             .await;
     }
 
+    /// Löscht das JSON-Unterverzeichnis und das MD-Unterverzeichnis eines Ordners.
+    /// Fehler werden ignoriert (404 = bereits gelöscht, 409 = nicht leer, etc.).
+    pub async fn delete_folder_dirs(&self, folder: &str) {
+        let _ = self
+            .client
+            .delete(self.folder_json_dir_url(folder))
+            .header("Authorization", &self.auth_header)
+            .send()
+            .await;
+        let _ = self
+            .client
+            .delete(self.folder_md_dir_url(folder))
+            .header("Authorization", &self.auth_header)
+            .send()
+            .await;
+    }
+
     // ── Verbindungstest & Verzeichnisse ─────────────────────────────────────────
 
     /// Testet die Verbindung zum Server

@@ -1501,7 +1501,7 @@ async fn set_folder_local_only(
                     .await;
             }
 
-            // Server-Ordner tombstonen (nur bei remove_from_server = true)
+            // Server-Ordner tombstonen und Verzeichnisse löschen (nur bei remove_from_server = true)
             if remove_from_server {
                 let now = chrono::Utc::now().timestamp_millis();
                 let name_c = name.clone();
@@ -1524,6 +1524,7 @@ async fn set_folder_local_only(
                         existing
                     })
                     .await?;
+                client.delete_folder_dirs(&name).await;
             }
         } else {
             // ── Offline-Pfad (Phase 2) ────────────────────────────────────────

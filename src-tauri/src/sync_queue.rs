@@ -199,7 +199,10 @@ pub async fn drain_sync_queue(
             })
             .await
         {
-            Ok(_) => remove_folder_tombstone(app, &name),
+            Ok(_) => {
+                remove_folder_tombstone(app, &name);
+                client.delete_folder_dirs(&name).await;
+            }
             Err(e) => eprintln!(
                 "[drain_sync_queue] tombstone '{}' fehlgeschlagen: {}",
                 name, e
