@@ -5,6 +5,8 @@ import * as tauri from '../services/tauri.js';
 /**
  * Settings Dialog Component
  */
+const FONT_SCALE = { system: 1, small: 0.85, normal: 1, large: 1.15, xlarge: 1.3 };
+
 export class SettingsDialog {
   constructor() {
     this.dialog = document.getElementById('settings-dialog');
@@ -24,9 +26,12 @@ export class SettingsDialog {
     this.updateStatus = document.getElementById('update-status');
     this.installUpdateBtn = document.getElementById('install-update-btn');
     this.defaultOpenModeSelect = document.getElementById('default-open-mode-select');
+    this.fontSizeChips = document.getElementById('font-size-chips');
     this.onSaveCallback = null;
     this.onReconnectCallback = null;
     this.originalTheme = null; // Store original theme for cancel
+    this._originalFontSize = null;
+    this._currentFontSize = 'system';
     this._currentTheme = null;
     this._platform = null;
     this._pendingUpdateVersion = null;
@@ -49,6 +54,15 @@ export class SettingsDialog {
     // Theme change handler - only preview, don't save
     this.themeSelect.addEventListener('change', () => {
       this.applyTheme(this.themeSelect.value);
+    });
+
+    // Font size chip handler - live preview
+    this.fontSizeChips.addEventListener('click', (e) => {
+      const chip = e.target.closest('.chip');
+      if (!chip) return;
+      const value = chip.dataset.value;
+      this._setActiveChip(value);
+      this.applyFontSize(value);
     });
 
     // Sync folder input sanitization (Android parity: only alphanumeric, dash, underscore)
@@ -181,6 +195,8 @@ export class SettingsDialog {
 
       // Store original theme for cancel
       this.originalTheme = settings.theme;
+      // Store original font size for cancel
+      this._originalFontSize = settings.font_size || 'system';
       // Store original sync folder for change detection
       this._previousSyncFolder = settings.sync_folder || 'notes';
 
@@ -192,6 +208,7 @@ export class SettingsDialog {
       this.updateNotificationsCheckbox.checked = settings.update_notifications !== false;
       this.defaultOpenModeSelect.value = settings.default_open_mode || 'edit';
       this.deviceIdInput.value = deviceId;
+      this._setActiveChip(this._originalFontSize);
 
       // Update-Status korrekt anzeigen (verhindert stale Zustand aus vorheriger Session)
       this._restoreUpdateState();
@@ -211,6 +228,10 @@ export class SettingsDialog {
     if (this.originalTheme) {
       this.applyTheme(this.originalTheme);
     }
+    // Restore original font size
+    if (this._originalFontSize) {
+      this.applyFontSize(this._originalFontSize);
+    }
     this.hide();
   }
 
@@ -225,6 +246,7 @@ export class SettingsDialog {
         sync_folder: syncFolderValue || 'notes',
         update_notifications: this.updateNotificationsCheckbox.checked,
         default_open_mode: this.defaultOpenModeSelect.value,
+        font_size: this._currentFontSize,
       };
 
       await tauri.saveSettings(settings);
@@ -280,10 +302,23 @@ export class SettingsDialog {
     }
   }
 
+  applyFontSize(value) {
+    this._currentFontSize = value in FONT_SCALE ? value : 'system';
+    document.documentElement.style.setProperty('--font-scale', FONT_SCALE[this._currentFontSize]);
+  }
+
+  _setActiveChip(value) {
+    this._currentFontSize = value in FONT_SCALE ? value : 'system';
+    for (const chip of this.fontSizeChips.querySelectorAll('.chip')) {
+      chip.classList.toggle('active', chip.dataset.value === this._currentFontSize);
+    }
+  }
+
   async loadAndApplyTheme() {
     try {
       const settings = await tauri.getSettings();
       this.applyTheme(settings.theme);
+      this.applyFontSize(settings.font_size || 'system');
       return settings;
     } catch (error) {
       console.error('Failed to load theme:', error);

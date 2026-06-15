@@ -25,6 +25,13 @@ function setupDOM() {
         <input type="checkbox" id="autostart-checkbox" />
         <input type="text" id="sync-folder-input" placeholder="notes" maxlength="50" />
         <input type="text" id="device-id" readonly />
+        <div class="chip-selector" id="font-size-chips">
+          <button class="chip" data-value="small" type="button"><span class="chip-preview">Aa</span><span>Small</span></button>
+          <button class="chip" data-value="system" type="button"><span class="chip-preview">Aa</span><span>System</span></button>
+          <button class="chip" data-value="normal" type="button"><span class="chip-preview">Aa</span><span>Normal</span></button>
+          <button class="chip" data-value="large" type="button"><span class="chip-preview">Aa</span><span>Large</span></button>
+          <button class="chip" data-value="xlarge" type="button"><span class="chip-preview">Aa</span><span>XLarge</span></button>
+        </div>
         <span id="app-version">Loading...</span>
         <a href="#" id="github-link">GitHub</a>
         <div id="updates-section" class="hidden">
@@ -57,6 +64,7 @@ describe('SettingsDialog', () => {
       sync_folder: 'notes',
       update_notifications: true,
       default_open_mode: 'edit',
+      font_size: 'system',
     });
     tauri.getDeviceId.mockResolvedValue('tauri-abc123');
     tauri.saveSettings.mockResolvedValue();

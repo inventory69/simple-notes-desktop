@@ -19,6 +19,7 @@ pub struct Settings {
     pub sync_folder: String,    // WebDAV sync folder name (default: "notes")
     pub update_notifications: bool, // Show popup when an update is available (Windows only)
     pub default_open_mode: String, // "edit" | "preview" — open text notes in edit vs preview
+    pub font_size: String,      // "system"|"small"|"normal"|"large"|"xlarge"
 }
 
 impl Default for Settings {
@@ -31,6 +32,7 @@ impl Default for Settings {
             sync_folder: "notes".to_string(),
             update_notifications: true,
             default_open_mode: "edit".to_string(),
+            font_size: "system".to_string(),
         }
     }
 }
@@ -48,6 +50,7 @@ mod tests {
         assert!(!settings.autostart);
         assert_eq!(settings.sync_folder, "notes");
         assert!(settings.update_notifications);
+        assert_eq!(settings.font_size, "system");
     }
 
     #[test]
@@ -60,6 +63,7 @@ mod tests {
             sync_folder: "my-notes".to_string(),
             update_notifications: false,
             default_open_mode: "edit".to_string(),
+            font_size: "large".to_string(),
         };
 
         let json = serde_json::to_string(&settings).unwrap();
@@ -71,6 +75,7 @@ mod tests {
         assert!(parsed.autostart);
         assert_eq!(parsed.sync_folder, "my-notes");
         assert!(!parsed.update_notifications);
+        assert_eq!(parsed.font_size, "large");
     }
 
     #[test]
@@ -100,6 +105,7 @@ mod tests {
                 sync_folder: "notes".to_string(),
                 update_notifications: true,
                 default_open_mode: "edit".to_string(),
+                font_size: "system".to_string(),
             };
 
             let json = serde_json::to_string(&settings).unwrap();
@@ -128,6 +134,7 @@ mod tests {
             sync_folder: "notes".to_string(),
             update_notifications: false,
             default_open_mode: "edit".to_string(),
+            font_size: "xlarge".to_string(),
         };
 
         let json = serde_json::to_string(&settings).unwrap();
@@ -166,6 +173,7 @@ mod tests {
             sync_folder: "custom".to_string(),
             update_notifications: false,
             default_open_mode: "edit".to_string(),
+            font_size: "normal".to_string(),
         };
 
         let cloned = settings.clone();
@@ -200,6 +208,7 @@ mod tests {
             "sync_folder",
             "update_notifications",
             "default_open_mode",
+            "font_size",
         ]
         .iter()
         .map(|s| s.to_string())

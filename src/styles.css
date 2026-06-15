@@ -1,4 +1,5 @@
 :root {
+  font-size: calc(16px * var(--font-scale, 1));
   --color-bg: #ffffff;
   --color-fg: #1a1a1a;
   --color-border: #e0e0e0;
@@ -298,6 +299,61 @@ body {
 [data-theme="dark"] .form-group select:focus {
   border-color: var(--color-primary);
   box-shadow: 0 0 0 3px rgba(77, 159, 255, 0.25);
+}
+
+/* Font Size Chip Selector */
+.chip-selector {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.chip-selector .chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+  min-width: 3.5rem;
+}
+
+.chip-selector .chip .chip-preview {
+  font-weight: 600;
+  line-height: 1;
+}
+
+.chip-selector .chip:hover {
+  border-color: var(--color-primary);
+  background: var(--color-hover);
+}
+
+.chip-selector .chip.active {
+  border-color: var(--color-primary);
+  background: var(--color-selected);
+  color: var(--color-primary);
+}
+
+[data-theme="dark"] .chip-selector .chip {
+  background: #2a2a2a;
+  border-color: #444;
+}
+
+[data-theme="dark"] .chip-selector .chip:hover {
+  background: var(--color-hover);
+}
+
+[data-theme="dark"] .chip-selector .chip.active {
+  background: var(--color-selected);
+  color: var(--color-primary);
 }
 
 .form-group input[type="checkbox"] {
@@ -1119,7 +1175,7 @@ body {
 
 .cm-scroller {
   font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
-  font-size: 14px;
+  font-size: 0.875rem;
   padding: 1rem;
 }
 
@@ -1787,7 +1843,7 @@ select.dialog-input {
   flex-direction: column;
   gap: 10px;
   max-width: 300px;
-  font-size: 14px;
+  font-size: 0.875rem;
   animation: toast-slide-in 0.2s ease-out;
 }
 
@@ -1813,7 +1869,7 @@ select.dialog-input {
   border: none;
   cursor: pointer;
   color: var(--color-fg-muted, var(--color-fg));
-  font-size: 14px;
+  font-size: 0.875rem;
   padding: 2px 6px;
   border-radius: 4px;
   opacity: 0.6;
@@ -1914,6 +1970,7 @@ select.dialog-input {
   margin-left: 4px;
   flex-shrink: 0;
 }
+
 
 .folder-menu-btn {
   flex-shrink: 0;
