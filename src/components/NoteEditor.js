@@ -564,12 +564,46 @@ export class NoteEditor {
       let currentIndex = dragIndex;
 
       const startY = e.clientY;
+      const initialScrollTop = container.scrollTop;
       const itemHeight = dragItem.getBoundingClientRect().height;
       // Cache initial item center positions for separator-aware calculation
       const itemCenters = allItems.map((el) => {
         const rect = el.getBoundingClientRect();
         return rect.top + rect.height / 2;
       });
+      // Cache container rect once — it doesn't change during a drag
+      const containerRect = container.getBoundingClientRect();
+
+      // Auto-scroll state
+      const SCROLL_ZONE = 60;
+      const SCROLL_SPEED = 8;
+      let scrollRAF = null;
+      let scrollDir = 0;
+
+      const runScroll = () => {
+        if (scrollDir !== 0) {
+          container.scrollTop += scrollDir * SCROLL_SPEED;
+          scrollRAF = requestAnimationFrame(runScroll);
+        }
+      };
+
+      const updateAutoScroll = (mouseY) => {
+        let newDir = 0;
+        if (mouseY < containerRect.top + SCROLL_ZONE) newDir = -1;
+        else if (mouseY > containerRect.bottom - SCROLL_ZONE) newDir = 1;
+        if (newDir !== scrollDir) {
+          scrollDir = newDir;
+          if (scrollRAF) cancelAnimationFrame(scrollRAF);
+          if (scrollDir !== 0) scrollRAF = requestAnimationFrame(runScroll);
+        }
+      };
+
+      // Stop the rAF loop if the window loses focus before mouseup is delivered
+      const onBlur = () => {
+        if (scrollRAF) cancelAnimationFrame(scrollRAF);
+        scrollDir = 0;
+      };
+      window.addEventListener('blur', onBlur);
 
       // Track source item's checked state for visual cross-boundary feedback
       const sourceItem = sortedItems[displayIndex];
@@ -577,11 +611,15 @@ export class NoteEditor {
       let visuallyToggled = false;
 
       const onMouseMove = (moveEvent) => {
-        const deltaY = moveEvent.clientY - startY;
+        // Compensate transform for container scroll so the item follows the mouse
+        const scrollOffset = container.scrollTop - initialScrollTop;
+        const deltaY = moveEvent.clientY - startY + scrollOffset;
         dragItem.style.transform = `translateY(${deltaY}px)`;
         dragItem.style.zIndex = '100';
 
-        // Calculate target based on actual item center positions (separator-aware)
+        // Calculate target based on actual item center positions (separator-aware).
+        // deltaY already incorporates scrollOffset, so comparing itemCenters[dragIndex] + deltaY
+        // against itemCenters[i] is equivalent to the scroll-adjusted form but without allocation.
         const dragCenter = itemCenters[dragIndex] + deltaY;
         let clampedTarget = dragIndex;
         let minDist = Infinity;
@@ -602,18 +640,13 @@ export class NoteEditor {
           visuallyToggled = wouldToggle;
           const checkbox = dragItem.querySelector('input[type="checkbox"]');
           const textEl = dragItem.querySelector('.checklist-item-text');
-          if (wouldToggle) {
-            // Show what it would look like after drop
-            dragItem.classList.toggle('checked', !sourceChecked);
-            if (checkbox) checkbox.checked = !sourceChecked;
-            if (textEl) textEl.style.opacity = !sourceChecked ? '0.5' : '1';
-          } else {
-            // Restore original visual state
-            dragItem.classList.toggle('checked', sourceChecked);
-            if (checkbox) checkbox.checked = sourceChecked;
-            if (textEl) textEl.style.opacity = sourceChecked ? '0.5' : '1';
-          }
+          const displayChecked = wouldToggle ? !sourceChecked : sourceChecked;
+          dragItem.classList.toggle('checked', displayChecked);
+          if (checkbox) checkbox.checked = displayChecked;
+          if (textEl) textEl.style.opacity = displayChecked ? '0.5' : '1';
         }
+
+        updateAutoScroll(moveEvent.clientY);
 
         if (clampedTarget !== currentIndex) {
           // Visual feedback: shift items AND separator together.
@@ -625,9 +658,8 @@ export class NoteEditor {
           const dragVisualIdx = allVisual.indexOf(dragItem);
           const targetVisualIdx = allVisual.indexOf(allItems[clampedTarget]);
 
-          allVisual.forEach((el) => {
+          allVisual.forEach((el, vi) => {
             if (el === dragItem) return;
-            const vi = allVisual.indexOf(el);
             const lo = Math.min(dragVisualIdx, targetVisualIdx);
             const hi = Math.max(dragVisualIdx, targetVisualIdx);
             if (vi >= lo && vi <= hi) {
@@ -644,6 +676,10 @@ export class NoteEditor {
       const onMouseUp = () => {
         document.removeEventListener('mousemove', onMouseMove);
         document.removeEventListener('mouseup', onMouseUp);
+        window.removeEventListener('blur', onBlur);
+
+        if (scrollRAF) cancelAnimationFrame(scrollRAF);
+        scrollDir = 0;
 
         // Reset visual state (items + separator)
         container.querySelectorAll('.checklist-item, .checklist-separator[data-separator]').forEach((el) => {
