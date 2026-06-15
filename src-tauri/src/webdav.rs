@@ -673,6 +673,25 @@ impl WebDavClient {
         }
     }
 
+    /// Entfernt Lösch-Einträge per ID aus dem geteilten Ledger (read-modify-write).
+    /// Wird beim Wieder-Einschluss eines local-only-Ordners aufgerufen, damit re-uploadete
+    /// Notizen nicht als gelöscht markiert bleiben. Best-effort: Fehler werden geloggt.
+    pub async fn remove_deletions(&self, ids: &[String]) {
+        if ids.is_empty() {
+            return;
+        }
+        let set: std::collections::HashSet<String> = ids.iter().cloned().collect();
+        let result = self
+            .write_deletions_merged(move |mut ledger| {
+                ledger.deleted_notes.retain(|r| !set.contains(&r.id));
+                ledger
+            })
+            .await;
+        if let Err(e) = result {
+            eprintln!("[remove_deletions] ledger write failed: {}", e);
+        }
+    }
+
     /// Löscht eine Notiz-JSON per ID und Ordner-Pfad ohne vollständiges Note-Objekt.
     /// 404 gilt als Erfolg — Datei ist bereits nicht mehr vorhanden.
     /// Wird von der Sync-Queue beim Drain verwendet.
@@ -1026,6 +1045,43 @@ mod tests {
         assert!(result.deleted_notes.iter().any(|r| r.id == "id-b"));
         assert!(result.deleted_notes.iter().any(|r| r.id == "id-c"));
         assert!(result.deleted_notes.iter().all(|r| r.deleted_at == now));
+    }
+
+    #[test]
+    fn test_remove_deletions_removes_matching_ids() {
+        let ledger = make_ledger(&[("id-a", 1000), ("id-b", 2000), ("id-c", 3000)]);
+        let to_remove = vec!["id-a".to_string(), "id-c".to_string()];
+        let set: std::collections::HashSet<String> = to_remove.into_iter().collect();
+        let mut result = ledger;
+        result.deleted_notes.retain(|r| !set.contains(&r.id));
+        assert_eq!(result.deleted_notes.len(), 1);
+        assert_eq!(result.deleted_notes[0].id, "id-b");
+    }
+
+    #[test]
+    fn test_remove_deletions_noop_on_empty_list() {
+        let ledger = make_ledger(&[("id-a", 1000)]);
+        let set: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut result = ledger;
+        result.deleted_notes.retain(|r| !set.contains(&r.id));
+        assert_eq!(
+            result.deleted_notes.len(),
+            1,
+            "empty removal set must leave ledger unchanged"
+        );
+    }
+
+    #[test]
+    fn test_remove_deletions_unknown_id_is_noop() {
+        let ledger = make_ledger(&[("id-a", 1000), ("id-b", 2000)]);
+        let set: std::collections::HashSet<String> = vec!["id-z".to_string()].into_iter().collect();
+        let mut result = ledger;
+        result.deleted_notes.retain(|r| !set.contains(&r.id));
+        assert_eq!(
+            result.deleted_notes.len(),
+            2,
+            "removing unknown id must not change ledger"
+        );
     }
 
     #[test]

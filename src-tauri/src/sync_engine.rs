@@ -59,6 +59,20 @@ pub fn update_cache_entry(app: &AppHandle, entry: NoteCacheEntry) {
     save_note_cache(app, &cache);
 }
 
+/// Mehrere Cache-Einträge per ID entfernen und sofort persistieren.
+/// Wird beim Wieder-Einschluss eines local-only-Ordners aufgerufen, damit veraltete
+/// Conflict/DeletedOnServer-Badges aus list_notes() verschwinden.
+pub fn remove_cache_entries(app: &AppHandle, ids: &[String]) {
+    if ids.is_empty() {
+        return;
+    }
+    let mut cache = load_note_cache(app);
+    for id in ids {
+        cache.remove(id);
+    }
+    save_note_cache(app, &cache);
+}
+
 fn save_last_sync_at(app: &AppHandle, ts: i64) {
     if let Ok(store) = app.store(SYNC_STORE) {
         store.set(KEY_LAST_SYNC, serde_json::json!(ts));

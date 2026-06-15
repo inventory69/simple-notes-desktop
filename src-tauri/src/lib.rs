@@ -1572,6 +1572,7 @@ async fn set_folder_local_only(
 
         // Lokale Notizen zum Server hochladen (ausgenommen Papierkorb-Notizen)
         let mut upload_ok = true;
+        let mut uploaded_ids: Vec<String> = Vec::new();
         for note in local_store::list_notes(&app) {
             if note
                 .folder_name
@@ -1589,6 +1590,7 @@ async fn set_folder_local_only(
                     eprintln!("[set_folder_local_only] upload {} failed: {}", note.id, e);
                     upload_ok = false;
                 } else {
+                    uploaded_ids.push(note.id.clone());
                     local_store::remove_note(&app, &note.id);
                 }
             }
@@ -1599,6 +1601,14 @@ async fn set_folder_local_only(
                 "Some notes could not be uploaded; folder kept local".to_string(),
             ));
         }
+
+        // Stale Tombstones aus dem geteilten Lösch-Ledger entfernen: re-uploadete Notizen
+        // dürfen nicht weiterhin als „gelöscht" im Ledger stehen (Zombie-Schutz in list_notes
+        // und Android detectDeletions würden sie sonst fälschlicherweise entfernen).
+        client.remove_deletions(&uploaded_ids).await;
+        // Sync-Cache-Einträge bereinigen, damit veraltete Conflict/DeletedOnServer-Badges
+        // nicht weiter in list_notes() eingeblendet werden.
+        sync_engine::remove_cache_entries(&app, &uploaded_ids);
 
         // Lokalen Ordner tombstonen; Server-Ordner reaktivieren
         local_store::upsert_folder(&app, &name, None, true);
