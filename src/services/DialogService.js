@@ -577,6 +577,58 @@ class DialogService {
   }
 
   /**
+   * Resolve a sync conflict or server-deletion for a note.
+   * @param {{ isDeleted: boolean }} opts - isDeleted true = DELETED_ON_SERVER, false = CONFLICT
+   * @returns {Promise<'keep_mine'|'use_server'|null>} null = dismissed
+   */
+  confirmConflictResolve({ isDeleted }) {
+    return new Promise((resolve) => {
+      this.titleEl.textContent = isDeleted ? 'Note Deleted on Server' : 'Sync Conflict';
+      this.messageEl.innerHTML = isDeleted
+        ? `<div>This note was deleted on the server by another device. What do you want to do?</div>`
+        : `<div>This note was modified on two devices at the same time. Which version do you want to keep?</div>`;
+      this.iconContainer.innerHTML = this._getIcon('warning');
+      this.iconContainer.className = 'dialog-icon dialog-icon-warning';
+
+      const origActions = this.actionsContainer.innerHTML;
+      const keepLabel = isDeleted ? 'Keep local' : 'Keep mine';
+      const serverLabel = isDeleted ? 'Discard' : 'Use server';
+      this.actionsContainer.innerHTML = `
+        <button id="cr-cancel" class="btn-secondary">Cancel</button>
+        <button id="cr-server" class="btn-danger">${serverLabel}</button>
+        <button id="cr-keep" class="btn-primary">${keepLabel}</button>
+      `;
+
+      this.dialog.classList.remove('hidden');
+
+      const done = (result) => {
+        this.actionsContainer.innerHTML = origActions;
+        this.confirmBtn = document.getElementById('dialog-confirm-btn');
+        this.cancelBtn = document.getElementById('dialog-cancel-btn');
+        this._cleanup();
+        resolve(result);
+      };
+
+      document.getElementById('cr-keep').onclick = () => done('keep_mine');
+      document.getElementById('cr-server').onclick = () => done('use_server');
+      document.getElementById('cr-cancel').onclick = () => done(null);
+
+      const handleKeydown = (e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          done(null);
+        }
+      };
+
+      this.keydownHandler = handleKeydown;
+      this._attachBackdropHandler(() => done(null));
+      document.addEventListener('keydown', handleKeydown);
+
+      setTimeout(() => document.getElementById('cr-keep')?.focus(), 100);
+    });
+  }
+
+  /**
    * Choose a target folder for moving notes.
    * @param {{folders: Array, currentFolder: string|null}} opts
    * @returns {Promise<string|null|undefined>} folder name, null = root, undefined = cancelled

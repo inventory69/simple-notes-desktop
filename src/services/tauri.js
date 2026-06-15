@@ -270,3 +270,21 @@ export async function emptyTrash() {
   return await invoke('empty_trash');
 }
 
+/**
+ * Run a server sync: download/upload notes, detect conflicts and server-side deletions.
+ * @returns {Promise<void>}
+ */
+export async function sync() {
+  return await invoke('sync');
+}
+
+/**
+ * Resolve a sync conflict for a note.
+ * @param {string} id - Note ID
+ * @param {'keep_mine'|'use_server'} resolution - Which version to keep
+ * @param {string|null} folderName - Folder context (needed for "use_server")
+ * @returns {Promise<void>}
+ */
+export async function resolveConflict(id, resolution, folderName = null) {
+  return await invoke('resolve_conflict', { id, resolution, folderName });
+}

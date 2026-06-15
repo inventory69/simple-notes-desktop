@@ -14,6 +14,8 @@ pub enum SyncStatus {
     LocalOnly,
     /// Konflikt erkannt
     Conflict,
+    /// Auf dem Server gelöscht während lokale Kopie noch existiert (Android-Parität)
+    DeletedOnServer,
 }
 
 /// Typ der Notiz
@@ -212,6 +214,10 @@ pub struct NoteMetadata {
     /// Zeitpunkt der Papierkorb-Verschiebung (Epoch ms). None = aktive Notiz.
     #[serde(rename = "trashedAt", default, skip_serializing_if = "Option::is_none")]
     pub trashed_at: Option<i64>,
+    /// Sync-Status für Konflikt-Badge im Frontend (Phase 6).
+    /// Wird aus dem Sync-Cache überlagert; default SYNCED für Server-Notizen ohne Cache-Eintrag.
+    #[serde(default)]
+    pub sync_status: SyncStatus,
 }
 
 impl From<&Note> for NoteMetadata {
@@ -229,6 +235,7 @@ impl From<&Note> for NoteMetadata {
             color: note.color.clone(),
             folder_name: note.folder_name.clone(),
             trashed_at: note.trashed_at,
+            sync_status: note.sync_status,
         }
     }
 }

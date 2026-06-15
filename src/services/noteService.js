@@ -289,6 +289,28 @@ class NoteService {
   }
 
   /**
+   * Run server sync and refresh local data.
+   */
+  async sync() {
+    await tauri.sync();
+    await this.loadNotes();
+    await this.loadFolders();
+    this.notify();
+  }
+
+  /**
+   * Resolve a sync conflict.
+   * @param {string} id - Note ID
+   * @param {'keep_mine'|'use_server'} resolution
+   */
+  async resolveConflict(id, resolution) {
+    const cached = this.notes.find((n) => n.id === id);
+    await tauri.resolveConflict(id, resolution, cached?.folderName ?? null);
+    await this.loadNotes();
+    this.notify();
+  }
+
+  /**
    * Rename a folder
    * @param {string} oldName
    * @param {string} newName

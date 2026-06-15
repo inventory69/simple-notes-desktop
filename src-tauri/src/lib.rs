@@ -4,12 +4,13 @@ mod local_store;
 mod markdown;
 mod models;
 mod storage;
+mod sync_engine;
 mod sync_queue;
 mod webdav;
 
 use error::{AppError, Result};
 use folders::{validate_folder_name, Folder, FolderMeta};
-use models::{Note, NoteMetadata};
+use models::{Note, NoteMetadata, SyncStatus};
 use std::sync::Mutex;
 use storage::{Credentials, Settings};
 use tauri::{
@@ -29,6 +30,10 @@ struct WebDavState(Mutex<Option<WebDavClient>>);
 
 /// Global Device ID
 struct DeviceIdState(Mutex<Option<String>>);
+
+/// Verhindert parallele Sync-Läufe (try_lock → Ok bei freiem Slot, Err wenn belegt).
+/// tokio::sync::Mutex wird verwendet, damit MutexGuard Send ist (Tauri-Command-Anforderung).
+struct SyncLockState(tokio::sync::Mutex<()>);
 
 /// Recovers from a poisoned mutex by extracting the inner value.
 /// A panic while holding a lock is rare in this app (no heavy work inside critical
@@ -199,6 +204,20 @@ async fn list_notes(
                 }
             }
             notes.push(NoteMetadata::from(note));
+        }
+    }
+
+    // Phase 6: Konflikt-/DeletedOnServer-Status aus Sync-Cache in Metadaten einbetten.
+    // Der Cache wird vom `sync`-Command befüllt; ohne Cache-Eintrag bleibt der Status SYNCED.
+    let note_cache = sync_engine::load_note_cache(&app);
+    for meta in notes.iter_mut() {
+        if let Some(entry) = note_cache.get(&meta.id) {
+            if matches!(
+                entry.note.sync_status,
+                SyncStatus::Conflict | SyncStatus::DeletedOnServer
+            ) {
+                meta.sync_status = entry.note.sync_status;
+            }
         }
     }
 
@@ -1612,6 +1631,84 @@ async fn set_folder_local_only(
     Ok(build_full_folder_list(client.as_ref(), &app).await)
 }
 
+/// Server-Sync ausführen: Notizen herunter-/hochladen, Konflikte und Löschungen erkennen.
+/// Exklusiver Sync-Lock verhindert parallele Läufe.
+#[tauri::command]
+async fn sync(
+    app: AppHandle,
+    device_id_state: State<'_, DeviceIdState>,
+    state: State<'_, WebDavState>,
+    sync_lock: State<'_, SyncLockState>,
+) -> Result<()> {
+    // Bei bereits laufendem Sync sofort zurückkehren (kein Fehler, kein zweiter Lauf)
+    let _guard = match sync_lock.0.try_lock() {
+        Ok(g) => g,
+        Err(_) => return Ok(()),
+    };
+
+    let client = {
+        let lock = lock_recover(&state.0);
+        lock.clone()
+    };
+    let client = match client {
+        Some(c) => c,
+        None => return Ok(()),
+    };
+
+    let device_id = get_or_create_device_id(&app, &device_id_state)?;
+    sync_engine::run_sync(&client, &app, &device_id, TRASH_RETENTION_MS).await;
+    Ok(())
+}
+
+/// Einen Sync-Konflikt auflösen: eigene Version behalten oder Server-Version übernehmen.
+#[tauri::command]
+async fn resolve_conflict(
+    id: String,
+    resolution: String, // "keep_mine" oder "use_server"
+    folder_name: Option<String>,
+    app: AppHandle,
+    state: State<'_, WebDavState>,
+) -> Result<()> {
+    let now = chrono::Utc::now().timestamp_millis();
+    let cache_entry = sync_engine::load_note_cache(&app).get(&id).cloned();
+
+    match resolution.as_str() {
+        "keep_mine" => {
+            // Eigene Version behalten: als PENDING markieren → nächster Sync lädt hoch
+            if let Some(mut entry) = cache_entry {
+                entry.note.sync_status = models::SyncStatus::Pending;
+                entry.note.updated_at = now;
+                sync_engine::update_cache_entry(&app, entry);
+            }
+        }
+        "use_server" => {
+            // Server-Version übernehmen: aktuellen Stand laden und Cache überschreiben
+            let client = {
+                let lock = lock_recover(&state.0);
+                lock.clone()
+            };
+            let client = client.ok_or(AppError::NotConnected)?;
+            let mut note = client.get_note(&id, folder_name.as_deref()).await?;
+            note.sync_status = models::SyncStatus::Synced;
+            sync_engine::update_cache_entry(
+                &app,
+                sync_engine::NoteCacheEntry {
+                    note,
+                    last_synced_at: now,
+                    etag: None,
+                },
+            );
+        }
+        other => {
+            return Err(AppError::WebDav(format!(
+                "Ungültige Konflikt-Auflösung: {}",
+                other
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// State to track minimize-to-tray setting at runtime
 struct TraySettings(Mutex<bool>);
 
@@ -1697,6 +1794,7 @@ pub fn run() {
         .manage(WebDavState(Mutex::new(None)))
         .manage(DeviceIdState(Mutex::new(None)))
         .manage(TraySettings(Mutex::new(false)))
+        .manage(SyncLockState(tokio::sync::Mutex::new(())))
         .setup(|app| {
             // Load minimize_to_tray setting
             if let Ok(store) = app.store("settings.json") {
@@ -1882,6 +1980,8 @@ pub fn run() {
             set_folder_color,
             set_folder_local_only,
             move_notes,
+            sync,
+            resolve_conflict,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

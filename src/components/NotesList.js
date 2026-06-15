@@ -632,6 +632,20 @@ export class NotesList {
 
   _attachNoteHandlers() {
     this.container.querySelectorAll('.note-item').forEach((item) => {
+      // Conflict / deleted-on-server badge click — resolve without opening the note
+      item.querySelector('.sync-conflict-badge, .sync-deleted-badge')?.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = item.dataset.id;
+        const isDeleted = e.currentTarget.classList.contains('sync-deleted-badge');
+        const resolution = await dialogService.confirmConflictResolve({ isDeleted });
+        if (resolution === null) return;
+        try {
+          await noteService.resolveConflict(id, resolution);
+        } catch (err) {
+          await dialogService.error({ title: 'Resolve Failed', message: err.message || String(err) });
+        }
+      });
+
       item.addEventListener('click', (e) => {
         const id = item.dataset.id;
 
@@ -873,6 +887,8 @@ export class NotesList {
           <div class="note-item-header">
             ${typeIcon}
             <div class="note-item-title">${this.escapeHtml(note.title)}</div>
+            ${note.syncStatus === 'CONFLICT' ? `<span class="sync-conflict-badge" title="Sync conflict — click to resolve">⚡</span>` : ''}
+            ${note.syncStatus === 'DELETED_ON_SERVER' ? `<span class="sync-deleted-badge" title="Deleted on server">🗑</span>` : ''}
           </div>
           <div class="note-item-preview">${previewLines.map((line) => `<div class="preview-line">${note.noteType === 'CHECKLIST' ? this.escapeHtml(line) : this.renderPreviewLine(line)}</div>`).join('')}</div>
           <div class="note-item-meta">${pinIcon}<span class="note-item-date" data-ts="${note.updatedAt}">${date}</span></div>
