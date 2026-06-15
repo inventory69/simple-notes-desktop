@@ -374,9 +374,9 @@ class App {
         });
         if (!confirmed) return;
       }
-      const name = await dialogService.promptFolderName({ title: 'New Folder' });
-      if (!name) return;
-      await noteService.createFolder(name, null);
+      const result = await dialogService.promptFolderName({ title: 'New Folder', showLocalOnly: true });
+      if (!result) return;
+      await noteService.createFolder(result.name, null, result.localOnly);
     } catch (error) {
       console.error('Failed to create folder:', error);
       await dialogService.error({

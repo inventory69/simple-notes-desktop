@@ -27,6 +27,7 @@ export class NotesList {
     this.sortDirection = localStorage.getItem('noteListSortDirection') || 'DESC';
     this._sortMenuCloseHandler = null;
     this._renderedFolder = undefined;
+    this._inTrashMode = false;
 
     this.init();
   }
@@ -239,7 +240,12 @@ export class NotesList {
 
   render(searchQuery = '') {
     // Trash view takes priority
-    if (noteService.isTrashMode()) {
+    const trashMode = noteService.isTrashMode();
+    if (trashMode !== this._inTrashMode) {
+      this.container.scrollTop = 0;
+      this._inTrashMode = trashMode;
+    }
+    if (trashMode) {
       this._renderTrashView();
       return;
     }
@@ -470,6 +476,15 @@ export class NotesList {
       ? `<span class="folder-color-swatch" style="background:${folder.color}"></span>`
       : '';
 
+    const localBadge = folder.localOnly
+      ? `<span class="folder-local-badge" title="Local only — not synced to server">
+           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+             <line x1="1" y1="1" x2="23" y2="23"></line>
+             <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55M5 12.55a10.94 10.94 0 0 1 5.17-2.39M10.71 5.05A16 16 0 0 1 22.56 9M1.42 9a15.91 15.91 0 0 1 4.7-2.88M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"></path>
+           </svg>
+         </span>`
+      : '';
+
     return `
       <div class="folder-card${colorClass}" data-folder="${this.escapeHtml(folder.name)}" ${colorStyle}>
         <div class="folder-card-main">
@@ -478,6 +493,7 @@ export class NotesList {
           </svg>
           ${colorSwatch}
           <span class="folder-card-name">${this.escapeHtml(folder.name)}</span>
+          ${localBadge}
           <span class="folder-card-count">${count}</span>
         </div>
         <button class="folder-menu-btn btn-icon-small" data-folder="${this.escapeHtml(folder.name)}" title="Folder options" type="button" aria-label="Folder options">⋯</button>
@@ -513,11 +529,15 @@ export class NotesList {
     // Remove any existing menu
     for (const m of document.querySelectorAll('.folder-options-menu')) m.remove();
 
+    const folder = noteService.getFolders().find((f) => f.name === folderName);
+    const isLocalOnly = folder?.localOnly ?? false;
+
     const menu = document.createElement('div');
     menu.className = 'sort-menu folder-options-menu';
     menu.innerHTML = `
       <div class="sort-menu-item" data-action="rename">Rename</div>
       <div class="sort-menu-item" data-action="color">Set color</div>
+      <div class="sort-menu-item" data-action="toggle-local">${isLocalOnly ? 'Include in sync' : 'Make local-only'}</div>
       <div class="sort-menu-separator"></div>
       <div class="sort-menu-item sort-menu-item-danger" data-action="delete">Delete folder</div>
     `;
@@ -527,8 +547,6 @@ export class NotesList {
     menu.style.top = `${rect.bottom + 4}px`;
     menu.style.right = `${window.innerWidth - rect.right}px`;
     document.body.appendChild(menu);
-
-    const folder = noteService.getFolders().find((f) => f.name === folderName);
 
     menu.addEventListener('click', async (e) => {
       const item = e.target.closest('.sort-menu-item');
@@ -542,6 +560,24 @@ export class NotesList {
           break;
         case 'color':
           await this._handleSetFolderColor(folderName, anchorBtn, folder?.color ?? null);
+          break;
+        case 'toggle-local':
+          try {
+            if (isLocalOnly) {
+              // Ordner wieder in den Sync aufnehmen — keine Server-Optionswahl nötig
+              await noteService.setFolderLocalOnly(folderName, false);
+            } else {
+              // Phase 3: Nutzer wählt, was mit den Server-Kopien passieren soll
+              const choice = await dialogService.confirmFolderExclude({ folderName });
+              if (choice === null) break; // Nutzer hat abgebrochen
+              await noteService.setFolderLocalOnly(folderName, true, choice === 'remove');
+            }
+          } catch (err) {
+            await dialogService.error({
+              title: isLocalOnly ? 'Include in Sync Failed' : 'Make Local-Only Failed',
+              message: err.message || String(err),
+            });
+          }
           break;
         case 'delete':
           await this._handleDeleteFolder(folderName);
@@ -560,13 +596,13 @@ export class NotesList {
   }
 
   async _handleRenameFolder(oldName) {
-    const newName = await dialogService.promptFolderName({
+    const result = await dialogService.promptFolderName({
       title: 'Rename Folder',
       defaultValue: oldName,
     });
-    if (!newName || newName === oldName) return;
+    if (!result || result.name === oldName) return;
     try {
-      await noteService.renameFolder(oldName, newName);
+      await noteService.renameFolder(oldName, result.name);
     } catch (e) {
       await dialogService.error({ title: 'Rename Failed', message: e.message || String(e) });
     }

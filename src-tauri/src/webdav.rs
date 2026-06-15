@@ -645,6 +645,56 @@ impl WebDavClient {
         }
     }
 
+    /// Hängt mehrere IDs in einem einzigen read-modify-write ans Lösch-Ledger.
+    /// Effizienter als n einzelne `append_deletion`-Aufrufe (ein GET+PUT statt n).
+    /// Best-effort: Fehler werden geloggt, nicht propagiert.
+    pub async fn append_deletions(
+        &self,
+        ids: &[String],
+        device_id: &str,
+        now: i64,
+        retention_ms: i64,
+    ) {
+        if ids.is_empty() {
+            return;
+        }
+        let ids = ids.to_vec();
+        let device_id = device_id.to_string();
+        let result = self
+            .write_deletions_merged(move |mut ledger| {
+                for id in &ids {
+                    ledger = merge_deletion(ledger, id, &device_id, now, retention_ms);
+                }
+                ledger
+            })
+            .await;
+        if let Err(e) = result {
+            eprintln!("[append_deletions] ledger write failed: {}", e);
+        }
+    }
+
+    /// Löscht eine Notiz-JSON per ID und Ordner-Pfad ohne vollständiges Note-Objekt.
+    /// 404 gilt als Erfolg — Datei ist bereits nicht mehr vorhanden.
+    /// Wird von der Sync-Queue beim Drain verwendet.
+    pub async fn delete_note_by_id_folder(&self, id: &str, folder: Option<&str>) -> Result<()> {
+        let json_url = self.note_json_url(folder, id);
+        let resp = self
+            .client
+            .delete(&json_url)
+            .header("Authorization", &self.auth_header)
+            .send()
+            .await
+            .map_err(|e| AppError::NetworkError(e.to_string()))?;
+
+        match resp.status() {
+            s if s.is_success() || s == StatusCode::NOT_FOUND => Ok(()),
+            s => Err(AppError::WebDav(format!(
+                "DELETE {} fehlgeschlagen: {}",
+                id, s
+            ))),
+        }
+    }
+
     // ── Interner PROPFIND-Helfer ─────────────────────────────────────────────────
 
     async fn propfind_text(&self, url: &str, depth: &str) -> Result<String> {
@@ -956,6 +1006,66 @@ mod tests {
         assert!(!ids.contains(&"old"), "expired entry must be pruned");
         assert!(ids.contains(&"recent"));
         assert!(ids.contains(&"new"));
+    }
+
+    #[test]
+    fn test_append_deletions_batch_merges_all_ids() {
+        // Simuliert den Kern von append_deletions: mehrere IDs in einem Schritt mergen
+        let ledger = DeletionLedger::default();
+        let ids = ["id-a", "id-b", "id-c"];
+        let now = 5000i64;
+        let retention = 100_000i64;
+
+        let mut result = ledger;
+        for id in &ids {
+            result = merge_deletion(result, id, "tauri-x", now, retention);
+        }
+
+        assert_eq!(result.deleted_notes.len(), 3);
+        assert!(result.deleted_notes.iter().any(|r| r.id == "id-a"));
+        assert!(result.deleted_notes.iter().any(|r| r.id == "id-b"));
+        assert!(result.deleted_notes.iter().any(|r| r.id == "id-c"));
+        assert!(result.deleted_notes.iter().all(|r| r.deleted_at == now));
+    }
+
+    #[test]
+    fn test_append_deletions_deduplicates_existing() {
+        // Vorhandene Einträge werden korrekt dedupliziert (neuestes deleted_at gewinnt)
+        let ledger = make_ledger(&[("id-a", 1000), ("id-b", 2000)]);
+        let ids = ["id-a", "id-c"]; // id-a aktualisieren, id-c neu hinzufügen
+        let now = 3000i64;
+        let retention = 100_000i64;
+
+        let mut result = ledger;
+        for id in &ids {
+            result = merge_deletion(result, id, "tauri-x", now, retention);
+        }
+
+        // id-a: aktualisiert auf 3000 (neuer als 1000)
+        // id-b: unverändert 2000
+        // id-c: neu mit 3000
+        assert_eq!(result.deleted_notes.len(), 3);
+        let a = result
+            .deleted_notes
+            .iter()
+            .find(|r| r.id == "id-a")
+            .unwrap();
+        assert_eq!(
+            a.deleted_at, 3000,
+            "id-a muss auf neueren Wert aktualisiert werden"
+        );
+        let b = result
+            .deleted_notes
+            .iter()
+            .find(|r| r.id == "id-b")
+            .unwrap();
+        assert_eq!(b.deleted_at, 2000, "id-b muss unverändert bleiben");
+        let c = result
+            .deleted_notes
+            .iter()
+            .find(|r| r.id == "id-c")
+            .unwrap();
+        assert_eq!(c.deleted_at, 3000, "id-c muss neu hinzugefügt werden");
     }
 
     #[test]

@@ -1971,6 +1971,19 @@ select.dialog-input {
   flex-shrink: 0;
 }
 
+.folder-local-badge {
+  display: inline-flex;
+  align-items: center;
+  opacity: 0.45;
+  flex-shrink: 0;
+  margin-left: 2px;
+  color: var(--color-fg);
+}
+
+[data-theme="dark"] .folder-local-badge {
+  opacity: 0.55;
+}
+
 
 .folder-menu-btn {
   flex-shrink: 0;

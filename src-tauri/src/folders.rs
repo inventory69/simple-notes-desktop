@@ -21,6 +21,9 @@ pub struct Folder {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// Ob der Ordner ausschließlich lokal gespeichert wird (nie zum Server synchronisiert).
+    #[serde(default)]
+    pub local_only: bool,
 }
 
 /// Validiert einen Ordnernamen (Port von `FolderNameValidator.kt`)

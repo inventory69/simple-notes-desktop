@@ -160,10 +160,22 @@ export async function listFolders() {
  * Create a new folder
  * @param {string} name - Folder name
  * @param {string|null} color - Optional hex color
+ * @param {boolean} localOnly - If true, folder is never synced to the server
  * @returns {Promise<Array>} Updated folder list
  */
-export async function createFolder(name, color = null) {
-  return await invoke('create_folder', { name, color });
+export async function createFolder(name, color = null, localOnly = false) {
+  return await invoke('create_folder', { name, color, localOnly });
+}
+
+/**
+ * Toggle a folder between server-synced and local-only.
+ * @param {string} name - Folder name
+ * @param {boolean} localOnly - true = exclude from sync; false = re-include
+ * @param {boolean} removeFromServer - Phase 3: delete server copies (true) or keep them (false)
+ * @returns {Promise<Array>} Updated folder list
+ */
+export async function setFolderLocalOnly(name, localOnly, removeFromServer = true) {
+  return await invoke('set_folder_local_only', { name, localOnly, removeFromServer });
 }
 
 /**
@@ -257,3 +269,4 @@ export async function listTrash() {
 export async function emptyTrash() {
   return await invoke('empty_trash');
 }
+

@@ -1,8 +1,10 @@
 mod error;
 mod folders;
+mod local_store;
 mod markdown;
 mod models;
 mod storage;
+mod sync_queue;
 mod webdav;
 
 use error::{AppError, Result};
@@ -129,12 +131,18 @@ async fn connect(
     let success = client.test_connection().await?;
 
     if success {
+        // Device-ID vorinitialisieren (vermeidet Race beim ersten Lösch-Ledger-Write)
+        let device_id = get_or_create_device_id(&app, &device_id_state)?;
+
+        // Phase 2: Offline-Queue beim Verbinden abarbeiten
+        sync_queue::drain_sync_queue(&client, &app, &device_id, TRASH_RETENTION_MS).await;
+
         let mut client_lock = lock_recover(&state.0);
         *client_lock = Some(client);
+    } else {
+        // Device-ID auch ohne erfolgreichen Connect initialisieren
+        let _ = get_or_create_device_id(&app, &device_id_state);
     }
-
-    // Device-ID beim Connect vorinitialisieren (vermeidet Race beim ersten Lösch-Ledger-Write)
-    let _ = get_or_create_device_id(&app, &device_id_state);
 
     Ok(success)
 }
@@ -150,39 +158,75 @@ async fn list_notes(
         client_lock.clone()
     };
 
-    let client = client.ok_or(AppError::NotConnected)?;
-    let device_id = get_or_create_device_id(&app, &device_id_state)?;
-
-    // Best-effort auto-purge: remove notes older than retention before listing
-    purge_expired_trash(&client, &device_id).await;
-
-    let all_notes = fetch_all_notes(&client).await?;
-
-    // Zombie-Schutz: Notizen, die auf einem anderen Gerät permanent gelöscht wurden,
-    // sollen nicht als "aktiv" aufgelistet werden. Das Lösch-Ledger wird einmal gelesen;
-    // für jeden Treffer (updatedAt ≤ deletedAt) wird die verwaiste Datei bereinigt.
-    let ledger = client.read_deletions().await;
-    let deletion_map: std::collections::HashMap<&str, i64> = ledger
-        .deleted_notes
-        .iter()
-        .map(|r| (r.id.as_str(), r.deleted_at))
-        .collect();
-
     let mut notes: Vec<NoteMetadata> = Vec::new();
-    for note in &all_notes {
-        if note.trashed_at.is_some() {
-            continue;
-        }
-        if let Some(&deleted_at) = deletion_map.get(note.id.as_str()) {
-            if note.updated_at <= deleted_at {
-                // Verwaiste Datei — vom Server entfernen
-                if let Err(e) = client.delete_note(note).await {
-                    eprintln!("[list_notes] zombie cleanup {} failed: {}", note.id, e);
-                }
+
+    // Server-Notizen nur wenn verbunden — lokale Ordner funktionieren auch offline.
+    if let Some(client) = client {
+        let device_id = get_or_create_device_id(&app, &device_id_state)?;
+
+        // Best-effort auto-purge: remove notes older than retention before listing
+        purge_expired_trash(&client, &device_id).await;
+
+        let all_notes = fetch_all_notes(&client).await?;
+
+        // Zombie-Schutz: Notizen, die auf einem anderen Gerät permanent gelöscht wurden,
+        // sollen nicht als "aktiv" aufgelistet werden. Das Lösch-Ledger wird einmal gelesen;
+        // für jeden Treffer (updatedAt ≤ deletedAt) wird die verwaiste Datei bereinigt.
+        let ledger = client.read_deletions().await;
+        let deletion_map: std::collections::HashMap<&str, i64> = ledger
+            .deleted_notes
+            .iter()
+            .map(|r| (r.id.as_str(), r.deleted_at))
+            .collect();
+
+        for note in &all_notes {
+            if note.trashed_at.is_some() {
                 continue;
             }
+            // Phase 3: Server-Notizen aus lokal-exklusiven Ordnern überspringen.
+            // "Keep on server"-Ausschluss lässt Server-Kopie bestehen; Notizen werden
+            // aus dem lokalen Store bedient, um Duplikate zu vermeiden.
+            if local_store::is_local_only(&app, note.folder_name.as_deref()) {
+                continue;
+            }
+            if let Some(&deleted_at) = deletion_map.get(note.id.as_str()) {
+                if note.updated_at <= deleted_at {
+                    // Verwaiste Datei — vom Server entfernen
+                    if let Err(e) = client.delete_note(note).await {
+                        eprintln!("[list_notes] zombie cleanup {} failed: {}", note.id, e);
+                    }
+                    continue;
+                }
+            }
+            notes.push(NoteMetadata::from(note));
         }
-        notes.push(NoteMetadata::from(note));
+    }
+
+    // Lokale aktive Notizen anhängen (auch offline). Aktive Ordner einmal vorberechnen
+    // (sonst O(n²): is_local_only deserialisiert die Ordnerliste je Notiz neu).
+    let now = chrono::Utc::now().timestamp_millis();
+    let active: std::collections::HashSet<String> = local_store::active_folders(&app)
+        .into_iter()
+        .map(|f| f.name.to_lowercase())
+        .collect();
+    for mut note in local_store::list_notes(&app) {
+        if let Some(trashed_at) = note.trashed_at {
+            // Abgelaufene lokale Papierkorb-Notizen aufräumen (Server-Parität).
+            if now - trashed_at > TRASH_RETENTION_MS {
+                local_store::remove_note(&app, &note.id);
+            }
+            continue;
+        }
+        let in_active = note
+            .folder_name
+            .as_deref()
+            .map(|f| active.contains(&f.to_lowercase()))
+            .unwrap_or(false);
+        if !in_active {
+            continue;
+        }
+        note.fix_note_type();
+        notes.push(NoteMetadata::from(&note));
     }
 
     notes.sort_by(|a, b| {
@@ -199,8 +243,15 @@ async fn list_notes(
 async fn get_note(
     id: String,
     folder_name: Option<String>,
+    app: AppHandle,
     state: State<'_, WebDavState>,
 ) -> Result<Note> {
+    // Lokale Notiz? (nach ID, unabhängig vom aktuellen Ordner-Status)
+    if let Some(mut note) = local_store::get_note(&app, &id) {
+        note.fix_note_type();
+        return Ok(note);
+    }
+
     let client = {
         let client_lock = lock_recover(&state.0);
         client_lock.clone()
@@ -211,9 +262,19 @@ async fn get_note(
 }
 
 #[tauri::command]
-async fn save_note(mut note: Note, state: State<'_, WebDavState>) -> Result<Note> {
+async fn save_note(mut note: Note, app: AppHandle, state: State<'_, WebDavState>) -> Result<Note> {
     // Update timestamp to NOW before saving
     note.updated_at = chrono::Utc::now().timestamp_millis();
+
+    // Lokaler Ordner (neue Notiz) ODER bereits lokal gespeicherte Notiz → lokaler Store.
+    // Die ID-Prüfung hält eine Notiz lokal, auch wenn sich der Ordner-Status zwischenzeitlich
+    // ändert (verhindert ein versehentliches Schreiben zum Server).
+    if local_store::is_local_only(&app, note.folder_name.as_deref())
+        || local_store::has_note(&app, &note.id)
+    {
+        local_store::put_note(&app, &note);
+        return Ok(note);
+    }
 
     #[cfg(debug_assertions)]
     eprintln!("[Save] Saving note '{}' (ID: {})", note.title, note.id);
@@ -256,9 +317,20 @@ async fn create_note(
 async fn delete_note(
     id: String,
     folder_name: Option<String>,
+    app: AppHandle,
     state: State<'_, WebDavState>,
 ) -> Result<()> {
     // Soft-delete: in den Papierkorb verschieben statt permanent löschen (Android-Parität)
+    let now = chrono::Utc::now().timestamp_millis();
+
+    // Lokale Notiz (nach ID) → lokal in den Papierkorb (auch offline)
+    if let Some(mut note) = local_store::get_note(&app, &id) {
+        note.trashed_at = Some(now);
+        note.updated_at = now;
+        local_store::put_note(&app, &note);
+        return Ok(());
+    }
+
     let client = {
         let client_lock = lock_recover(&state.0);
         client_lock.clone()
@@ -266,7 +338,6 @@ async fn delete_note(
 
     let client = client.ok_or(AppError::NotConnected)?;
     let mut note = client.get_note(&id, folder_name.as_deref()).await?;
-    let now = chrono::Utc::now().timestamp_millis();
     note.trashed_at = Some(now);
     note.updated_at = now;
     client.save_note(&note).await
@@ -276,15 +347,25 @@ async fn delete_note(
 async fn trash_note(
     id: String,
     folder_name: Option<String>,
+    app: AppHandle,
     state: State<'_, WebDavState>,
 ) -> Result<()> {
+    let now = chrono::Utc::now().timestamp_millis();
+
+    // Lokale Notiz (nach ID) → lokal in den Papierkorb (auch offline)
+    if let Some(mut note) = local_store::get_note(&app, &id) {
+        note.trashed_at = Some(now);
+        note.updated_at = now;
+        local_store::put_note(&app, &note);
+        return Ok(());
+    }
+
     let client = {
         let lock = lock_recover(&state.0);
         lock.clone()
     };
     let client = client.ok_or(AppError::NotConnected)?;
     let mut note = client.get_note(&id, folder_name.as_deref()).await?;
-    let now = chrono::Utc::now().timestamp_millis();
     note.trashed_at = Some(now);
     note.updated_at = now;
     client.save_note(&note).await
@@ -294,15 +375,42 @@ async fn trash_note(
 async fn restore_note(
     id: String,
     folder_name: Option<String>,
+    app: AppHandle,
     state: State<'_, WebDavState>,
 ) -> Result<()> {
+    let now = chrono::Utc::now().timestamp_millis();
+
+    // Lokale Notiz (nach ID) wiederherstellen
+    if let Some(mut note) = local_store::get_note(&app, &id) {
+        note.trashed_at = None;
+        note.updated_at = now;
+        // Ordner nicht mehr local-only? → zum Server migrieren (nur wenn verbunden).
+        let folder_local = local_store::is_local_only(&app, note.folder_name.as_deref());
+        if !folder_local {
+            let client = {
+                let lock = lock_recover(&state.0);
+                lock.clone()
+            };
+            if let Some(client) = client {
+                // Erst NACH erfolgreichem Server-Upload lokal entfernen — sonst Datenverlust,
+                // wenn save_note fehlschlägt.
+                // folder_name bleibt erhalten, damit die Notiz im richtigen Server-Ordner landet.
+                client.save_note(&note).await?;
+                local_store::remove_note(&app, &id);
+                return Ok(());
+            }
+            // Offline: Notiz lokal behalten (bleibt wiederherstellbar, sobald wieder verbunden).
+        }
+        local_store::put_note(&app, &note);
+        return Ok(());
+    }
+
     let client = {
         let lock = lock_recover(&state.0);
         lock.clone()
     };
     let client = client.ok_or(AppError::NotConnected)?;
     let mut note = client.get_note(&id, folder_name.as_deref()).await?;
-    let now = chrono::Utc::now().timestamp_millis();
     note.trashed_at = None;
     note.updated_at = now;
 
@@ -328,6 +436,12 @@ async fn delete_note_permanent(
     device_id_state: State<'_, DeviceIdState>,
     state: State<'_, WebDavState>,
 ) -> Result<()> {
+    // Lokale Notiz (nach ID) endgültig entfernen (auch offline)
+    if local_store::has_note(&app, &id) {
+        local_store::remove_note(&app, &id);
+        return Ok(());
+    }
+
     let client = {
         let lock = lock_recover(&state.0);
         lock.clone()
@@ -349,32 +463,47 @@ async fn list_trash(
         let lock = lock_recover(&state.0);
         lock.clone()
     };
-    let client = client.ok_or(AppError::NotConnected)?;
-    let device_id = get_or_create_device_id(&app, &device_id_state)?;
 
     let now = chrono::Utc::now().timestamp_millis();
-    let all_notes = fetch_all_notes(&client).await?;
+    let mut trashed: Vec<NoteMetadata> = Vec::new();
 
-    // Abgelaufene Tombstones zuerst entfernen und ins Lösch-Ledger schreiben
-    for note in &all_notes {
-        if let Some(trashed_at) = note.trashed_at {
-            if now - trashed_at > TRASH_RETENTION_MS {
-                if let Err(e) = purge_note(&client, note, &device_id, now).await {
-                    eprintln!("[list_trash] purge {} failed: {}", note.id, e);
+    // Server-Papierkorb nur wenn verbunden — lokaler Papierkorb funktioniert auch offline.
+    if let Some(client) = client {
+        let device_id = get_or_create_device_id(&app, &device_id_state)?;
+        let all_notes = fetch_all_notes(&client).await?;
+
+        // Abgelaufene Tombstones zuerst entfernen und ins Lösch-Ledger schreiben
+        for note in &all_notes {
+            if let Some(trashed_at) = note.trashed_at {
+                if now - trashed_at > TRASH_RETENTION_MS {
+                    if let Err(e) = purge_note(&client, note, &device_id, now).await {
+                        eprintln!("[list_trash] purge {} failed: {}", note.id, e);
+                    }
                 }
             }
         }
+
+        trashed = all_notes
+            .iter()
+            .filter(|n| {
+                n.trashed_at
+                    .map(|t| now - t <= TRASH_RETENTION_MS)
+                    .unwrap_or(false)
+            })
+            .map(NoteMetadata::from)
+            .collect();
     }
 
-    let mut trashed: Vec<NoteMetadata> = all_notes
-        .iter()
-        .filter(|n| {
-            n.trashed_at
-                .map(|t| now - t <= TRASH_RETENTION_MS)
-                .unwrap_or(false)
-        })
-        .map(NoteMetadata::from)
-        .collect();
+    // Lokale getrashte Notizen einbeziehen (auch offline)
+    for note in local_store::list_notes(&app) {
+        if let Some(trashed_at) = note.trashed_at {
+            if now - trashed_at > TRASH_RETENTION_MS {
+                local_store::remove_note(&app, &note.id);
+            } else {
+                trashed.push(NoteMetadata::from(&note));
+            }
+        }
+    }
 
     trashed.sort_by_key(|n| std::cmp::Reverse(n.trashed_at));
     Ok(trashed)
@@ -390,18 +519,28 @@ async fn empty_trash(
         let lock = lock_recover(&state.0);
         lock.clone()
     };
-    let client = client.ok_or(AppError::NotConnected)?;
-    let device_id = get_or_create_device_id(&app, &device_id_state)?;
     let now = chrono::Utc::now().timestamp_millis();
 
-    let all_notes = fetch_all_notes(&client).await?;
-    for note in all_notes {
-        if note.trashed_at.is_some() {
-            if let Err(e) = purge_note(&client, &note, &device_id, now).await {
-                eprintln!("[empty_trash] purge {} failed: {}", note.id, e);
+    // Server-Papierkorb nur wenn verbunden — lokaler Papierkorb wird auch offline geleert.
+    if let Some(client) = client {
+        let device_id = get_or_create_device_id(&app, &device_id_state)?;
+        let all_notes = fetch_all_notes(&client).await?;
+        for note in all_notes {
+            if note.trashed_at.is_some() {
+                if let Err(e) = purge_note(&client, &note, &device_id, now).await {
+                    eprintln!("[empty_trash] purge {} failed: {}", note.id, e);
+                }
             }
         }
     }
+
+    // Lokale getrashte Notizen löschen (auch offline)
+    for note in local_store::list_notes(&app) {
+        if note.trashed_at.is_some() {
+            local_store::remove_note(&app, &note.id);
+        }
+    }
+
     Ok(())
 }
 
@@ -663,8 +802,21 @@ async fn color_notes(
     ids: Vec<String>,
     color: Option<String>,
     folder_name: Option<String>,
+    app: AppHandle,
     state: State<'_, WebDavState>,
 ) -> Result<()> {
+    // Lokaler Ordner: nur den lokalen Store mutieren, nie zum Server
+    if local_store::is_local_only(&app, folder_name.as_deref()) {
+        for id in &ids {
+            if let Some(mut note) = local_store::get_note(&app, id) {
+                note.color = color.clone();
+                note.updated_at = chrono::Utc::now().timestamp_millis();
+                local_store::put_note(&app, &note);
+            }
+        }
+        return Ok(());
+    }
+
     let client = {
         let lock = lock_recover(&state.0);
         lock.clone()
@@ -692,8 +844,22 @@ async fn pin_notes(
     ids: Vec<String>,
     pinned: bool,
     folder_name: Option<String>,
+    app: AppHandle,
     state: State<'_, WebDavState>,
 ) -> Result<()> {
+    // Lokaler Ordner: nur den lokalen Store mutieren, nie zum Server
+    if local_store::is_local_only(&app, folder_name.as_deref()) {
+        for id in &ids {
+            if let Some(mut note) = local_store::get_note(&app, id) {
+                // None statt Some(false) beim Lösen — Android-kompatibel
+                note.is_pinned = if pinned { Some(true) } else { None };
+                note.updated_at = chrono::Utc::now().timestamp_millis();
+                local_store::put_note(&app, &note);
+            }
+        }
+        return Ok(());
+    }
+
     let client = {
         let lock = lock_recover(&state.0);
         lock.clone()
@@ -747,19 +913,61 @@ async fn build_folder_list(client: &WebDavClient) -> Vec<Folder> {
     names.sort_by_key(|(a, _)| a.to_lowercase());
     names
         .into_iter()
-        .map(|(name, color)| Folder { name, color })
+        .map(|(name, color)| Folder {
+            name,
+            color,
+            local_only: false,
+        })
         .collect()
 }
 
-/// Alle Ordner auflisten
+/// Server-Ordner (sofern verbunden) + lokale Ordner zusammenführen und alphabetisch sortieren.
+///
+/// Phase 3: Server-Ordner, die lokal als local-only markiert sind, erhalten `local_only = true`
+/// ("Keep on server"-Ausschluss — Server-Eintrag bleibt, Desktop behandelt den Ordner lokal).
+async fn build_full_folder_list(client: Option<&WebDavClient>, app: &AppHandle) -> Vec<Folder> {
+    let local_active: Vec<_> = local_store::active_folders(app);
+    let local_names: std::collections::HashSet<String> =
+        local_active.iter().map(|f| f.name.to_lowercase()).collect();
+
+    let mut folders = match client {
+        Some(c) => build_folder_list(c).await,
+        None => Vec::new(),
+    };
+
+    // Server-Ordner, die lokal als local-only markiert sind, entsprechend kennzeichnen
+    for f in folders.iter_mut() {
+        if local_names.contains(&f.name.to_lowercase()) {
+            f.local_only = true;
+        }
+    }
+
+    // Rein lokale Ordner ergänzen, die nicht im Server-Listing auftauchen
+    for meta in local_active {
+        let already = folders
+            .iter()
+            .any(|f| f.name.eq_ignore_ascii_case(&meta.name));
+        if !already {
+            folders.push(Folder {
+                name: meta.name,
+                color: meta.color,
+                local_only: true,
+            });
+        }
+    }
+    folders.sort_by_key(|f| f.name.to_lowercase());
+    folders
+}
+
+/// Alle Ordner auflisten (Server + lokal)
 #[tauri::command]
-async fn list_folders(state: State<'_, WebDavState>) -> Result<Vec<Folder>> {
+async fn list_folders(app: AppHandle, state: State<'_, WebDavState>) -> Result<Vec<Folder>> {
+    // Auch offline: lokale Ordner werden ohne Server-Verbindung geliefert.
     let client = {
         let lock = lock_recover(&state.0);
         lock.clone()
     };
-    let client = client.ok_or(AppError::NotConnected)?;
-    Ok(build_folder_list(&client).await)
+    Ok(build_full_folder_list(client.as_ref(), &app).await)
 }
 
 /// Neuen Ordner erstellen (oder reaktivieren wenn tombstoned)
@@ -767,6 +975,8 @@ async fn list_folders(state: State<'_, WebDavState>) -> Result<Vec<Folder>> {
 async fn create_folder(
     name: String,
     color: Option<String>,
+    local_only: bool,
+    app: AppHandle,
     state: State<'_, WebDavState>,
 ) -> Result<Vec<Folder>> {
     if !validate_folder_name(&name) {
@@ -777,6 +987,23 @@ async fn create_folder(
         let lock = lock_recover(&state.0);
         lock.clone()
     };
+
+    if local_only {
+        // Kollision mit gleichnamigem Server-Ordner verhindern: ein local-only-Ordner würde
+        // sonst dessen Notizen verdecken (is_local_only → true → Routing in den leeren Store).
+        if let Some(ref client) = client {
+            let server = build_folder_list(client).await;
+            if server.iter().any(|f| f.name.eq_ignore_ascii_case(&name)) {
+                return Err(AppError::WebDav(format!(
+                    "A synced folder named '{}' already exists",
+                    name
+                )));
+            }
+        }
+        local_store::upsert_folder(&app, &name, color, false);
+        return Ok(build_full_folder_list(client.as_ref(), &app).await);
+    }
+
     let client = client.ok_or(AppError::NotConnected)?;
 
     let now = chrono::Utc::now().timestamp_millis();
@@ -808,7 +1035,7 @@ async fn create_folder(
     // Verzeichnisse anlegen
     client.ensure_folder_dirs(&name).await;
 
-    Ok(build_folder_list(&client).await)
+    Ok(build_full_folder_list(Some(&client), &app).await)
 }
 
 /// Ordner umbenennen: Notizen verschieben + Meta aktualisieren
@@ -816,6 +1043,7 @@ async fn create_folder(
 async fn rename_folder(
     old_name: String,
     new_name: String,
+    app: AppHandle,
     state: State<'_, WebDavState>,
 ) -> Result<Vec<Folder>> {
     if !validate_folder_name(&new_name) {
@@ -829,6 +1057,26 @@ async fn rename_folder(
         let lock = lock_recover(&state.0);
         lock.clone()
     };
+
+    // Lokaler Ordner: nur Meta + Notizen im lokalen Store umbenennen (auch offline)
+    if local_store::is_local_only(&app, Some(&old_name)) {
+        // Kollision mit gleichnamigem Server-Ordner verhindern (würde dessen Notizen verdecken).
+        if let Some(ref client) = client {
+            let server = build_folder_list(client).await;
+            if server
+                .iter()
+                .any(|f| f.name.eq_ignore_ascii_case(&new_name))
+            {
+                return Err(AppError::WebDav(format!(
+                    "A synced folder named '{}' already exists",
+                    new_name
+                )));
+            }
+        }
+        local_store::rename_folder(&app, &old_name, &new_name);
+        return Ok(build_full_folder_list(client.as_ref(), &app).await);
+    }
+
     let client = client.ok_or(AppError::NotConnected)?;
 
     // Alle Notizen im alten Ordner verschieben
@@ -891,7 +1139,7 @@ async fn rename_folder(
     // Neues Verzeichnis sicherstellen
     client.ensure_folder_dirs(&new_name).await;
 
-    Ok(build_folder_list(&client).await)
+    Ok(build_full_folder_list(Some(&client), &app).await)
 }
 
 /// Ordner löschen: Notizen behalten (→ Root verschieben) oder mitlöschen
@@ -899,37 +1147,101 @@ async fn rename_folder(
 async fn delete_folder(
     name: String,
     keep_notes: bool,
+    app: AppHandle,
+    device_id_state: State<'_, DeviceIdState>,
     state: State<'_, WebDavState>,
 ) -> Result<Vec<Folder>> {
     let client = {
         let lock = lock_recover(&state.0);
         lock.clone()
     };
+
+    // Lokaler Ordner
+    if local_store::is_local_only(&app, Some(&name)) {
+        let mut migrate_ok = true;
+        if keep_notes {
+            // Notizen zum Server migrieren — erfordert eine Verbindung.
+            let client = client.as_ref().ok_or(AppError::NotConnected)?;
+            for note in local_store::list_notes(&app) {
+                if note
+                    .folder_name
+                    .as_deref()
+                    .map(|f| f.eq_ignore_ascii_case(&name))
+                    .unwrap_or(false)
+                {
+                    let mut n = note;
+                    n.folder_name = None;
+                    n.updated_at = chrono::Utc::now().timestamp_millis();
+                    if let Err(e) = client.save_note(&n).await {
+                        eprintln!("[delete_folder] migrate local note {} failed: {}", n.id, e);
+                        migrate_ok = false;
+                    } else {
+                        local_store::remove_note(&app, &n.id);
+                    }
+                }
+            }
+        } else {
+            // Lokale Notizen des Ordners löschen (auch offline)
+            for note in local_store::list_notes(&app) {
+                if note
+                    .folder_name
+                    .as_deref()
+                    .map(|f| f.eq_ignore_ascii_case(&name))
+                    .unwrap_or(false)
+                {
+                    local_store::remove_note(&app, &note.id);
+                }
+            }
+        }
+        // Ordner nur tombstonen, wenn jede Notiz migriert/gelöscht wurde — sonst bliebe eine
+        // hängengebliebene Notiz unsichtbar (weder lokal aktiv noch auf dem Server).
+        if !migrate_ok {
+            return Err(AppError::WebDav(
+                "Some notes could not be migrated; folder kept local".to_string(),
+            ));
+        }
+        local_store::upsert_folder(&app, &name, None, true);
+        return Ok(build_full_folder_list(client.as_ref(), &app).await);
+    }
+
     let client = client.ok_or(AppError::NotConnected)?;
 
     // Notizen im Ordner behandeln
     let note_locations = client.list_notes_with_folders().await?;
-    for (id, folder) in note_locations {
+    let mut deleted_ids: Vec<String> = Vec::new();
+    for (id, folder) in &note_locations {
         if folder
             .as_deref()
             .map(|f| f.eq_ignore_ascii_case(&name))
             .unwrap_or(false)
         {
             if keep_notes {
-                if let Err(e) = client.move_note_file(&id, Some(&name), None).await {
+                if let Err(e) = client.move_note_file(id, Some(&name), None).await {
                     eprintln!("[delete_folder] move {} to root failed: {}", id, e);
                 }
             } else {
-                match client.get_note(&id, Some(&name)).await {
+                match client.get_note(id, Some(&name)).await {
                     Ok(note) => {
                         if let Err(e) = client.delete_note(&note).await {
                             eprintln!("[delete_folder] delete {} failed: {}", id, e);
+                        } else {
+                            // Phase 1: Erfolgreiche Löschungen ins Ledger schreiben
+                            deleted_ids.push(id.clone());
                         }
                     }
                     Err(e) => eprintln!("[delete_folder] get {} failed: {}", id, e),
                 }
             }
         }
+    }
+
+    // Phase 1: Batch-Ledger-Write für alle gelöschten Notizen des Ordners
+    if !deleted_ids.is_empty() {
+        let device_id = get_or_create_device_id(&app, &device_id_state)?;
+        let now = chrono::Utc::now().timestamp_millis();
+        client
+            .append_deletions(&deleted_ids, &device_id, now, TRASH_RETENTION_MS)
+            .await;
     }
 
     // Ordner tombstonen
@@ -955,7 +1267,7 @@ async fn delete_folder(
         })
         .await?;
 
-    Ok(build_folder_list(&client).await)
+    Ok(build_full_folder_list(Some(&client), &app).await)
 }
 
 /// Ordner-Farbe setzen oder entfernen
@@ -963,12 +1275,20 @@ async fn delete_folder(
 async fn set_folder_color(
     name: String,
     color: Option<String>,
+    app: AppHandle,
     state: State<'_, WebDavState>,
 ) -> Result<Vec<Folder>> {
     let client = {
         let lock = lock_recover(&state.0);
         lock.clone()
     };
+
+    // Lokaler Ordner: nur lokale Meta aktualisieren (auch offline)
+    if local_store::is_local_only(&app, Some(&name)) {
+        local_store::set_folder_color(&app, &name, color);
+        return Ok(build_full_folder_list(client.as_ref(), &app).await);
+    }
+
     let client = client.ok_or(AppError::NotConnected)?;
 
     let now = chrono::Utc::now().timestamp_millis();
@@ -995,7 +1315,7 @@ async fn set_folder_color(
         })
         .await?;
 
-    Ok(build_folder_list(&client).await)
+    Ok(build_full_folder_list(Some(&client), &app).await)
 }
 
 /// Notizen in einen anderen Ordner verschieben
@@ -1004,28 +1324,292 @@ async fn move_notes(
     ids: Vec<String>,
     source_folder: Option<String>,
     target_folder: Option<String>,
+    app: AppHandle,
+    device_id_state: State<'_, DeviceIdState>,
     state: State<'_, WebDavState>,
 ) -> Result<()> {
     let client = {
         let lock = lock_recover(&state.0);
         lock.clone()
     };
-    let client = client.ok_or(AppError::NotConnected)?;
 
-    // Ziel-Verzeichnis anlegen (einmal)
-    if let Some(ref f) = target_folder {
-        client.ensure_folder_dirs(f).await;
+    let src_local = local_store::is_local_only(&app, source_folder.as_deref());
+    let dst_local = local_store::is_local_only(&app, target_folder.as_deref());
+
+    // Verbindung nur erforderlich, wenn eine Server-Seite beteiligt ist
+    // (rein lokale Verschiebungen funktionieren offline).
+    if (!src_local || !dst_local) && client.is_none() {
+        return Err(AppError::NotConnected);
     }
 
-    for id in ids {
-        if let Err(e) = client
-            .move_note_file(&id, source_folder.as_deref(), target_folder.as_deref())
-            .await
-        {
-            eprintln!("[move_notes] move {} failed: {}", id, e);
+    // Ziel-Verzeichnis anlegen (nur Server-Ziel)
+    if !dst_local {
+        if let (Some(client), Some(f)) = (client.as_ref(), target_folder.as_ref()) {
+            client.ensure_folder_dirs(f).await;
         }
     }
+
+    // Phase 1: Server→Lokal-Verschiebungen schreiben ans Lösch-Ledger (verhindert Android-Trash).
+    let mut server_to_local_deleted: Vec<String> = Vec::new();
+
+    for id in &ids {
+        if src_local && dst_local {
+            // Lokal → Lokal: nur folder_name aktualisieren (kein Server nötig)
+            if let Some(mut note) = local_store::get_note(&app, id) {
+                note.folder_name = target_folder.clone();
+                note.updated_at = chrono::Utc::now().timestamp_millis();
+                local_store::put_note(&app, &note);
+            }
+        } else if let Some(client) = client.as_ref() {
+            // Ab hier ist garantiert verbunden (siehe Guard oben).
+            if src_local {
+                // Lokal → Server: hochladen + aus lokalem Store entfernen
+                if let Some(mut note) = local_store::get_note(&app, id) {
+                    note.folder_name = target_folder.clone();
+                    note.updated_at = chrono::Utc::now().timestamp_millis();
+                    if let Err(e) = client.save_note(&note).await {
+                        eprintln!("[move_notes] upload local note {} failed: {}", id, e);
+                    } else {
+                        local_store::remove_note(&app, id);
+                    }
+                }
+            } else if dst_local {
+                // Server → Lokal: runterladen, in lokalem Store speichern, vom Server löschen
+                match client.get_note(id, source_folder.as_deref()).await {
+                    Ok(mut note) => {
+                        note.folder_name = target_folder.clone();
+                        note.updated_at = chrono::Utc::now().timestamp_millis();
+                        local_store::put_note(&app, &note);
+                        if let Err(e) = client.delete_note(&note).await {
+                            eprintln!("[move_notes] delete server note {} failed: {}", id, e);
+                        } else {
+                            server_to_local_deleted.push(id.clone());
+                        }
+                    }
+                    Err(e) => eprintln!("[move_notes] get server note {} failed: {}", id, e),
+                }
+            } else {
+                // Server → Server
+                if let Err(e) = client
+                    .move_note_file(id, source_folder.as_deref(), target_folder.as_deref())
+                    .await
+                {
+                    eprintln!("[move_notes] move {} failed: {}", id, e);
+                }
+            }
+        }
+    }
+
+    // Phase 1: Batch-Ledger-Write für Server→Lokal-Verschiebungen
+    if !server_to_local_deleted.is_empty() {
+        if let Some(client) = client.as_ref() {
+            let device_id = get_or_create_device_id(&app, &device_id_state)?;
+            let now = chrono::Utc::now().timestamp_millis();
+            client
+                .append_deletions(
+                    &server_to_local_deleted,
+                    &device_id,
+                    now,
+                    TRASH_RETENTION_MS,
+                )
+                .await;
+        }
+    }
+
     Ok(())
+}
+
+/// Ordner zwischen Server-Sync und Local-Only umschalten.
+///
+/// `local_only = true`:  Server-Notizen in lokalen Store übertragen + Server-Ordner behandeln.
+/// `local_only = false`: Lokale Notizen zum Server hochladen + lokalen Ordner entfernen.
+///
+/// `remove_from_server` (Phase 3, nur bei `local_only = true`):
+///   - `true`:  Notizen vom Server löschen + Ordner tombstonen (bisheriges Verhalten).
+///   - `false`: Notizen auf Server belassen + Ordner NICHT tombstonen ("Keep on server").
+#[tauri::command]
+async fn set_folder_local_only(
+    name: String,
+    local_only: bool,
+    remove_from_server: bool,
+    app: AppHandle,
+    device_id_state: State<'_, DeviceIdState>,
+    state: State<'_, WebDavState>,
+) -> Result<Vec<Folder>> {
+    let client = {
+        let lock = lock_recover(&state.0);
+        lock.clone()
+    };
+
+    if local_only {
+        // ── Online-Pfad: Notizen vom Server holen ────────────────────────────
+        if let Some(ref client) = client {
+            let note_locations = client.list_notes_with_folders().await?;
+            let mut deleted_ids: Vec<String> = Vec::new();
+
+            for (id, folder) in &note_locations {
+                if folder
+                    .as_deref()
+                    .map(|f| f.eq_ignore_ascii_case(&name))
+                    .unwrap_or(false)
+                {
+                    match client.get_note(id, Some(&name)).await {
+                        Ok(note) => {
+                            local_store::put_note(&app, &note);
+                            if remove_from_server {
+                                // Phase 1: Löschen + Ledger-Eintrag sammeln
+                                if let Err(e) = client.delete_note(&note).await {
+                                    eprintln!(
+                                        "[set_folder_local_only] delete {} failed: {}",
+                                        id, e
+                                    );
+                                } else {
+                                    deleted_ids.push(id.clone());
+                                }
+                            }
+                        }
+                        Err(e) => eprintln!("[set_folder_local_only] get {} failed: {}", id, e),
+                    }
+                }
+            }
+
+            // Phase 1: Alle erfolgreichen Löschungen in einem Batch ins Ledger schreiben
+            if !deleted_ids.is_empty() {
+                let device_id = get_or_create_device_id(&app, &device_id_state)?;
+                let now = chrono::Utc::now().timestamp_millis();
+                client
+                    .append_deletions(&deleted_ids, &device_id, now, TRASH_RETENTION_MS)
+                    .await;
+            }
+
+            // Server-Ordner tombstonen (nur bei remove_from_server = true)
+            if remove_from_server {
+                let now = chrono::Utc::now().timestamp_millis();
+                let name_c = name.clone();
+                client
+                    .write_folders_meta_merged(move |mut existing| {
+                        if let Some(pos) = existing
+                            .iter()
+                            .position(|m| m.name.eq_ignore_ascii_case(&name_c))
+                        {
+                            existing[pos].deleted = true;
+                            existing[pos].updated_at = now;
+                        } else {
+                            existing.push(FolderMeta {
+                                name: name_c.clone(),
+                                color: None,
+                                updated_at: now,
+                                deleted: true,
+                            });
+                        }
+                        existing
+                    })
+                    .await?;
+            }
+        } else {
+            // ── Offline-Pfad (Phase 2) ────────────────────────────────────────
+            // Notizen die bereits im lokalen Store für diesen Ordner liegen einreihen
+            // (für server-synchronisierte Ordner typischerweise leer; Phase 4 erweitert dies).
+            if remove_from_server {
+                let local_ids: Vec<(String, Option<String>)> = local_store::list_notes(&app)
+                    .into_iter()
+                    .filter(|n| {
+                        n.folder_name
+                            .as_deref()
+                            .map(|f| f.eq_ignore_ascii_case(&name))
+                            .unwrap_or(false)
+                    })
+                    .map(|n| (n.id, n.folder_name))
+                    .collect();
+
+                sync_queue::enqueue_deletions(&app, &local_ids);
+                sync_queue::enqueue_folder_tombstone(&app, &name);
+            }
+            // Offline ohne remove_from_server → nur lokal markieren, nichts queuen
+        }
+
+        // Ordner-Farbe aus Server-Meta übernehmen (wenn verbunden)
+        let color = if let Some(ref client) = client {
+            let meta = client.read_folders_meta().await;
+            meta.iter()
+                .find(|m| m.name.eq_ignore_ascii_case(&name))
+                .and_then(|m| m.color.clone())
+        } else {
+            None
+        };
+
+        local_store::upsert_folder(&app, &name, color, false);
+    } else {
+        // ── Ordner wieder in den Sync aufnehmen ──────────────────────────────
+        let client = client.ok_or(AppError::NotConnected)?;
+
+        // Phase 2: Queue-Einträge für diesen Ordner löschen (verhindert Race mit Re-Upload)
+        sync_queue::cancel_folder_deletions(&app, &name);
+
+        // Timestamp vor dem Upload setzen — Notizen müssen einen neueren updated_at als
+        // den deleted_at-Eintrag im Lösch-Ledger haben, sonst löscht der Zombie-Check
+        // in list_notes() die gerade hochgeladenen Notizen sofort wieder.
+        let now = chrono::Utc::now().timestamp_millis();
+
+        // Lokale Notizen zum Server hochladen (ausgenommen Papierkorb-Notizen)
+        let mut upload_ok = true;
+        for note in local_store::list_notes(&app) {
+            if note
+                .folder_name
+                .as_deref()
+                .map(|f| f.eq_ignore_ascii_case(&name))
+                .unwrap_or(false)
+            {
+                // Bereits gelöschte Notizen nicht hochladen — sie bleiben im lokalen Papierkorb.
+                if note.trashed_at.is_some() {
+                    continue;
+                }
+                let mut note = note;
+                note.updated_at = now;
+                if let Err(e) = client.save_note(&note).await {
+                    eprintln!("[set_folder_local_only] upload {} failed: {}", note.id, e);
+                    upload_ok = false;
+                } else {
+                    local_store::remove_note(&app, &note.id);
+                }
+            }
+        }
+
+        if !upload_ok {
+            return Err(AppError::WebDav(
+                "Some notes could not be uploaded; folder kept local".to_string(),
+            ));
+        }
+
+        // Lokalen Ordner tombstonen; Server-Ordner reaktivieren
+        local_store::upsert_folder(&app, &name, None, true);
+        let name_c = name.clone();
+        client
+            .write_folders_meta_merged(move |mut existing| {
+                if let Some(pos) = existing
+                    .iter()
+                    .position(|m| m.name.eq_ignore_ascii_case(&name_c))
+                {
+                    existing[pos].deleted = false;
+                    existing[pos].updated_at = now;
+                } else {
+                    existing.push(FolderMeta {
+                        name: name_c.clone(),
+                        color: None,
+                        updated_at: now,
+                        deleted: false,
+                    });
+                }
+                existing
+            })
+            .await?;
+
+        client.ensure_folder_dirs(&name).await;
+
+        return Ok(build_full_folder_list(Some(&client), &app).await);
+    }
+
+    Ok(build_full_folder_list(client.as_ref(), &app).await)
 }
 
 /// State to track minimize-to-tray setting at runtime
@@ -1296,6 +1880,7 @@ pub fn run() {
             rename_folder,
             delete_folder,
             set_folder_color,
+            set_folder_local_only,
             move_notes,
         ])
         .run(tauri::generate_context!())

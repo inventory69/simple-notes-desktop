@@ -356,19 +356,27 @@ class DialogService {
 
   /**
    * Prompt for a folder name with live validation.
-   * @param {{title: string, defaultValue?: string}} opts
-   * @returns {Promise<string|null>} valid folder name or null if cancelled
+   * @param {{title: string, defaultValue?: string, showLocalOnly?: boolean}} opts
+   * @returns {Promise<{name: string, localOnly: boolean}|null>}
    */
-  promptFolderName({ title, defaultValue = '' }) {
+  promptFolderName({ title, defaultValue = '', showLocalOnly = false }) {
     return new Promise((resolve) => {
       this.resolvePromise = resolve;
       this.titleEl.textContent = title;
+
+      const localOnlyRow = showLocalOnly
+        ? `<label style="display:flex;align-items:center;gap:0.5rem;margin-top:0.75rem;cursor:pointer">
+             <input type="checkbox" id="dialog-local-only">
+             <span>Local only (don't sync to server)</span>
+           </label>`
+        : '';
 
       this.messageEl.innerHTML = `
         <div style="margin-bottom:0.5rem">Folder name:</div>
         <input type="text" id="dialog-input" class="dialog-input"
                placeholder="e.g. Work" maxlength="64" value="${defaultValue}">
         <div id="dialog-folder-error" style="color:var(--color-danger);font-size:0.85em;margin-top:0.25rem;min-height:1.2em"></div>
+        ${localOnlyRow}
       `;
       this.confirmBtn.textContent = 'OK';
       this.cancelBtn.textContent = 'Cancel';
@@ -417,8 +425,9 @@ class DialogService {
           if (!val) errorEl.textContent = 'Folder name cannot be empty.';
           return;
         }
+        const localOnly = document.getElementById('dialog-local-only')?.checked ?? false;
         this._cleanup();
-        resolve(val);
+        resolve({ name: val, localOnly });
       };
 
       const handleCancel = () => {
@@ -512,6 +521,62 @@ class DialogService {
   }
 
   /**
+   * Phase 3: Wahl der Server-Behandlung beim Ausschluss eines Ordners aus dem Sync.
+   * Zeigt drei Optionen: "Remove from server", "Keep on server", "Cancel".
+   *
+   * @param {{folderName: string}} opts
+   * @returns {Promise<'remove'|'keep'|null>} 'remove', 'keep', oder null (abgebrochen)
+   */
+  confirmFolderExclude({ folderName }) {
+    return new Promise((resolve) => {
+      this.titleEl.textContent = 'Exclude from Sync';
+      this.messageEl.innerHTML = `
+        <div>What should happen to notes in "<strong>${this._escapeHtml(folderName)}</strong>" on the server?</div>
+        <div style="margin-top:0.5rem;font-size:0.85em;color:var(--color-fg);opacity:0.7">
+          Notes will always remain available locally on this device.
+        </div>
+      `;
+      this.iconContainer.innerHTML = this._getIcon('info');
+      this.iconContainer.className = 'dialog-icon dialog-icon-info';
+
+      // Aktions-Buttons temporär ersetzen (werden nach Wahl wiederhergestellt)
+      const origActions = this.actionsContainer.innerHTML;
+      this.actionsContainer.innerHTML = `
+        <button id="fe-cancel" class="btn-secondary">Cancel</button>
+        <button id="fe-keep" class="btn-primary">Keep on server</button>
+        <button id="fe-remove" class="btn-danger">Remove from server</button>
+      `;
+
+      this.dialog.classList.remove('hidden');
+
+      const done = (result) => {
+        this.actionsContainer.innerHTML = origActions;
+        this.confirmBtn = document.getElementById('dialog-confirm-btn');
+        this.cancelBtn = document.getElementById('dialog-cancel-btn');
+        this._cleanup();
+        resolve(result);
+      };
+
+      document.getElementById('fe-remove').onclick = () => done('remove');
+      document.getElementById('fe-keep').onclick = () => done('keep');
+      document.getElementById('fe-cancel').onclick = () => done(null);
+
+      const handleKeydown = (e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          done(null);
+        }
+      };
+
+      this.keydownHandler = handleKeydown;
+      this._attachBackdropHandler(() => done(null));
+      document.addEventListener('keydown', handleKeydown);
+
+      setTimeout(() => document.getElementById('fe-keep')?.focus(), 100);
+    });
+  }
+
+  /**
    * Choose a target folder for moving notes.
    * @param {{folders: Array, currentFolder: string|null}} opts
    * @returns {Promise<string|null|undefined>} folder name, null = root, undefined = cancelled
@@ -550,19 +615,19 @@ class DialogService {
         if (val === '__new__') {
           this._cleanup();
           // Prompt for new folder name
-          const newName = await this.promptFolderName({ title: 'New Folder' });
-          if (!newName) {
+          const result = await this.promptFolderName({ title: 'New Folder' });
+          if (!result) {
             resolve(undefined);
             return;
           }
           // Create the folder then return it as target
           try {
             const { createFolder } = await import('./tauri.js');
-            await createFolder(newName, null);
+            await createFolder(result.name, null, result.localOnly);
           } catch (_) {
             /* ignore — noteService will reload */
           }
-          resolve(newName);
+          resolve(result.name);
           return;
         }
         this._cleanup();

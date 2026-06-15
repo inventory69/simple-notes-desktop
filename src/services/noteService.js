@@ -268,9 +268,22 @@ class NoteService {
    * Create a folder
    * @param {string} name - Folder name
    * @param {string|null} color - Optional hex color
+   * @param {boolean} localOnly - If true, never synced to server
    */
-  async createFolder(name, color = null) {
-    this.folders = await tauri.createFolder(name, color);
+  async createFolder(name, color = null, localOnly = false) {
+    this.folders = await tauri.createFolder(name, color, localOnly);
+    await this.loadNotes();
+    this.notify();
+  }
+
+  /**
+   * Toggle a folder between server-synced and local-only.
+   * @param {string} name
+   * @param {boolean} localOnly
+   * @param {boolean} removeFromServer - Phase 3: delete server copies or keep them
+   */
+  async setFolderLocalOnly(name, localOnly, removeFromServer = true) {
+    this.folders = await tauri.setFolderLocalOnly(name, localOnly, removeFromServer);
     await this.loadNotes();
     this.notify();
   }
