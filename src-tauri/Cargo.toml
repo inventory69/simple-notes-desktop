@@ -1,6 +1,6 @@
 [package]
 name = "simple-notes-desktop"
-version = "0.7.0"
+version = "0.8.0"
 description = "Desktop app for Simple Notes with WebDAV sync"
 authors = ["inventory69"]
 license = "MIT"

@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-16
+
+### Added
+
+- Background sync engine with conflict detection and resolution (`feat(sync)`)
+  - PENDING notes are pushed to the server on each sync run; a disk-persisted note cache tracks each note's last-synced timestamp and status between runs
+  - Server notes newer than the last sync are flagged CONFLICT; server-side deletions become DELETED_ON_SERVER
+  - ⚡ conflict and 🗑 deleted-on-server badges in the note list open a keep-mine / use-server resolve dialog
+  - `sync` and `resolve_conflict` IPC commands; a sync lock prevents concurrent runs
+- Trash with soft-delete, restore, and permanent delete, matching Android (`feat(trash)`)
+  - Deleting a note now moves it to trash (`trashedAt`) instead of removing it; a dedicated trash view shows trashed notes with a countdown to permanent deletion, plus Restore, Delete permanently, and Empty Trash actions
+  - Permanent deletes are recorded in a shared `deletions.json` ledger so removals propagate across devices; `list_notes` zombie-cleans notes the ledger says were deleted elsewhere
+- Local-only folders with offline note storage (`feat(sync)`)
+  - Notes in local-only folders are stored in an on-disk JSON sidecar instead of the WebDAV server; all CRUD routes through the local store
+  - Folder context menu toggles "Make local-only / Include in sync" with a Remove / Keep / Cancel choice for existing server copies
+  - An offline sync queue persists folder tombstones and pending deletions, drained on the next successful connect
+- Markdown syntax highlighting and a formatting toolbar in the editor (`feat(editor)`)
+  - CodeMirror highlights headings, bold, italic, strikethrough, code spans, and links, dimming syntax markers to match Android
+  - 9-button toolbar (bold, italic, strikethrough, heading, code, link, bullet list, checklist item, horizontal rule) with Ctrl+B / Ctrl+I shortcuts
+- Inline markdown rendering in note-list previews — bold, italic, strikethrough, inline code, and links render in sidebar preview lines for text notes (`feat(ui)`)
+- Font size setting with a five-level chip selector (small/system/normal/large/xlarge), applied via a `--font-scale` custom property with live preview (`feat(ui)`)
+- Default open mode for text notes — open existing text notes directly in preview when configured (`feat(settings)`)
+- Color accent line on the editor header for notes with a color, matching the Android toolbar accent (`feat(editor)`)
+- New text notes auto-focus the content area; new checklists create and focus an initial empty item (`feat(editor)`)
+- Auto-scroll the checklist container while dragging an item to the top or bottom edge during reorder (`feat(checklist)`)
+
+### Fixed
+
+- Deleting a folder without keeping its notes now moves them to trash instead of hard-deleting them (`fix(sync)`)
+- Folder rename and delete now clean up the old WebDAV JSON and Markdown directories instead of leaving them orphaned (`fix(sync)`)
+- Excluding a folder from sync with "Remove from server" now deletes the folder directories on the server, matching Android (`fix(sync)`)
+- Re-including a local-only folder now removes its stale tombstones from `deletions.json`, preventing re-uploaded notes from being treated as deleted (`fix(sync)`)
+- Checklist items now move to the correct sort group immediately on checkbox toggle in MANUAL sort mode, with focus preserved (`fix(checklist)`)
+
 ## [0.7.0] - 2026-06-01
 
 ### Added
