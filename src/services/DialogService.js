@@ -474,7 +474,7 @@ class DialogService {
             <span>Keep notes (move to Root)</span>
           </label>
           <div style="margin-top:0.5rem;font-size:0.85em;color:var(--color-fg);opacity:0.7">
-            Uncheck to delete all notes in this folder from the server.
+            Uncheck to move all notes in this folder to Trash.
           </div>
         `;
       } else {

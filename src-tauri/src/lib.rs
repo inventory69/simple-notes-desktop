@@ -1168,7 +1168,6 @@ async fn delete_folder(
     name: String,
     keep_notes: bool,
     app: AppHandle,
-    device_id_state: State<'_, DeviceIdState>,
     state: State<'_, WebDavState>,
 ) -> Result<Vec<Folder>> {
     let client = {
@@ -1227,8 +1226,8 @@ async fn delete_folder(
     let client = client.ok_or(AppError::NotConnected)?;
 
     // Notizen im Ordner behandeln
+    let now = chrono::Utc::now().timestamp_millis();
     let note_locations = client.list_notes_with_folders().await?;
-    let mut deleted_ids: Vec<String> = Vec::new();
     for (id, folder) in &note_locations {
         if folder
             .as_deref()
@@ -1241,12 +1240,14 @@ async fn delete_folder(
                 }
             } else {
                 match client.get_note(id, Some(&name)).await {
-                    Ok(note) => {
-                        if let Err(e) = client.delete_note(&note).await {
-                            eprintln!("[delete_folder] delete {} failed: {}", id, e);
+                    Ok(mut note) => {
+                        note.folder_name = None;
+                        note.trashed_at = Some(now);
+                        note.updated_at = now;
+                        if let Err(e) = client.save_note(&note).await {
+                            eprintln!("[delete_folder] trash {} failed: {}", id, e);
                         } else {
-                            // Phase 1: Erfolgreiche Löschungen ins Ledger schreiben
-                            deleted_ids.push(id.clone());
+                            let _ = client.delete_note_by_id_folder(id, Some(&name)).await;
                         }
                     }
                     Err(e) => eprintln!("[delete_folder] get {} failed: {}", id, e),
@@ -1255,17 +1256,7 @@ async fn delete_folder(
         }
     }
 
-    // Phase 1: Batch-Ledger-Write für alle gelöschten Notizen des Ordners
-    if !deleted_ids.is_empty() {
-        let device_id = get_or_create_device_id(&app, &device_id_state)?;
-        let now = chrono::Utc::now().timestamp_millis();
-        client
-            .append_deletions(&deleted_ids, &device_id, now, TRASH_RETENTION_MS)
-            .await;
-    }
-
     // Ordner tombstonen
-    let now = chrono::Utc::now().timestamp_millis();
     let name_c = name.clone();
     client
         .write_folders_meta_merged(move |mut existing| {
