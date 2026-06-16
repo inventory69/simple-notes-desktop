@@ -1155,8 +1155,9 @@ async fn rename_folder(
         })
         .await?;
 
-    // Neues Verzeichnis sicherstellen
+    // Neues Verzeichnis sicherstellen, altes entfernen
     client.ensure_folder_dirs(&new_name).await;
+    client.delete_folder_dirs(&old_name).await;
 
     Ok(build_full_folder_list(Some(&client), &app).await)
 }
@@ -1285,6 +1286,8 @@ async fn delete_folder(
             existing
         })
         .await?;
+
+    client.delete_folder_dirs(&name).await;
 
     Ok(build_full_folder_list(Some(&client), &app).await)
 }
