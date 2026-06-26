@@ -212,10 +212,23 @@ export class NoteEditor {
       this.editorView.destroy();
     }
 
+    // ponytail: EditorView.theme() wins over basicSetup's baseTheme (same scoping class)
+    const gutterTheme = EditorView.theme({
+      '.cm-gutters': {
+        backgroundColor: 'var(--color-bg-elevated)',
+        borderRight: '1px solid var(--color-border)',
+        color: 'var(--color-muted)',
+      },
+      '.cm-activeLineGutter': {
+        backgroundColor: 'color-mix(in srgb, var(--color-fg) 5%, transparent)',
+      },
+    });
+
     const startState = EditorState.create({
       doc: this.currentNote?.content || '',
       extensions: [
         basicSetup,
+        gutterTheme,
         markdown(),
         ...markdownHighlightExtensions,
         EditorView.lineWrapping,
