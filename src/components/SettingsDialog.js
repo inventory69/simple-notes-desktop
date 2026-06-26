@@ -1,6 +1,7 @@
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { dialogService } from '../services/DialogService.js';
 import * as tauri from '../services/tauri.js';
+import { MODE_BY_ID, THEME_IDS, THEMES } from '../utils/themes.js';
 
 /**
  * Settings Dialog Component
@@ -10,7 +11,7 @@ const FONT_SCALE = { system: 1, small: 0.85, normal: 1, large: 1.15, xlarge: 1.3
 export class SettingsDialog {
   constructor() {
     this.dialog = document.getElementById('settings-dialog');
-    this.themeSelect = document.getElementById('theme-select');
+    this.themeGrid = document.getElementById('theme-grid');
     this.autosaveCheckbox = document.getElementById('autosave-checkbox');
     this.trayCheckbox = document.getElementById('tray-checkbox');
     this.autostartCheckbox = document.getElementById('autostart-checkbox');
@@ -29,7 +30,7 @@ export class SettingsDialog {
     this.fontSizeChips = document.getElementById('font-size-chips');
     this.onSaveCallback = null;
     this.onReconnectCallback = null;
-    this.originalTheme = null; // Store original theme for cancel
+    this.originalTheme = null;
     this._originalFontSize = null;
     this._currentFontSize = 'system';
     this._currentTheme = null;
@@ -51,10 +52,7 @@ export class SettingsDialog {
     this.saveBtn.addEventListener('click', () => this.handleSave());
     this.cancelBtn.addEventListener('click', () => this.handleCancel());
 
-    // Theme change handler - only preview, don't save
-    this.themeSelect.addEventListener('change', () => {
-      this.applyTheme(this.themeSelect.value);
-    });
+    this.renderThemeGrid();
 
     // Font size chip handler - live preview
     this.fontSizeChips.addEventListener('click', (e) => {
@@ -200,7 +198,7 @@ export class SettingsDialog {
       // Store original sync folder for change detection
       this._previousSyncFolder = settings.sync_folder || 'notes';
 
-      this.themeSelect.value = settings.theme;
+      this.selectTheme(settings.theme);
       this.autosaveCheckbox.checked = settings.autosave;
       this.trayCheckbox.checked = settings.minimize_to_tray || false;
       this.autostartCheckbox.checked = settings.autostart || false;
@@ -224,9 +222,8 @@ export class SettingsDialog {
   }
 
   handleCancel() {
-    // Restore original theme
     if (this.originalTheme) {
-      this.applyTheme(this.originalTheme);
+      this.selectTheme(this.originalTheme);
     }
     // Restore original font size
     if (this._originalFontSize) {
@@ -239,7 +236,7 @@ export class SettingsDialog {
     try {
       const syncFolderValue = this.syncFolderInput.value.trim();
       const settings = {
-        theme: this.themeSelect.value,
+        theme: this._currentTheme,
         autosave: this.autosaveCheckbox.checked,
         minimize_to_tray: this.trayCheckbox.checked,
         autostart: this.autostartCheckbox.checked,
@@ -284,22 +281,47 @@ export class SettingsDialog {
     }
   }
 
+  renderThemeGrid() {
+    this.themeGrid.innerHTML = '';
+    for (const t of THEMES) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'theme-card';
+      btn.dataset.themeId = t.id;
+      btn.setAttribute('aria-pressed', 'false');
+      const dots = t.swatch.map((c) => `<i style="background:${c}"></i>`).join('');
+      btn.innerHTML = `<span class="theme-swatch">${dots}</span><span class="theme-name">${t.label}</span>`;
+      btn.addEventListener('click', () => this.selectTheme(t.id));
+      this.themeGrid.appendChild(btn);
+    }
+  }
+
+  selectTheme(id) {
+    this.applyTheme(id);
+    for (const card of this.themeGrid.querySelectorAll('.theme-card')) {
+      card.setAttribute('aria-pressed', String(card.dataset.themeId === id));
+    }
+  }
+
   applyTheme(theme) {
     this._currentTheme = theme;
     const root = document.documentElement;
+    const kde = root.getAttribute('data-desktop') === 'kde';
 
-    if (theme === 'dark') {
-      root.setAttribute('data-theme', 'dark');
-    } else if (theme === 'light') {
+    let effective = theme;
+    if (theme === 'system') {
+      const dark = this._mql.matches;
+      effective = kde ? (dark ? 'breeze-dark' : 'breeze-light') : dark ? 'dark' : 'light';
+    } else if (!THEME_IDS.has(theme)) {
+      effective = 'light';
+    }
+
+    if (effective === 'light') {
       root.removeAttribute('data-theme');
     } else {
-      // System theme — reuse the persistent MQL instance so the change listener stays in sync
-      if (this._mql.matches) {
-        root.setAttribute('data-theme', 'dark');
-      } else {
-        root.removeAttribute('data-theme');
-      }
+      root.setAttribute('data-theme', effective);
     }
+    root.setAttribute('data-mode', MODE_BY_ID[effective] || 'light');
   }
 
   applyFontSize(value) {
@@ -322,6 +344,7 @@ export class SettingsDialog {
       return settings;
     } catch (error) {
       console.error('Failed to load theme:', error);
+      this.applyTheme('system');
       return null;
     }
   }

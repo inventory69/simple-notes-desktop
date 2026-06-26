@@ -11,11 +11,7 @@ function setupDOM() {
   document.body.innerHTML = `
     <div id="settings-dialog" class="dialog hidden">
       <div class="dialog-content">
-        <select id="theme-select">
-          <option value="system">System</option>
-          <option value="light">Light</option>
-          <option value="dark">Dark</option>
-        </select>
+        <div id="theme-grid"></div>
         <select id="default-open-mode-select">
           <option value="edit">Edit mode</option>
           <option value="preview">Preview</option>
@@ -86,11 +82,21 @@ describe('SettingsDialog', () => {
     it('should find all DOM elements', () => {
       const dialog = new SettingsDialog();
       expect(dialog.dialog).toBeTruthy();
-      expect(dialog.themeSelect).toBeTruthy();
+      expect(dialog.themeGrid).toBeTruthy();
       expect(dialog.autosaveCheckbox).toBeTruthy();
       expect(dialog.trayCheckbox).toBeTruthy();
       expect(dialog.autostartCheckbox).toBeTruthy();
       expect(dialog.deviceIdInput).toBeTruthy();
+    });
+
+    it('should render theme cards in the grid', () => {
+      const dialog = new SettingsDialog();
+      const cards = dialog.themeGrid.querySelectorAll('.theme-card');
+      expect(cards.length).toBeGreaterThan(0);
+      const ids = [...cards].map((c) => c.dataset.themeId);
+      expect(ids).toContain('system');
+      expect(ids).toContain('catppuccin-macchiato');
+      expect(ids).toContain('nord');
     });
 
     it('should load app version on init', async () => {
@@ -116,7 +122,9 @@ describe('SettingsDialog', () => {
       const dialog = new SettingsDialog();
       await dialog.show();
 
-      expect(dialog.themeSelect.value).toBe('dark');
+      const darkCard = dialog.themeGrid.querySelector('[data-theme-id="dark"]');
+      expect(darkCard.getAttribute('aria-pressed')).toBe('true');
+      expect(dialog._currentTheme).toBe('dark');
       expect(dialog.autosaveCheckbox.checked).toBe(false);
       expect(dialog.trayCheckbox.checked).toBe(true);
       expect(dialog.autostartCheckbox.checked).toBe(true);
@@ -166,7 +174,7 @@ describe('SettingsDialog', () => {
       await dialog.show();
 
       // Change settings
-      dialog.themeSelect.value = 'dark';
+      dialog.selectTheme('dark');
       dialog.autosaveCheckbox.checked = false;
       dialog.trayCheckbox.checked = true;
       dialog.autostartCheckbox.checked = true;
@@ -235,7 +243,7 @@ describe('SettingsDialog', () => {
       await dialog.show();
 
       // User changes theme but cancels
-      dialog.themeSelect.value = 'dark';
+      dialog.selectTheme('dark');
       dialog.handleCancel();
 
       // Theme should be reverted to 'light'
@@ -263,24 +271,70 @@ describe('SettingsDialog', () => {
   });
 
   describe('applyTheme()', () => {
-    it('should set dark theme', () => {
+    it('should set dark theme and data-mode', () => {
       const dialog = new SettingsDialog();
       dialog.applyTheme('dark');
       expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+      expect(document.documentElement.getAttribute('data-mode')).toBe('dark');
     });
 
-    it('should set light theme by removing attribute', () => {
+    it('should set light theme by removing data-theme, mode=light', () => {
       document.documentElement.setAttribute('data-theme', 'dark');
       const dialog = new SettingsDialog();
       dialog.applyTheme('light');
       expect(document.documentElement.getAttribute('data-theme')).toBeNull();
+      expect(document.documentElement.getAttribute('data-mode')).toBe('light');
     });
 
-    it('should use system preference for system theme', () => {
+    it('should use system preference for system theme (light OS)', () => {
       const dialog = new SettingsDialog();
       dialog.applyTheme('system');
       // matchMedia is mocked to return false for prefers-color-scheme: dark
       expect(document.documentElement.getAttribute('data-theme')).toBeNull();
+      expect(document.documentElement.getAttribute('data-mode')).toBe('light');
+    });
+
+    it('should apply catppuccin-macchiato as dark mode', () => {
+      const dialog = new SettingsDialog();
+      dialog.applyTheme('catppuccin-macchiato');
+      expect(document.documentElement.getAttribute('data-theme')).toBe('catppuccin-macchiato');
+      expect(document.documentElement.getAttribute('data-mode')).toBe('dark');
+    });
+
+    it('should fall back to light for unknown theme', () => {
+      const dialog = new SettingsDialog();
+      dialog.applyTheme('unknown-theme-xyz');
+      expect(document.documentElement.getAttribute('data-theme')).toBeNull();
+      expect(document.documentElement.getAttribute('data-mode')).toBe('light');
+    });
+  });
+
+  describe('selectTheme()', () => {
+    it('should mark the selected card with aria-pressed', () => {
+      const dialog = new SettingsDialog();
+      dialog.selectTheme('nord');
+      const nordCard = dialog.themeGrid.querySelector('[data-theme-id="nord"]');
+      const otherCard = dialog.themeGrid.querySelector('[data-theme-id="dark"]');
+      expect(nordCard.getAttribute('aria-pressed')).toBe('true');
+      expect(otherCard.getAttribute('aria-pressed')).toBe('false');
+    });
+
+    it('should restore selected card on cancel', async () => {
+      tauri.getSettings.mockResolvedValue({
+        theme: 'catppuccin-mocha',
+        autosave: true,
+        minimize_to_tray: false,
+        autostart: false,
+        sync_folder: 'notes',
+      });
+      const dialog = new SettingsDialog();
+      await dialog.show();
+
+      dialog.selectTheme('nord');
+      dialog.handleCancel();
+
+      const mochaCard = dialog.themeGrid.querySelector('[data-theme-id="catppuccin-mocha"]');
+      expect(mochaCard.getAttribute('aria-pressed')).toBe('true');
     });
   });
 });

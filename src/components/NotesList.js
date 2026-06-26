@@ -262,7 +262,7 @@ export class NotesList {
       const rawNotes = noteService.searchNotes(searchQuery);
       const notes = this.applySortOption(rawNotes);
       if (notes.length === 0) {
-        this.container.innerHTML = '<div style="padding: 1rem; text-align: center; color: #999;">No notes found</div>';
+        this.container.innerHTML = '<div class="empty-placeholder">No notes found</div>';
         return;
       }
       for (const note of notes) {
@@ -319,7 +319,7 @@ export class NotesList {
     }
 
     if (pinnedNotes.length === 0 && folders.length === 0 && unpinnedNotes.length === 0) {
-      html.push('<div style="padding: 1rem; text-align: center; color: #999;">No notes found</div>');
+      html.push('<div class="empty-placeholder">No notes found</div>');
     }
   }
 
@@ -356,7 +356,7 @@ export class NotesList {
     }
 
     if (pinnedNotes.length === 0 && unpinnedNotes.length === 0) {
-      html.push('<div style="padding: 1rem; text-align: center; color: #999;">This folder is empty</div>');
+      html.push('<div class="empty-placeholder">This folder is empty</div>');
     }
   }
 
@@ -378,7 +378,7 @@ export class NotesList {
     `);
 
     if (notes.length === 0) {
-      html.push('<div style="padding: 1rem; text-align: center; color: #999;">Trash is empty</div>');
+      html.push('<div class="empty-placeholder">Trash is empty</div>');
     } else {
       const now = Date.now();
       for (const note of notes) {

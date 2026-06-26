@@ -257,7 +257,7 @@ export class NoteEditor {
 
   updatePreview() {
     if (!this.currentNote?.content) {
-      this.previewDiv.innerHTML = '<div style="padding: 1rem; color: #999;">No content to preview</div>';
+      this.previewDiv.innerHTML = '<div class="empty-placeholder">No content to preview</div>';
       return;
     }
 
