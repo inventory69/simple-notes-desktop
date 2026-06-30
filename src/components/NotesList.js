@@ -38,7 +38,9 @@ export class NotesList {
 
     // Search input
     this.searchInput.addEventListener('input', (e) => {
-      this.render(e.target.value);
+      const q = e.target.value;
+      if (this._searchTimer) clearTimeout(this._searchTimer);
+      this._searchTimer = setTimeout(() => this.render(q), 150);
     });
 
     // Sort button

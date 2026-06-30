@@ -238,7 +238,8 @@ export class NoteEditor {
             this._scheduleLocalUpdate();
             this.scheduleSave();
             if (this.showPreview) {
-              this.updatePreview();
+              if (this._previewTimer) clearTimeout(this._previewTimer);
+              this._previewTimer = setTimeout(() => this.updatePreview(), 200);
             }
           }
           // Keep undo-button state in sync with CodeMirror's own history
