@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-06-30
+
+### Added
+
+- Local-first offline architecture: all note operations write to local storage first and sync to WebDAV in the background, making the app fully functional without a server connection ([44fbb2c](https://github.com/inventory69/simple-notes-desktop/commit/44fbb2c989ccab7656561630c06329455b1df2c5))
+  - A scheduler (5s debounce + 5-minute periodic) reconciles local changes with the server and emits `notes-synced` so the UI reloads without a full refresh
+  - Connection dialog replaced with a Settings screen: offline toggle, server fields, non-destructive "Test connection" button
+  - Sync status shown as an inline badge on the sync button instead of a modal dialog
+  - Per-folder `local_only` flag; local-only folders never sync to the server
+  - One-time migration moves existing `note_cache` data into the new `local_store`
+  - New IPC commands: `disconnect`, `is_connected`, `test_connection`
+- Settings reorganised into labelled card groups (Server, Sync, Editor, Appearance, App) with the offline-mode toggle and Test Connection button at the top ([44fbb2c](https://github.com/inventory69/simple-notes-desktop/commit/44fbb2c989ccab7656561630c06329455b1df2c5))
+- 15-theme system with visual swatch picker: Breeze Light/Dark, Catppuccin Latte/Frappé/Macchiato/Mocha, Nord, Gruvbox Dark/Light, Tokyo Night, Rosé Pine, Rosé Pine Dawn, plus System/Light/Dark ([71b2de9](https://github.com/inventory69/simple-notes-desktop/commit/71b2de9b35a2b5c7686c08190a2e9a19692310a8))
+  - Token-based architecture with 8 new CSS custom properties; `data-mode="light|dark"` decouples dark-mode rules from specific theme IDs
+  - Theme selector replaced with a visual swatch grid (3-dot color preview per theme)
+
+### Fixed
+
+- Selection background now uses theme colors in all 15 themes; note-list preview links are styled with `--color-primary` and open in the system browser ([de9e6fe](https://github.com/inventory69/simple-notes-desktop/commit/de9e6fe02207ba22dfc6a284be2619112414c046))
+  - CodeMirror's baseTheme specificity required a `!important` override on `.cm-selectionBackground` resolved via `color-mix`
+  - Preview links previously had `pointer-events:none` and fell back to browser-default blue
+- WebDAV connection now fails fast with a 5-second timeout for unreachable hosts instead of hanging for 30 seconds ([eea5150](https://github.com/inventory69/simple-notes-desktop/commit/eea5150b07b1ddece59878e5c35e721494b3166a))
+- CodeMirror gutter background now correctly uses theme tokens instead of the hardcoded `#f5f5f5` from `basicSetup` ([4e49888](https://github.com/inventory69/simple-notes-desktop/commit/4e49888d80c26ef3ef0073e3ea13e7d23c52be83))
+
+### Changed
+
+- Live Markdown preview and note-list search are debounced (200ms and 150ms respectively) to avoid redundant rendering while typing ([10b4f21](https://github.com/inventory69/simple-notes-desktop/commit/10b4f218594b2a8d18f690c49d0e95f351570108))
+
 ## [0.8.0] - 2026-06-16
 
 ### Added
