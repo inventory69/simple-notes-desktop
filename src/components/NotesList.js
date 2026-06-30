@@ -1,3 +1,4 @@
+import { openUrl } from '@tauri-apps/plugin-opener';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { dialogService } from '../services/DialogService.js';
@@ -650,6 +651,14 @@ export class NotesList {
       });
 
       item.addEventListener('click', (e) => {
+        const link = e.target.closest('.note-item-preview a');
+        if (link?.href) {
+          e.preventDefault();
+          e.stopPropagation();
+          openUrl(link.href);
+          return;
+        }
+
         const id = item.dataset.id;
 
         if (this.selectionMode) {

@@ -358,7 +358,7 @@
 }
 
 .hidden {
-  display: none !important;
+  display: none;
 }
 
 body {
@@ -1282,7 +1282,13 @@ body {
 }
 
 .note-item-preview .preview-line a {
-  pointer-events: none;
+  color: var(--color-primary);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.note-item-preview .preview-line a:hover {
+  text-decoration: underline;
 }
 
 .note-item-meta {
@@ -1552,9 +1558,9 @@ body {
   border-left-color: var(--color-fg);
 }
 
-.cm-selectionBackground,
-.cm-content ::selection {
-  background-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
+/* ponytail: !important needed — CM baseTheme rule has higher specificity (7 classes vs our 4) and no !important */
+.cm-selectionBackground {
+  background-color: color-mix(in srgb, var(--color-primary) 35%, var(--color-bg)) !important;
 }
 
 .cm-content {
