@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-06-30
+
+### Fixed
+
+- `.hidden` elements are now reliably hidden even when overridden by higher-specificity component rules ([ba15bff](https://github.com/inventory69/simple-notes-desktop/commit/ba15bff7da547f26eaad807b233b65f938ee72ae))
+
 ## [0.9.0] - 2026-06-30
 
 ### Added
