@@ -43,6 +43,9 @@ impl WebDavClient {
     pub fn new(url: &str, username: &str, password: &str, sync_folder: &str) -> Result<Self> {
         let client = Client::builder()
             .danger_accept_invalid_certs(true)
+            // connect_timeout: schnelles Fehlschlagen wenn der Server nicht erreichbar ist
+            // (sonst hängt "Test connection" bis zum 30s-Request-Timeout).
+            .connect_timeout(std::time::Duration::from_secs(5))
             .timeout(std::time::Duration::from_secs(30))
             .build()
             .map_err(|e| AppError::NetworkError(e.to_string()))?;
