@@ -3,54 +3,54 @@ mod folders;
 mod local_store;
 mod markdown;
 mod models;
+mod scheduler;
 mod storage;
 mod sync_engine;
 mod sync_queue;
 mod webdav;
 
 use error::{AppError, Result};
-use folders::{validate_folder_name, Folder, FolderMeta};
+use folders::{validate_folder_name, Folder};
 use models::{Note, NoteMetadata, SyncStatus};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use storage::{Credentials, Settings};
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
     tray::TrayIconBuilder,
-    AppHandle, Manager, State,
+    AppHandle, Emitter, Manager, State,
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_store::StoreExt;
 use uuid::Uuid;
 use webdav::WebDavClient;
 
-const TRASH_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1000;
+pub(crate) const TRASH_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 
 /// Global WebDAV Client State
-struct WebDavState(Mutex<Option<WebDavClient>>);
+pub(crate) struct WebDavState(Mutex<Option<WebDavClient>>);
 
 /// Global Device ID
-struct DeviceIdState(Mutex<Option<String>>);
+pub(crate) struct DeviceIdState(pub(crate) Mutex<Option<String>>);
 
 /// Verhindert parallele Sync-Läufe (try_lock → Ok bei freiem Slot, Err wenn belegt).
-/// tokio::sync::Mutex wird verwendet, damit MutexGuard Send ist (Tauri-Command-Anforderung).
-struct SyncLockState(tokio::sync::Mutex<()>);
+pub(crate) struct SyncLockState(tokio::sync::Mutex<()>);
 
 /// Recovers from a poisoned mutex by extracting the inner value.
-/// A panic while holding a lock is rare in this app (no heavy work inside critical
-/// sections) but would otherwise leave the mutex permanently unusable.
-fn lock_recover<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+pub(crate) fn lock_recover<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// Generiert oder lädt Device ID
-fn get_or_create_device_id(app: &AppHandle, state: &State<DeviceIdState>) -> Result<String> {
+pub(crate) fn get_or_create_device_id(
+    app: &AppHandle,
+    state: &State<DeviceIdState>,
+) -> Result<String> {
     let mut device_id_lock = lock_recover(&state.0);
 
     if let Some(id) = &*device_id_lock {
         return Ok(id.clone());
     }
 
-    // Versuche aus Store zu laden
     let store = app
         .store("settings.json")
         .map_err(|e| AppError::StorageError(e.to_string()))?;
@@ -62,7 +62,6 @@ fn get_or_create_device_id(app: &AppHandle, state: &State<DeviceIdState>) -> Res
         }
     }
 
-    // Neu generieren
     let uuid = Uuid::new_v4().simple().to_string();
     let new_id = format!("tauri-{}", &uuid[..16]);
 
@@ -73,50 +72,6 @@ fn get_or_create_device_id(app: &AppHandle, state: &State<DeviceIdState>) -> Res
 
     *device_id_lock = Some(new_id.clone());
     Ok(new_id)
-}
-
-// ============ PRIVATE HELPERS ============
-
-async fn fetch_all_notes(client: &WebDavClient) -> Result<Vec<models::Note>> {
-    let note_locations = client.list_notes_with_folders().await?;
-    let mut notes = Vec::new();
-    for (id, folder) in note_locations {
-        match client.get_note(&id, folder.as_deref()).await {
-            Ok(note) => notes.push(note),
-            Err(e) => eprintln!("[fetch_all_notes] failed to load {}: {}", id, e),
-        }
-    }
-    Ok(notes)
-}
-
-/// Löscht eine Notiz permanent vom Server und schreibt einen Eintrag ins Lösch-Ledger.
-/// Der Delete muss gelingen; das Ledger-Write ist best-effort (Fehler werden geloggt).
-async fn purge_note(client: &WebDavClient, note: &Note, device_id: &str, now: i64) -> Result<()> {
-    client.delete_note(note).await?;
-    client
-        .append_deletion(&note.id, device_id, now, TRASH_RETENTION_MS)
-        .await;
-    Ok(())
-}
-
-async fn purge_expired_trash(client: &WebDavClient, device_id: &str) {
-    let now = chrono::Utc::now().timestamp_millis();
-    let notes = match fetch_all_notes(client).await {
-        Ok(n) => n,
-        Err(e) => {
-            eprintln!("[purge_expired_trash] fetch failed: {}", e);
-            return;
-        }
-    };
-    for note in notes {
-        if let Some(trashed_at) = note.trashed_at {
-            if now - trashed_at > TRASH_RETENTION_MS {
-                if let Err(e) = purge_note(client, &note, device_id, now).await {
-                    eprintln!("[purge_expired_trash] purge {} failed: {}", note.id, e);
-                }
-            }
-        }
-    }
 }
 
 // ============ TAURI COMMANDS ============
@@ -136,118 +91,54 @@ async fn connect(
     let success = client.test_connection().await?;
 
     if success {
-        // Device-ID vorinitialisieren (vermeidet Race beim ersten Lösch-Ledger-Write)
-        let device_id = get_or_create_device_id(&app, &device_id_state)?;
-
-        // Phase 2: Offline-Queue beim Verbinden abarbeiten
-        sync_queue::drain_sync_queue(&client, &app, &device_id, TRASH_RETENTION_MS).await;
-
+        let _ = get_or_create_device_id(&app, &device_id_state)?;
         let mut client_lock = lock_recover(&state.0);
         *client_lock = Some(client);
+        drop(client_lock);
+        // Sofort synchronisieren (nicht erst nach Debounce), damit die Liste gleich aktuell ist.
+        let app2 = app.clone();
+        tauri::async_runtime::spawn(async move {
+            scheduler::run_once(&app2).await;
+        });
     } else {
-        // Device-ID auch ohne erfolgreichen Connect initialisieren
         let _ = get_or_create_device_id(&app, &device_id_state);
     }
 
     Ok(success)
 }
 
+/// Abgelaufene getrashte Notiz lokal entfernen — und, falls sie eine Server-Kopie hatte,
+/// eine echte Löschung (Server-Datei + Ledger-Tombstone) einreihen. Sonst würde die noch
+/// am Server liegende Kopie beim nächsten Sync wieder heruntergeladen (Ping-Pong) und nie
+/// vom Server entfernt. LOCAL_ONLY/DELETED_ON_SERVER-Notizen haben keine Server-Kopie.
+fn purge_expired_trashed(app: &AppHandle, note: &Note) {
+    if matches!(
+        note.sync_status,
+        SyncStatus::Synced | SyncStatus::Pending | SyncStatus::Conflict
+    ) {
+        sync_queue::enqueue_deletions(app, &[(note.id.clone(), note.folder_name.clone())]);
+        scheduler::trigger_sync(app);
+    }
+    local_store::remove_note(app, &note.id);
+}
+
 #[tauri::command]
-async fn list_notes(
-    app: AppHandle,
-    device_id_state: State<'_, DeviceIdState>,
-    state: State<'_, WebDavState>,
-) -> Result<Vec<NoteMetadata>> {
-    let client = {
-        let client_lock = lock_recover(&state.0);
-        client_lock.clone()
-    };
-
-    let mut notes: Vec<NoteMetadata> = Vec::new();
-
-    // Server-Notizen nur wenn verbunden — lokale Ordner funktionieren auch offline.
-    if let Some(client) = client {
-        let device_id = get_or_create_device_id(&app, &device_id_state)?;
-
-        // Best-effort auto-purge: remove notes older than retention before listing
-        purge_expired_trash(&client, &device_id).await;
-
-        let all_notes = fetch_all_notes(&client).await?;
-
-        // Zombie-Schutz: Notizen, die auf einem anderen Gerät permanent gelöscht wurden,
-        // sollen nicht als "aktiv" aufgelistet werden. Das Lösch-Ledger wird einmal gelesen;
-        // für jeden Treffer (updatedAt ≤ deletedAt) wird die verwaiste Datei bereinigt.
-        let ledger = client.read_deletions().await;
-        let deletion_map: std::collections::HashMap<&str, i64> = ledger
-            .deleted_notes
-            .iter()
-            .map(|r| (r.id.as_str(), r.deleted_at))
-            .collect();
-
-        for note in &all_notes {
-            if note.trashed_at.is_some() {
-                continue;
-            }
-            // Phase 3: Server-Notizen aus lokal-exklusiven Ordnern überspringen.
-            // "Keep on server"-Ausschluss lässt Server-Kopie bestehen; Notizen werden
-            // aus dem lokalen Store bedient, um Duplikate zu vermeiden.
-            if local_store::is_local_only(&app, note.folder_name.as_deref()) {
-                continue;
-            }
-            if let Some(&deleted_at) = deletion_map.get(note.id.as_str()) {
-                if note.updated_at <= deleted_at {
-                    // Verwaiste Datei — vom Server entfernen
-                    if let Err(e) = client.delete_note(note).await {
-                        eprintln!("[list_notes] zombie cleanup {} failed: {}", note.id, e);
-                    }
-                    continue;
-                }
-            }
-            notes.push(NoteMetadata::from(note));
-        }
-    }
-
-    // Phase 6: Konflikt-/DeletedOnServer-Status aus Sync-Cache in Metadaten einbetten.
-    // Der Cache wird vom `sync`-Command befüllt; ohne Cache-Eintrag bleibt der Status SYNCED.
-    let note_cache = sync_engine::load_note_cache(&app);
-    for meta in notes.iter_mut() {
-        if let Some(entry) = note_cache.get(&meta.id) {
-            if matches!(
-                entry.note.sync_status,
-                SyncStatus::Conflict | SyncStatus::DeletedOnServer
-            ) {
-                meta.sync_status = entry.note.sync_status;
-            }
-        }
-    }
-
-    // Lokale aktive Notizen anhängen (auch offline). Aktive Ordner einmal vorberechnen
-    // (sonst O(n²): is_local_only deserialisiert die Ordnerliste je Notiz neu).
+async fn list_notes(app: AppHandle) -> Result<Vec<NoteMetadata>> {
     let now = chrono::Utc::now().timestamp_millis();
-    let active: std::collections::HashSet<String> = local_store::active_folders(&app)
-        .into_iter()
-        .map(|f| f.name.to_lowercase())
-        .collect();
+    let mut notes = Vec::new();
     for mut note in local_store::list_notes(&app) {
         if let Some(trashed_at) = note.trashed_at {
-            // Abgelaufene lokale Papierkorb-Notizen aufräumen (Server-Parität).
-            if now - trashed_at > TRASH_RETENTION_MS {
-                local_store::remove_note(&app, &note.id);
+            // Abgelaufene getrashte Notizen aufräumen (DeletedOnServer bleiben sichtbar im Trash)
+            if note.sync_status != SyncStatus::DeletedOnServer
+                && now - trashed_at > TRASH_RETENTION_MS
+            {
+                purge_expired_trashed(&app, &note);
             }
-            continue;
-        }
-        let in_active = note
-            .folder_name
-            .as_deref()
-            .map(|f| active.contains(&f.to_lowercase()))
-            .unwrap_or(false);
-        if !in_active {
-            continue;
+            continue; // getrashte Notizen erscheinen nicht in der Hauptliste
         }
         note.fix_note_type();
         notes.push(NoteMetadata::from(&note));
     }
-
     notes.sort_by(|a, b| {
         let a_pin = a.is_pinned.unwrap_or(false);
         let b_pin = b.is_pinned.unwrap_or(false);
@@ -259,60 +150,45 @@ async fn list_notes(
 }
 
 #[tauri::command]
-async fn get_note(
-    id: String,
-    folder_name: Option<String>,
-    app: AppHandle,
-    state: State<'_, WebDavState>,
-) -> Result<Note> {
-    // Lokale Notiz? (nach ID, unabhängig vom aktuellen Ordner-Status)
-    if let Some(mut note) = local_store::get_note(&app, &id) {
-        note.fix_note_type();
-        return Ok(note);
-    }
-
-    let client = {
-        let client_lock = lock_recover(&state.0);
-        client_lock.clone()
-    };
-
-    let client = client.ok_or(AppError::NotConnected)?;
-    client.get_note(&id, folder_name.as_deref()).await
+async fn get_note(id: String, app: AppHandle) -> Result<Note> {
+    let mut note =
+        local_store::get_note(&app, &id).ok_or_else(|| AppError::NoteNotFound(id.clone()))?;
+    note.fix_note_type();
+    Ok(note)
 }
 
 #[tauri::command]
-async fn save_note(mut note: Note, app: AppHandle, state: State<'_, WebDavState>) -> Result<Note> {
-    // Update timestamp to NOW before saving
+async fn save_note(mut note: Note, app: AppHandle) -> Result<Note> {
     note.updated_at = chrono::Utc::now().timestamp_millis();
-
-    // Lokaler Ordner (neue Notiz) ODER bereits lokal gespeicherte Notiz → lokaler Store.
-    // Die ID-Prüfung hält eine Notiz lokal, auch wenn sich der Ordner-Status zwischenzeitlich
-    // ändert (verhindert ein versehentliches Schreiben zum Server).
-    if local_store::is_local_only(&app, note.folder_name.as_deref())
-        || local_store::has_note(&app, &note.id)
-    {
-        local_store::put_note(&app, &note);
-        return Ok(note);
-    }
-
-    #[cfg(debug_assertions)]
-    eprintln!("[Save] Saving note '{}' (ID: {})", note.title, note.id);
-    #[cfg(debug_assertions)]
-    eprintln!("[Save] Updated timestamp: {}", note.updated_at);
-
-    let client = {
-        let client_lock = lock_recover(&state.0);
-        client_lock.clone()
-    };
-
-    let client = client.ok_or(AppError::NotConnected)?;
-    client.save_note(&note).await?;
-
-    #[cfg(debug_assertions)]
-    eprintln!("[Save] Note saved successfully to WebDAV");
-
-    // Return the updated note with new timestamp
+    local_store::mark_dirty(&app, &mut note);
+    local_store::put_note(&app, &note);
+    scheduler::trigger_sync(&app);
     Ok(note)
+}
+
+#[tauri::command]
+async fn disconnect(state: State<'_, WebDavState>) -> Result<()> {
+    let mut lock = lock_recover(&state.0);
+    *lock = None;
+    Ok(())
+}
+
+#[tauri::command]
+async fn is_connected(state: State<'_, WebDavState>) -> Result<bool> {
+    Ok(lock_recover(&state.0).is_some())
+}
+
+/// Reiner Verbindungstest — KEINE Seiteneffekte.
+#[tauri::command]
+async fn test_connection(
+    url: String,
+    username: String,
+    password: String,
+    sync_folder: Option<String>,
+) -> Result<bool> {
+    let folder = sync_folder.unwrap_or_else(|| "notes".to_string());
+    let client = WebDavClient::new(&url, &username, &password, &folder)?;
+    client.test_connection().await
 }
 
 #[tauri::command]
@@ -333,233 +209,102 @@ async fn create_note(
 }
 
 #[tauri::command]
-async fn delete_note(
-    id: String,
-    folder_name: Option<String>,
-    app: AppHandle,
-    state: State<'_, WebDavState>,
-) -> Result<()> {
-    // Soft-delete: in den Papierkorb verschieben statt permanent löschen (Android-Parität)
+async fn delete_note(id: String, app: AppHandle) -> Result<()> {
     let now = chrono::Utc::now().timestamp_millis();
-
-    // Lokale Notiz (nach ID) → lokal in den Papierkorb (auch offline)
     if let Some(mut note) = local_store::get_note(&app, &id) {
         note.trashed_at = Some(now);
         note.updated_at = now;
+        local_store::mark_dirty(&app, &mut note);
         local_store::put_note(&app, &note);
-        return Ok(());
+        scheduler::trigger_sync(&app);
     }
-
-    let client = {
-        let client_lock = lock_recover(&state.0);
-        client_lock.clone()
-    };
-
-    let client = client.ok_or(AppError::NotConnected)?;
-    let mut note = client.get_note(&id, folder_name.as_deref()).await?;
-    note.trashed_at = Some(now);
-    note.updated_at = now;
-    client.save_note(&note).await
+    Ok(())
 }
 
 #[tauri::command]
-async fn trash_note(
-    id: String,
-    folder_name: Option<String>,
-    app: AppHandle,
-    state: State<'_, WebDavState>,
-) -> Result<()> {
-    let now = chrono::Utc::now().timestamp_millis();
-
-    // Lokale Notiz (nach ID) → lokal in den Papierkorb (auch offline)
-    if let Some(mut note) = local_store::get_note(&app, &id) {
-        note.trashed_at = Some(now);
-        note.updated_at = now;
-        local_store::put_note(&app, &note);
-        return Ok(());
-    }
-
-    let client = {
-        let lock = lock_recover(&state.0);
-        lock.clone()
-    };
-    let client = client.ok_or(AppError::NotConnected)?;
-    let mut note = client.get_note(&id, folder_name.as_deref()).await?;
-    note.trashed_at = Some(now);
-    note.updated_at = now;
-    client.save_note(&note).await
+async fn trash_note(id: String, app: AppHandle) -> Result<()> {
+    delete_note(id, app).await
 }
 
 #[tauri::command]
-async fn restore_note(
-    id: String,
-    folder_name: Option<String>,
-    app: AppHandle,
-    state: State<'_, WebDavState>,
-) -> Result<()> {
+async fn restore_note(id: String, app: AppHandle) -> Result<()> {
     let now = chrono::Utc::now().timestamp_millis();
-
-    // Lokale Notiz (nach ID) wiederherstellen
     if let Some(mut note) = local_store::get_note(&app, &id) {
+        // Ordner zwischenzeitlich gelöscht? → in den Root wiederherstellen statt in einen toten Ordner.
+        if let Some(fname) = note.folder_name.clone() {
+            let exists = local_store::active_folders(&app)
+                .iter()
+                .any(|f| f.name.eq_ignore_ascii_case(&fname));
+            if !exists {
+                note.folder_name = None;
+            }
+        }
         note.trashed_at = None;
         note.updated_at = now;
-        // Ordner nicht mehr local-only? → zum Server migrieren (nur wenn verbunden).
-        let folder_local = local_store::is_local_only(&app, note.folder_name.as_deref());
-        if !folder_local {
-            let client = {
-                let lock = lock_recover(&state.0);
-                lock.clone()
-            };
-            if let Some(client) = client {
-                // Erst NACH erfolgreichem Server-Upload lokal entfernen — sonst Datenverlust,
-                // wenn save_note fehlschlägt.
-                // folder_name bleibt erhalten, damit die Notiz im richtigen Server-Ordner landet.
-                client.save_note(&note).await?;
-                local_store::remove_note(&app, &id);
-                return Ok(());
-            }
-            // Offline: Notiz lokal behalten (bleibt wiederherstellbar, sobald wieder verbunden).
-        }
+        local_store::mark_dirty(&app, &mut note);
         local_store::put_note(&app, &note);
-        return Ok(());
+        scheduler::trigger_sync(&app);
     }
+    Ok(())
+}
 
-    let client = {
-        let lock = lock_recover(&state.0);
-        lock.clone()
-    };
-    let client = client.ok_or(AppError::NotConnected)?;
-    let mut note = client.get_note(&id, folder_name.as_deref()).await?;
-    note.trashed_at = None;
-    note.updated_at = now;
-
-    // Fallback: Falls der Original-Ordner nicht mehr existiert, Notiz nach Root verschieben
-    if let Some(ref fname) = note.folder_name.clone() {
-        let existing_folders = client.discover_folders().await;
-        let folder_exists = existing_folders
-            .iter()
-            .any(|f| f.eq_ignore_ascii_case(fname));
-        if !folder_exists {
-            note.folder_name = None;
+#[tauri::command]
+async fn delete_note_permanent(id: String, app: AppHandle) -> Result<()> {
+    let note = local_store::get_note(&app, &id);
+    local_store::remove_note(&app, &id);
+    // Nur eine echte Server-Löschung einreihen, wenn die Notiz je am Server war —
+    // sonst landet ein Geister-Tombstone im geteilten Ledger (das auch Android liest).
+    if let Some(n) = note {
+        if matches!(
+            n.sync_status,
+            SyncStatus::Synced | SyncStatus::Pending | SyncStatus::Conflict
+        ) {
+            sync_queue::enqueue_deletions(&app, &[(id, n.folder_name)]);
         }
     }
-
-    client.save_note(&note).await
+    scheduler::trigger_sync(&app);
+    Ok(())
 }
 
 #[tauri::command]
-async fn delete_note_permanent(
-    id: String,
-    folder_name: Option<String>,
-    app: AppHandle,
-    device_id_state: State<'_, DeviceIdState>,
-    state: State<'_, WebDavState>,
-) -> Result<()> {
-    // Lokale Notiz (nach ID) endgültig entfernen (auch offline)
-    if local_store::has_note(&app, &id) {
-        local_store::remove_note(&app, &id);
-        return Ok(());
-    }
-
-    let client = {
-        let lock = lock_recover(&state.0);
-        lock.clone()
-    };
-    let client = client.ok_or(AppError::NotConnected)?;
-    let device_id = get_or_create_device_id(&app, &device_id_state)?;
-    let note = client.get_note(&id, folder_name.as_deref()).await?;
-    let now = chrono::Utc::now().timestamp_millis();
-    purge_note(&client, &note, &device_id, now).await
-}
-
-#[tauri::command]
-async fn list_trash(
-    app: AppHandle,
-    device_id_state: State<'_, DeviceIdState>,
-    state: State<'_, WebDavState>,
-) -> Result<Vec<NoteMetadata>> {
-    let client = {
-        let lock = lock_recover(&state.0);
-        lock.clone()
-    };
-
+async fn list_trash(app: AppHandle) -> Result<Vec<NoteMetadata>> {
     let now = chrono::Utc::now().timestamp_millis();
     let mut trashed: Vec<NoteMetadata> = Vec::new();
-
-    // Server-Papierkorb nur wenn verbunden — lokaler Papierkorb funktioniert auch offline.
-    if let Some(client) = client {
-        let device_id = get_or_create_device_id(&app, &device_id_state)?;
-        let all_notes = fetch_all_notes(&client).await?;
-
-        // Abgelaufene Tombstones zuerst entfernen und ins Lösch-Ledger schreiben
-        for note in &all_notes {
-            if let Some(trashed_at) = note.trashed_at {
-                if now - trashed_at > TRASH_RETENTION_MS {
-                    if let Err(e) = purge_note(&client, note, &device_id, now).await {
-                        eprintln!("[list_trash] purge {} failed: {}", note.id, e);
-                    }
-                }
-            }
-        }
-
-        trashed = all_notes
-            .iter()
-            .filter(|n| {
-                n.trashed_at
-                    .map(|t| now - t <= TRASH_RETENTION_MS)
-                    .unwrap_or(false)
-            })
-            .map(NoteMetadata::from)
-            .collect();
-    }
-
-    // Lokale getrashte Notizen einbeziehen (auch offline)
     for note in local_store::list_notes(&app) {
         if let Some(trashed_at) = note.trashed_at {
             if now - trashed_at > TRASH_RETENTION_MS {
-                local_store::remove_note(&app, &note.id);
+                purge_expired_trashed(&app, &note);
             } else {
                 trashed.push(NoteMetadata::from(&note));
             }
         }
     }
-
     trashed.sort_by_key(|n| std::cmp::Reverse(n.trashed_at));
     Ok(trashed)
 }
 
 #[tauri::command]
-async fn empty_trash(
-    app: AppHandle,
-    device_id_state: State<'_, DeviceIdState>,
-    state: State<'_, WebDavState>,
-) -> Result<()> {
-    let client = {
-        let lock = lock_recover(&state.0);
-        lock.clone()
-    };
-    let now = chrono::Utc::now().timestamp_millis();
-
-    // Server-Papierkorb nur wenn verbunden — lokaler Papierkorb wird auch offline geleert.
-    if let Some(client) = client {
-        let device_id = get_or_create_device_id(&app, &device_id_state)?;
-        let all_notes = fetch_all_notes(&client).await?;
-        for note in all_notes {
-            if note.trashed_at.is_some() {
-                if let Err(e) = purge_note(&client, &note, &device_id, now).await {
-                    eprintln!("[empty_trash] purge {} failed: {}", note.id, e);
-                }
-            }
-        }
+async fn empty_trash(app: AppHandle) -> Result<()> {
+    let trashed: Vec<Note> = local_store::list_notes(&app)
+        .into_iter()
+        .filter(|n| n.trashed_at.is_some())
+        .collect();
+    // Nur Notizen mit Server-Kopie ins Lösch-Ledger einreihen (s. delete_note_permanent).
+    let server_deletions: Vec<(String, Option<String>)> = trashed
+        .iter()
+        .filter(|n| {
+            matches!(
+                n.sync_status,
+                SyncStatus::Synced | SyncStatus::Pending | SyncStatus::Conflict
+            )
+        })
+        .map(|n| (n.id.clone(), n.folder_name.clone()))
+        .collect();
+    for n in &trashed {
+        local_store::remove_note(&app, &n.id);
     }
-
-    // Lokale getrashte Notizen löschen (auch offline)
-    for note in local_store::list_notes(&app) {
-        if note.trashed_at.is_some() {
-            local_store::remove_note(&app, &note.id);
-        }
-    }
-
+    sync_queue::enqueue_deletions(&app, &server_deletions);
+    scheduler::trigger_sync(&app);
     Ok(())
 }
 
@@ -634,10 +379,6 @@ async fn get_settings(app: AppHandle) -> Result<Settings> {
         .store("settings.json")
         .map_err(|e| AppError::StorageError(e.to_string()))?;
 
-    // Read each Settings key individually so missing keys fall back to Settings::default()
-    // rather than failing deserialization. This list MUST stay in sync with the fields
-    // of the Settings struct in storage.rs — see test_get_settings_keys_match_settings_struct
-    // in storage.rs which enforces this at test time.
     let mut map = serde_json::Map::new();
     for key in [
         "theme",
@@ -648,13 +389,13 @@ async fn get_settings(app: AppHandle) -> Result<Settings> {
         "update_notifications",
         "default_open_mode",
         "font_size",
+        "offline_mode",
     ] {
         if let Some(val) = store.get(key) {
             map.insert(key.to_string(), val.clone());
         }
     }
 
-    // Missing keys are filled from Settings::default() via #[serde(default)]
     Ok(serde_json::from_value(serde_json::Value::Object(map)).unwrap_or_default())
 }
 
@@ -664,8 +405,6 @@ async fn save_settings(settings: Settings, app: AppHandle) -> Result<()> {
         .store("settings.json")
         .map_err(|e| AppError::StorageError(e.to_string()))?;
 
-    // Derive store keys from the Settings struct itself so adding a new field
-    // to the struct automatically persists it without a separate hand-typed entry.
     let value = serde_json::to_value(&settings).map_err(|e| AppError::ParseError(e.to_string()))?;
     if let serde_json::Value::Object(map) = value {
         for (k, v) in map {
@@ -673,7 +412,6 @@ async fn save_settings(settings: Settings, app: AppHandle) -> Result<()> {
         }
     }
 
-    // Handle autostart toggle
     if settings.autostart {
         let _ = app.autolaunch().enable();
     } else {
@@ -694,7 +432,6 @@ fn get_app_version() -> String {
 
 #[tauri::command]
 fn get_desktop_environment() -> Option<String> {
-    // Try to detect desktop environment from environment variables
     if let Ok(session) = std::env::var("XDG_CURRENT_DESKTOP") {
         return Some(session.to_lowercase());
     }
@@ -710,7 +447,6 @@ fn get_desktop_environment() -> Option<String> {
     None
 }
 
-/// Aktuelles Betriebssystem zurückgeben (für plattformspezifische UI-Logik im Frontend)
 #[tauri::command]
 fn get_platform() -> &'static str {
     if cfg!(target_os = "windows") {
@@ -724,7 +460,6 @@ fn get_platform() -> &'static str {
     }
 }
 
-/// Übersetzt rohe Updater-Fehlermeldungen in nutzbare Hinweise.
 #[cfg(target_os = "windows")]
 fn humanize_updater_error(e: impl ToString) -> AppError {
     let msg = e.to_string();
@@ -747,9 +482,6 @@ fn humanize_updater_error(e: impl ToString) -> AppError {
     }
 }
 
-/// Prüft ob ein In-App-Update verfügbar ist.
-/// Gibt die neue Versionsnummer zurück oder None wenn aktuell.
-/// Auf Linux ist diese Funktion deaktiviert — Updates laufen über den Paketmanager.
 #[cfg(target_os = "windows")]
 #[tauri::command]
 async fn check_for_updates(app: AppHandle) -> Result<Option<String>> {
@@ -766,13 +498,9 @@ async fn check_for_updates(app: AppHandle) -> Result<Option<String>> {
 #[cfg(not(target_os = "windows"))]
 #[tauri::command]
 async fn check_for_updates(_app: AppHandle) -> Result<Option<String>> {
-    // Auf Linux/macOS übernimmt der Paketmanager die Updates
     Ok(None)
 }
 
-/// Lädt das Update herunter und installiert es (nur Windows).
-/// Nach erfolgreicher Installation wird die App beendet;
-/// der Installer startet die neue Version automatisch.
 #[cfg(target_os = "windows")]
 #[tauri::command]
 async fn install_update(app: AppHandle) -> Result<()> {
@@ -787,11 +515,9 @@ async fn install_update(app: AppHandle) -> Result<()> {
             .download_and_install(|_, _| {}, || {})
             .await
             .map_err(humanize_updater_error)?;
-        // Installer wurde gestartet; App beenden damit der Installer die Binary ersetzen kann
         app.exit(0);
         Ok(())
     } else {
-        // Update zwischen Check und Install verschwunden (Race Condition, Release zurückgezogen etc.)
         Err(AppError::StorageError(
             "Update no longer available. Please click 'Check for Updates' again.".to_string(),
         ))
@@ -807,7 +533,6 @@ async fn install_update(_app: AppHandle) -> Result<()> {
     ))
 }
 
-/// Update the minimize-to-tray runtime setting without restarting
 #[tauri::command]
 async fn update_tray_setting(enabled: bool, state: State<'_, TraySettings>) -> Result<()> {
     let mut lock = lock_recover(&state.0);
@@ -815,829 +540,274 @@ async fn update_tray_setting(enabled: bool, state: State<'_, TraySettings>) -> R
     Ok(())
 }
 
-/// Farbe mehrerer Notizen setzen oder entfernen
 #[tauri::command]
-async fn color_notes(
-    ids: Vec<String>,
-    color: Option<String>,
-    folder_name: Option<String>,
-    app: AppHandle,
-    state: State<'_, WebDavState>,
-) -> Result<()> {
-    // Lokaler Ordner: nur den lokalen Store mutieren, nie zum Server
-    if local_store::is_local_only(&app, folder_name.as_deref()) {
-        for id in &ids {
-            if let Some(mut note) = local_store::get_note(&app, id) {
-                note.color = color.clone();
-                note.updated_at = chrono::Utc::now().timestamp_millis();
-                local_store::put_note(&app, &note);
-            }
-        }
-        return Ok(());
-    }
-
-    let client = {
-        let lock = lock_recover(&state.0);
-        lock.clone()
-    };
-    let client = client.ok_or(AppError::NotConnected)?;
-
-    for id in ids {
-        match client.get_note(&id, folder_name.as_deref()).await {
-            Ok(mut note) => {
-                note.color = color.clone();
-                note.updated_at = chrono::Utc::now().timestamp_millis();
-                if let Err(e) = client.save_note(&note).await {
-                    eprintln!("[color_notes] save failed for {}: {}", id, e);
-                }
-            }
-            Err(e) => eprintln!("[color_notes] get failed for {}: {}", id, e),
+async fn color_notes(ids: Vec<String>, color: Option<String>, app: AppHandle) -> Result<()> {
+    for id in &ids {
+        if let Some(mut note) = local_store::get_note(&app, id) {
+            note.color = color.clone();
+            note.updated_at = chrono::Utc::now().timestamp_millis();
+            local_store::mark_dirty(&app, &mut note);
+            local_store::put_note(&app, &note);
         }
     }
+    scheduler::trigger_sync(&app);
     Ok(())
 }
 
-/// Mehrere Notizen auf einmal an-/abpinnen
 #[tauri::command]
-async fn pin_notes(
-    ids: Vec<String>,
-    pinned: bool,
-    folder_name: Option<String>,
-    app: AppHandle,
-    state: State<'_, WebDavState>,
-) -> Result<()> {
-    // Lokaler Ordner: nur den lokalen Store mutieren, nie zum Server
-    if local_store::is_local_only(&app, folder_name.as_deref()) {
-        for id in &ids {
-            if let Some(mut note) = local_store::get_note(&app, id) {
-                // None statt Some(false) beim Lösen — Android-kompatibel
-                note.is_pinned = if pinned { Some(true) } else { None };
-                note.updated_at = chrono::Utc::now().timestamp_millis();
-                local_store::put_note(&app, &note);
-            }
-        }
-        return Ok(());
-    }
-
-    let client = {
-        let lock = lock_recover(&state.0);
-        lock.clone()
-    };
-    let client = client.ok_or(AppError::NotConnected)?;
-
-    for id in ids {
-        match client.get_note(&id, folder_name.as_deref()).await {
-            Ok(mut note) => {
-                // None statt Some(false) beim Lösen — Android-kompatibel
-                note.is_pinned = if pinned { Some(true) } else { None };
-                note.updated_at = chrono::Utc::now().timestamp_millis();
-                if let Err(e) = client.save_note(&note).await {
-                    eprintln!("[pin_notes] save failed for {}: {}", id, e);
-                }
-            }
-            Err(e) => eprintln!("[pin_notes] get failed for {}: {}", id, e),
+async fn pin_notes(ids: Vec<String>, pinned: bool, app: AppHandle) -> Result<()> {
+    for id in &ids {
+        if let Some(mut note) = local_store::get_note(&app, id) {
+            note.is_pinned = if pinned { Some(true) } else { None };
+            note.updated_at = chrono::Utc::now().timestamp_millis();
+            local_store::mark_dirty(&app, &mut note);
+            local_store::put_note(&app, &note);
         }
     }
+    scheduler::trigger_sync(&app);
     Ok(())
 }
 
 // ── Ordner-Commands ──────────────────────────────────────────────────────────
 
-/// Hilfsfunktion: Aktive (nicht tombstoned) Ordner als Folder-Liste sortiert nach Name.
-/// Vereinigt `folders.json`-Einträge mit auf dem Server entdeckten Ordnern.
-async fn build_folder_list(client: &WebDavClient) -> Vec<Folder> {
-    let meta = client.read_folders_meta().await;
-    let discovered = client.discover_folders().await;
-
-    let mut names: Vec<(String, Option<String>)> = Vec::new();
-
-    // Zuerst Meta-Einträge (nicht gelöscht)
-    for m in &meta {
-        if !m.deleted {
-            names.push((m.name.clone(), m.color.clone()));
-        }
-    }
-
-    // Dann auf dem Server entdeckte Ordner hinzufügen, die noch nicht in Meta sind
-    for d in &discovered {
-        let already = meta.iter().any(|m| m.name.eq_ignore_ascii_case(d));
-        if !already {
-            let name_exists = names.iter().any(|(n, _)| n.eq_ignore_ascii_case(d));
-            if !name_exists {
-                names.push((d.clone(), None));
-            }
-        }
-    }
-
-    names.sort_by_key(|(a, _)| a.to_lowercase());
-    names
-        .into_iter()
-        .map(|(name, color)| Folder {
-            name,
-            color,
-            local_only: false,
-        })
-        .collect()
-}
-
-/// Server-Ordner (sofern verbunden) + lokale Ordner zusammenführen und alphabetisch sortieren.
-///
-/// Phase 3: Server-Ordner, die lokal als local-only markiert sind, erhalten `local_only = true`
-/// ("Keep on server"-Ausschluss — Server-Eintrag bleibt, Desktop behandelt den Ordner lokal).
-async fn build_full_folder_list(client: Option<&WebDavClient>, app: &AppHandle) -> Vec<Folder> {
-    let local_active: Vec<_> = local_store::active_folders(app);
-    let local_names: std::collections::HashSet<String> =
-        local_active.iter().map(|f| f.name.to_lowercase()).collect();
-
-    let mut folders = match client {
-        Some(c) => build_folder_list(c).await,
-        None => Vec::new(),
-    };
-
-    // Server-Ordner, die lokal als local-only markiert sind, entsprechend kennzeichnen
-    for f in folders.iter_mut() {
-        if local_names.contains(&f.name.to_lowercase()) {
-            f.local_only = true;
-        }
-    }
-
-    // Rein lokale Ordner ergänzen, die nicht im Server-Listing auftauchen
-    for meta in local_active {
-        let already = folders
-            .iter()
-            .any(|f| f.name.eq_ignore_ascii_case(&meta.name));
-        if !already {
-            folders.push(Folder {
-                name: meta.name,
-                color: meta.color,
-                local_only: true,
-            });
-        }
-    }
-    folders.sort_by_key(|f| f.name.to_lowercase());
-    folders
-}
-
-/// Alle Ordner auflisten (Server + lokal)
 #[tauri::command]
-async fn list_folders(app: AppHandle, state: State<'_, WebDavState>) -> Result<Vec<Folder>> {
-    // Auch offline: lokale Ordner werden ohne Server-Verbindung geliefert.
-    let client = {
-        let lock = lock_recover(&state.0);
-        lock.clone()
-    };
-    Ok(build_full_folder_list(client.as_ref(), &app).await)
+async fn list_folders(app: AppHandle) -> Result<Vec<Folder>> {
+    let folders = local_store::active_folders(&app)
+        .into_iter()
+        .map(|meta| Folder {
+            name: meta.name,
+            color: meta.color,
+            local_only: meta.local_only,
+        })
+        .collect();
+    Ok(folders)
 }
 
-/// Neuen Ordner erstellen (oder reaktivieren wenn tombstoned)
 #[tauri::command]
 async fn create_folder(
     name: String,
     color: Option<String>,
     local_only: bool,
     app: AppHandle,
-    state: State<'_, WebDavState>,
 ) -> Result<Vec<Folder>> {
     if !validate_folder_name(&name) {
         return Err(AppError::WebDav(format!("Invalid folder name: {}", name)));
     }
-
-    let client = {
-        let lock = lock_recover(&state.0);
-        lock.clone()
-    };
-
-    if local_only {
-        // Kollision mit gleichnamigem Server-Ordner verhindern: ein local-only-Ordner würde
-        // sonst dessen Notizen verdecken (is_local_only → true → Routing in den leeren Store).
-        if let Some(ref client) = client {
-            let server = build_folder_list(client).await;
-            if server.iter().any(|f| f.name.eq_ignore_ascii_case(&name)) {
-                return Err(AppError::WebDav(format!(
-                    "A synced folder named '{}' already exists",
-                    name
-                )));
-            }
-        }
-        local_store::upsert_folder(&app, &name, color, false);
-        return Ok(build_full_folder_list(client.as_ref(), &app).await);
+    local_store::upsert_folder(&app, &name, color, false, local_only);
+    if !local_only {
+        scheduler::trigger_sync(&app);
     }
-
-    let client = client.ok_or(AppError::NotConnected)?;
-
-    let now = chrono::Utc::now().timestamp_millis();
-    let new_name = name.clone();
-    let new_color = color.clone();
-
-    client
-        .write_folders_meta_merged(move |mut existing| {
-            if let Some(pos) = existing
-                .iter()
-                .position(|m| m.name.eq_ignore_ascii_case(&new_name))
-            {
-                // Reaktivieren
-                existing[pos].deleted = false;
-                existing[pos].color = new_color.clone();
-                existing[pos].updated_at = now;
-            } else {
-                existing.push(FolderMeta {
-                    name: new_name.clone(),
-                    color: new_color.clone(),
-                    updated_at: now,
-                    deleted: false,
-                });
-            }
-            existing
-        })
-        .await?;
-
-    // Verzeichnisse anlegen
-    client.ensure_folder_dirs(&name).await;
-
-    Ok(build_full_folder_list(Some(&client), &app).await)
+    list_folders(app).await
 }
 
-/// Ordner umbenennen: Notizen verschieben + Meta aktualisieren
 #[tauri::command]
-async fn rename_folder(
-    old_name: String,
-    new_name: String,
-    app: AppHandle,
-    state: State<'_, WebDavState>,
-) -> Result<Vec<Folder>> {
+async fn rename_folder(old_name: String, new_name: String, app: AppHandle) -> Result<Vec<Folder>> {
     if !validate_folder_name(&new_name) {
         return Err(AppError::WebDav(format!(
             "Invalid folder name: {}",
             new_name
         )));
     }
+    let now = chrono::Utc::now().timestamp_millis();
+    // Notizen mit Server-Kopie sammeln — für Move-Cleanup der alten Server-Pfade
+    let to_move: Vec<(String, Option<String>)> = local_store::list_notes(&app)
+        .into_iter()
+        .filter(|n| {
+            n.folder_name
+                .as_deref()
+                .map(|f| f.eq_ignore_ascii_case(&old_name))
+                .unwrap_or(false)
+                && matches!(
+                    n.sync_status,
+                    SyncStatus::Synced | SyncStatus::Pending | SyncStatus::Conflict
+                )
+        })
+        .map(|n| (n.id, Some(old_name.clone())))
+        .collect();
 
-    let client = {
-        let lock = lock_recover(&state.0);
-        lock.clone()
-    };
+    // Ordner-Meta + folder_name aller Notizen umbenennen
+    local_store::rename_folder(&app, &old_name, &new_name);
 
-    // Lokaler Ordner: nur Meta + Notizen im lokalen Store umbenennen (auch offline)
-    if local_store::is_local_only(&app, Some(&old_name)) {
-        // Kollision mit gleichnamigem Server-Ordner verhindern (würde dessen Notizen verdecken).
-        if let Some(ref client) = client {
-            let server = build_folder_list(client).await;
-            if server
-                .iter()
-                .any(|f| f.name.eq_ignore_ascii_case(&new_name))
-            {
-                return Err(AppError::WebDav(format!(
-                    "A synced folder named '{}' already exists",
-                    new_name
-                )));
-            }
-        }
-        local_store::rename_folder(&app, &old_name, &new_name);
-        return Ok(build_full_folder_list(client.as_ref(), &app).await);
-    }
-
-    let client = client.ok_or(AppError::NotConnected)?;
-
-    // Alle Notizen im alten Ordner verschieben
-    let note_locations = client.list_notes_with_folders().await?;
-    for (id, folder) in note_locations {
-        if folder
+    // Umbenannte Notizen als PENDING markieren (müssen zum neuen Pfad hochgeladen werden)
+    for note in local_store::list_notes(&app) {
+        if note
+            .folder_name
             .as_deref()
-            .map(|f| f.eq_ignore_ascii_case(&old_name))
+            .map(|f| f.eq_ignore_ascii_case(&new_name))
             .unwrap_or(false)
         {
-            if let Err(e) = client
-                .move_note_file(&id, Some(&old_name), Some(&new_name))
-                .await
-            {
-                eprintln!("[rename_folder] move {} failed: {}", id, e);
-            }
+            let mut n = note;
+            n.updated_at = now;
+            local_store::mark_dirty(&app, &mut n);
+            local_store::put_note(&app, &n);
         }
     }
 
-    // Meta: alten Ordner tombstonen + neuen hinzufügen/reaktivieren (Farbe übernehmen)
-    let now = chrono::Utc::now().timestamp_millis();
-    let old_name_c = old_name.clone();
-    let new_name_c = new_name.clone();
-
-    client
-        .write_folders_meta_merged(move |mut existing| {
-            let old_color = existing
-                .iter()
-                .find(|m| m.name.eq_ignore_ascii_case(&old_name_c))
-                .and_then(|m| m.color.clone());
-
-            // Alten Eintrag tombstonen
-            for m in existing.iter_mut() {
-                if m.name.eq_ignore_ascii_case(&old_name_c) {
-                    m.deleted = true;
-                    m.updated_at = now;
-                }
-            }
-
-            // Neuen Eintrag hinzufügen oder reaktivieren
-            if let Some(pos) = existing
-                .iter()
-                .position(|m| m.name.eq_ignore_ascii_case(&new_name_c))
-            {
-                existing[pos].deleted = false;
-                existing[pos].color = old_color;
-                existing[pos].updated_at = now;
-            } else {
-                existing.push(FolderMeta {
-                    name: new_name_c.clone(),
-                    color: old_color,
-                    updated_at: now,
-                    deleted: false,
-                });
-            }
-            existing
-        })
-        .await?;
-
-    // Neues Verzeichnis sicherstellen, altes entfernen
-    client.ensure_folder_dirs(&new_name).await;
-    client.delete_folder_dirs(&old_name).await;
-
-    Ok(build_full_folder_list(Some(&client), &app).await)
+    if !to_move.is_empty() {
+        sync_queue::enqueue_move_deletions(&app, &to_move);
+    }
+    scheduler::trigger_sync(&app);
+    list_folders(app).await
 }
 
-/// Ordner löschen: Notizen behalten (→ Root verschieben) oder mitlöschen
 #[tauri::command]
-async fn delete_folder(
-    name: String,
-    keep_notes: bool,
-    app: AppHandle,
-    state: State<'_, WebDavState>,
-) -> Result<Vec<Folder>> {
-    let client = {
-        let lock = lock_recover(&state.0);
-        lock.clone()
-    };
-
-    // Lokaler Ordner
-    if local_store::is_local_only(&app, Some(&name)) {
-        let mut migrate_ok = true;
-        if keep_notes {
-            // Notizen zum Server migrieren — erfordert eine Verbindung.
-            let client = client.as_ref().ok_or(AppError::NotConnected)?;
-            for note in local_store::list_notes(&app) {
-                if note
-                    .folder_name
-                    .as_deref()
-                    .map(|f| f.eq_ignore_ascii_case(&name))
-                    .unwrap_or(false)
-                {
-                    let mut n = note;
-                    n.folder_name = None;
-                    n.updated_at = chrono::Utc::now().timestamp_millis();
-                    if let Err(e) = client.save_note(&n).await {
-                        eprintln!("[delete_folder] migrate local note {} failed: {}", n.id, e);
-                        migrate_ok = false;
-                    } else {
-                        local_store::remove_note(&app, &n.id);
-                    }
-                }
-            }
-        } else {
-            // Lokale Notizen des Ordners löschen (auch offline)
-            for note in local_store::list_notes(&app) {
-                if note
-                    .folder_name
-                    .as_deref()
-                    .map(|f| f.eq_ignore_ascii_case(&name))
-                    .unwrap_or(false)
-                {
-                    local_store::remove_note(&app, &note.id);
-                }
-            }
-        }
-        // Ordner nur tombstonen, wenn jede Notiz migriert/gelöscht wurde — sonst bliebe eine
-        // hängengebliebene Notiz unsichtbar (weder lokal aktiv noch auf dem Server).
-        if !migrate_ok {
-            return Err(AppError::WebDav(
-                "Some notes could not be migrated; folder kept local".to_string(),
-            ));
-        }
-        local_store::upsert_folder(&app, &name, None, true);
-        return Ok(build_full_folder_list(client.as_ref(), &app).await);
-    }
-
-    let client = client.ok_or(AppError::NotConnected)?;
-
-    // Notizen im Ordner behandeln
+async fn delete_folder(name: String, keep_notes: bool, app: AppHandle) -> Result<Vec<Folder>> {
     let now = chrono::Utc::now().timestamp_millis();
-    let note_locations = client.list_notes_with_folders().await?;
-    for (id, folder) in &note_locations {
-        if folder
-            .as_deref()
-            .map(|f| f.eq_ignore_ascii_case(&name))
-            .unwrap_or(false)
-        {
-            if keep_notes {
-                if let Err(e) = client.move_note_file(id, Some(&name), None).await {
-                    eprintln!("[delete_folder] move {} to root failed: {}", id, e);
-                }
-            } else {
-                match client.get_note(id, Some(&name)).await {
-                    Ok(mut note) => {
-                        note.folder_name = None;
-                        note.trashed_at = Some(now);
-                        note.updated_at = now;
-                        if let Err(e) = client.save_note(&note).await {
-                            eprintln!("[delete_folder] trash {} failed: {}", id, e);
-                        } else {
-                            let _ = client.delete_note_by_id_folder(id, Some(&name)).await;
-                        }
-                    }
-                    Err(e) => eprintln!("[delete_folder] get {} failed: {}", id, e),
-                }
+    let is_local = local_store::is_local_only(&app, Some(&name));
+    let notes: Vec<_> = local_store::list_notes(&app)
+        .into_iter()
+        .filter(|n| {
+            n.folder_name
+                .as_deref()
+                .map(|f| f.eq_ignore_ascii_case(&name))
+                .unwrap_or(false)
+        })
+        .collect();
+
+    if keep_notes {
+        for note in &notes {
+            if note.trashed_at.is_some() {
+                continue;
             }
+            // Alte Server-Datei aufräumen wenn Notiz synchronisiert war
+            if !is_local
+                && matches!(
+                    note.sync_status,
+                    SyncStatus::Synced | SyncStatus::Pending | SyncStatus::Conflict
+                )
+            {
+                sync_queue::enqueue_move_deletions(&app, &[(note.id.clone(), Some(name.clone()))]);
+            }
+            let mut n = note.clone();
+            n.folder_name = None;
+            n.updated_at = now;
+            local_store::mark_dirty(&app, &mut n);
+            local_store::put_note(&app, &n);
+        }
+    } else {
+        for note in &notes {
+            if note.trashed_at.is_some() {
+                continue;
+            }
+            let mut n = note.clone();
+            n.trashed_at = Some(now);
+            n.updated_at = now;
+            local_store::mark_dirty(&app, &mut n);
+            local_store::put_note(&app, &n);
         }
     }
 
-    // Ordner tombstonen
-    let name_c = name.clone();
-    client
-        .write_folders_meta_merged(move |mut existing| {
-            if let Some(pos) = existing
-                .iter()
-                .position(|m| m.name.eq_ignore_ascii_case(&name_c))
-            {
-                existing[pos].deleted = true;
-                existing[pos].updated_at = now;
-            } else {
-                existing.push(FolderMeta {
-                    name: name_c.clone(),
-                    color: None,
-                    updated_at: now,
-                    deleted: true,
-                });
-            }
-            existing
-        })
-        .await?;
-
-    client.delete_folder_dirs(&name).await;
-
-    Ok(build_full_folder_list(Some(&client), &app).await)
+    local_store::upsert_folder(&app, &name, None, true, is_local);
+    if !is_local {
+        sync_queue::enqueue_folder_tombstone(&app, &name);
+    }
+    scheduler::trigger_sync(&app);
+    list_folders(app).await
 }
 
-/// Ordner-Farbe setzen oder entfernen
 #[tauri::command]
 async fn set_folder_color(
     name: String,
     color: Option<String>,
     app: AppHandle,
-    state: State<'_, WebDavState>,
 ) -> Result<Vec<Folder>> {
-    let client = {
-        let lock = lock_recover(&state.0);
-        lock.clone()
-    };
-
-    // Lokaler Ordner: nur lokale Meta aktualisieren (auch offline)
-    if local_store::is_local_only(&app, Some(&name)) {
-        local_store::set_folder_color(&app, &name, color);
-        return Ok(build_full_folder_list(client.as_ref(), &app).await);
+    local_store::set_folder_color(&app, &name, color);
+    let is_local = local_store::is_local_only(&app, Some(&name));
+    if !is_local {
+        scheduler::trigger_sync(&app);
     }
-
-    let client = client.ok_or(AppError::NotConnected)?;
-
-    let now = chrono::Utc::now().timestamp_millis();
-    let name_c = name.clone();
-    let color_c = color.clone();
-
-    client
-        .write_folders_meta_merged(move |mut existing| {
-            if let Some(pos) = existing
-                .iter()
-                .position(|m| m.name.eq_ignore_ascii_case(&name_c))
-            {
-                existing[pos].color = color_c.clone();
-                existing[pos].updated_at = now;
-            } else {
-                existing.push(FolderMeta {
-                    name: name_c.clone(),
-                    color: color_c.clone(),
-                    updated_at: now,
-                    deleted: false,
-                });
-            }
-            existing
-        })
-        .await?;
-
-    Ok(build_full_folder_list(Some(&client), &app).await)
+    list_folders(app).await
 }
 
-/// Notizen in einen anderen Ordner verschieben
 #[tauri::command]
-async fn move_notes(
-    ids: Vec<String>,
-    source_folder: Option<String>,
-    target_folder: Option<String>,
-    app: AppHandle,
-    device_id_state: State<'_, DeviceIdState>,
-    state: State<'_, WebDavState>,
-) -> Result<()> {
-    let client = {
-        let lock = lock_recover(&state.0);
-        lock.clone()
-    };
-
-    let src_local = local_store::is_local_only(&app, source_folder.as_deref());
-    let dst_local = local_store::is_local_only(&app, target_folder.as_deref());
-
-    // Verbindung nur erforderlich, wenn eine Server-Seite beteiligt ist
-    // (rein lokale Verschiebungen funktionieren offline).
-    if (!src_local || !dst_local) && client.is_none() {
-        return Err(AppError::NotConnected);
-    }
-
-    // Ziel-Verzeichnis anlegen (nur Server-Ziel)
-    if !dst_local {
-        if let (Some(client), Some(f)) = (client.as_ref(), target_folder.as_ref()) {
-            client.ensure_folder_dirs(f).await;
-        }
-    }
-
-    // Phase 1: Server→Lokal-Verschiebungen schreiben ans Lösch-Ledger (verhindert Android-Trash).
-    let mut server_to_local_deleted: Vec<String> = Vec::new();
-
+async fn move_notes(ids: Vec<String>, target_folder: Option<String>, app: AppHandle) -> Result<()> {
+    let now = chrono::Utc::now().timestamp_millis();
+    let mut move_deletions: Vec<(String, Option<String>)> = Vec::new();
     for id in &ids {
-        if src_local && dst_local {
-            // Lokal → Lokal: nur folder_name aktualisieren (kein Server nötig)
-            if let Some(mut note) = local_store::get_note(&app, id) {
-                note.folder_name = target_folder.clone();
-                note.updated_at = chrono::Utc::now().timestamp_millis();
-                local_store::put_note(&app, &note);
+        if let Some(mut note) = local_store::get_note(&app, id) {
+            // Alte Server-Datei aufräumen wenn Notiz eine Server-Kopie hatte und Ordner wechselt
+            // (Synced | Pending | Conflict — konsistent mit rename_folder/delete_folder).
+            if matches!(
+                note.sync_status,
+                SyncStatus::Synced | SyncStatus::Pending | SyncStatus::Conflict
+            ) && note.folder_name.as_deref().map(str::to_lowercase)
+                != target_folder.as_deref().map(str::to_lowercase)
+            {
+                move_deletions.push((note.id.clone(), note.folder_name.clone()));
             }
-        } else if let Some(client) = client.as_ref() {
-            // Ab hier ist garantiert verbunden (siehe Guard oben).
-            if src_local {
-                // Lokal → Server: hochladen + aus lokalem Store entfernen
-                if let Some(mut note) = local_store::get_note(&app, id) {
-                    note.folder_name = target_folder.clone();
-                    note.updated_at = chrono::Utc::now().timestamp_millis();
-                    if let Err(e) = client.save_note(&note).await {
-                        eprintln!("[move_notes] upload local note {} failed: {}", id, e);
-                    } else {
-                        local_store::remove_note(&app, id);
-                    }
-                }
-            } else if dst_local {
-                // Server → Lokal: runterladen, in lokalem Store speichern, vom Server löschen
-                match client.get_note(id, source_folder.as_deref()).await {
-                    Ok(mut note) => {
-                        note.folder_name = target_folder.clone();
-                        note.updated_at = chrono::Utc::now().timestamp_millis();
-                        local_store::put_note(&app, &note);
-                        if let Err(e) = client.delete_note(&note).await {
-                            eprintln!("[move_notes] delete server note {} failed: {}", id, e);
-                        } else {
-                            server_to_local_deleted.push(id.clone());
-                        }
-                    }
-                    Err(e) => eprintln!("[move_notes] get server note {} failed: {}", id, e),
-                }
-            } else {
-                // Server → Server
-                if let Err(e) = client
-                    .move_note_file(id, source_folder.as_deref(), target_folder.as_deref())
-                    .await
-                {
-                    eprintln!("[move_notes] move {} failed: {}", id, e);
-                }
-            }
+            note.folder_name = target_folder.clone();
+            note.updated_at = now;
+            local_store::mark_dirty(&app, &mut note);
+            local_store::put_note(&app, &note);
         }
     }
-
-    // Phase 1: Batch-Ledger-Write für Server→Lokal-Verschiebungen
-    if !server_to_local_deleted.is_empty() {
-        if let Some(client) = client.as_ref() {
-            let device_id = get_or_create_device_id(&app, &device_id_state)?;
-            let now = chrono::Utc::now().timestamp_millis();
-            client
-                .append_deletions(
-                    &server_to_local_deleted,
-                    &device_id,
-                    now,
-                    TRASH_RETENTION_MS,
-                )
-                .await;
-        }
+    if !move_deletions.is_empty() {
+        sync_queue::enqueue_move_deletions(&app, &move_deletions);
     }
-
+    scheduler::trigger_sync(&app);
     Ok(())
 }
 
-/// Ordner zwischen Server-Sync und Local-Only umschalten.
-///
-/// `local_only = true`:  Server-Notizen in lokalen Store übertragen + Server-Ordner behandeln.
-/// `local_only = false`: Lokale Notizen zum Server hochladen + lokalen Ordner entfernen.
-///
-/// `remove_from_server` (Phase 3, nur bei `local_only = true`):
-///   - `true`:  Notizen vom Server löschen + Ordner tombstonen (bisheriges Verhalten).
-///   - `false`: Notizen auf Server belassen + Ordner NICHT tombstonen ("Keep on server").
 #[tauri::command]
 async fn set_folder_local_only(
     name: String,
     local_only: bool,
     remove_from_server: bool,
     app: AppHandle,
-    device_id_state: State<'_, DeviceIdState>,
-    state: State<'_, WebDavState>,
 ) -> Result<Vec<Folder>> {
-    let client = {
-        let lock = lock_recover(&state.0);
-        lock.clone()
-    };
-
     if local_only {
-        // ── Online-Pfad: Notizen vom Server holen ────────────────────────────
-        if let Some(ref client) = client {
-            let note_locations = client.list_notes_with_folders().await?;
-            let mut deleted_ids: Vec<String> = Vec::new();
+        // Ordner als local-only markieren — Sync-Engine überspringt ihn künftig
+        let color = local_store::active_folders(&app)
+            .into_iter()
+            .find(|f| f.name.eq_ignore_ascii_case(&name))
+            .and_then(|f| f.color);
+        local_store::upsert_folder(&app, &name, color, false, true);
 
-            for (id, folder) in &note_locations {
-                if folder
-                    .as_deref()
-                    .map(|f| f.eq_ignore_ascii_case(&name))
-                    .unwrap_or(false)
-                {
-                    match client.get_note(id, Some(&name)).await {
-                        Ok(note) => {
-                            local_store::put_note(&app, &note);
-                            if remove_from_server {
-                                // Phase 1: Löschen + Ledger-Eintrag sammeln
-                                if let Err(e) = client.delete_note(&note).await {
-                                    eprintln!(
-                                        "[set_folder_local_only] delete {} failed: {}",
-                                        id, e
-                                    );
-                                } else {
-                                    deleted_ids.push(id.clone());
-                                }
-                            }
-                        }
-                        Err(e) => eprintln!("[set_folder_local_only] get {} failed: {}", id, e),
-                    }
-                }
-            }
-
-            // Phase 1: Alle erfolgreichen Löschungen in einem Batch ins Ledger schreiben
-            if !deleted_ids.is_empty() {
-                let device_id = get_or_create_device_id(&app, &device_id_state)?;
-                let now = chrono::Utc::now().timestamp_millis();
-                client
-                    .append_deletions(&deleted_ids, &device_id, now, TRASH_RETENTION_MS)
-                    .await;
-            }
-
-            // Server-Ordner tombstonen und Verzeichnisse löschen (nur bei remove_from_server = true)
-            if remove_from_server {
-                let now = chrono::Utc::now().timestamp_millis();
-                let name_c = name.clone();
-                client
-                    .write_folders_meta_merged(move |mut existing| {
-                        if let Some(pos) = existing
-                            .iter()
-                            .position(|m| m.name.eq_ignore_ascii_case(&name_c))
-                        {
-                            existing[pos].deleted = true;
-                            existing[pos].updated_at = now;
-                        } else {
-                            existing.push(FolderMeta {
-                                name: name_c.clone(),
-                                color: None,
-                                updated_at: now,
-                                deleted: true,
-                            });
-                        }
-                        existing
-                    })
-                    .await?;
-                client.delete_folder_dirs(&name).await;
-            }
-        } else {
-            // ── Offline-Pfad (Phase 2) ────────────────────────────────────────
-            // Notizen die bereits im lokalen Store für diesen Ordner liegen einreihen
-            // (für server-synchronisierte Ordner typischerweise leer; Phase 4 erweitert dies).
-            if remove_from_server {
-                let local_ids: Vec<(String, Option<String>)> = local_store::list_notes(&app)
-                    .into_iter()
-                    .filter(|n| {
-                        n.folder_name
-                            .as_deref()
-                            .map(|f| f.eq_ignore_ascii_case(&name))
-                            .unwrap_or(false)
-                    })
-                    .map(|n| (n.id, n.folder_name))
-                    .collect();
-
-                sync_queue::enqueue_deletions(&app, &local_ids);
-                sync_queue::enqueue_folder_tombstone(&app, &name);
-            }
-            // Offline ohne remove_from_server → nur lokal markieren, nichts queuen
+        if remove_from_server {
+            // Server-Kopien löschen + Ordner-Tombstone
+            let ids: Vec<(String, Option<String>)> = local_store::list_notes(&app)
+                .into_iter()
+                .filter(|n| {
+                    n.folder_name
+                        .as_deref()
+                        .map(|f| f.eq_ignore_ascii_case(&name))
+                        .unwrap_or(false)
+                        && matches!(n.sync_status, SyncStatus::Synced | SyncStatus::Pending)
+                })
+                .map(|n| (n.id, Some(name.clone())))
+                .collect();
+            sync_queue::enqueue_deletions(&app, &ids);
+            sync_queue::enqueue_folder_tombstone(&app, &name);
+            scheduler::trigger_sync(&app);
         }
-
-        // Ordner-Farbe aus Server-Meta übernehmen (wenn verbunden)
-        let color = if let Some(ref client) = client {
-            let meta = client.read_folders_meta().await;
-            meta.iter()
-                .find(|m| m.name.eq_ignore_ascii_case(&name))
-                .and_then(|m| m.color.clone())
-        } else {
-            None
-        };
-
-        local_store::upsert_folder(&app, &name, color, false);
     } else {
-        // ── Ordner wieder in den Sync aufnehmen ──────────────────────────────
-        let client = client.ok_or(AppError::NotConnected)?;
-
-        // Phase 2: Queue-Einträge für diesen Ordner löschen (verhindert Race mit Re-Upload)
+        // Ordner wieder in den Sync aufnehmen
         sync_queue::cancel_folder_deletions(&app, &name);
-
-        // Timestamp vor dem Upload setzen — Notizen müssen einen neueren updated_at als
-        // den deleted_at-Eintrag im Lösch-Ledger haben, sonst löscht der Zombie-Check
-        // in list_notes() die gerade hochgeladenen Notizen sofort wieder.
         let now = chrono::Utc::now().timestamp_millis();
-
-        // Lokale Notizen zum Server hochladen (ausgenommen Papierkorb-Notizen)
-        let mut upload_ok = true;
-        let mut uploaded_ids: Vec<String> = Vec::new();
         for note in local_store::list_notes(&app) {
             if note
                 .folder_name
                 .as_deref()
                 .map(|f| f.eq_ignore_ascii_case(&name))
                 .unwrap_or(false)
+                && note.trashed_at.is_none()
             {
-                // Bereits gelöschte Notizen nicht hochladen — sie bleiben im lokalen Papierkorb.
-                if note.trashed_at.is_some() {
-                    continue;
-                }
-                let mut note = note;
-                note.updated_at = now;
-                if let Err(e) = client.save_note(&note).await {
-                    eprintln!("[set_folder_local_only] upload {} failed: {}", note.id, e);
-                    upload_ok = false;
-                } else {
-                    uploaded_ids.push(note.id.clone());
-                    local_store::remove_note(&app, &note.id);
-                }
+                let mut n = note;
+                n.updated_at = now;
+                n.sync_status = SyncStatus::Pending;
+                local_store::put_note(&app, &n);
             }
         }
-
-        if !upload_ok {
-            return Err(AppError::WebDav(
-                "Some notes could not be uploaded; folder kept local".to_string(),
-            ));
-        }
-
-        // Stale Tombstones aus dem geteilten Lösch-Ledger entfernen: re-uploadete Notizen
-        // dürfen nicht weiterhin als „gelöscht" im Ledger stehen (Zombie-Schutz in list_notes
-        // und Android detectDeletions würden sie sonst fälschlicherweise entfernen).
-        client.remove_deletions(&uploaded_ids).await;
-        // Sync-Cache-Einträge bereinigen, damit veraltete Conflict/DeletedOnServer-Badges
-        // nicht weiter in list_notes() eingeblendet werden.
-        sync_engine::remove_cache_entries(&app, &uploaded_ids);
-
-        // Lokalen Ordner tombstonen; Server-Ordner reaktivieren
-        local_store::upsert_folder(&app, &name, None, true);
-        let name_c = name.clone();
-        client
-            .write_folders_meta_merged(move |mut existing| {
-                if let Some(pos) = existing
-                    .iter()
-                    .position(|m| m.name.eq_ignore_ascii_case(&name_c))
-                {
-                    existing[pos].deleted = false;
-                    existing[pos].updated_at = now;
-                } else {
-                    existing.push(FolderMeta {
-                        name: name_c.clone(),
-                        color: None,
-                        updated_at: now,
-                        deleted: false,
-                    });
-                }
-                existing
-            })
-            .await?;
-
-        client.ensure_folder_dirs(&name).await;
-
-        return Ok(build_full_folder_list(Some(&client), &app).await);
+        let color = local_store::active_folders(&app)
+            .into_iter()
+            .find(|f| f.name.eq_ignore_ascii_case(&name))
+            .and_then(|f| f.color);
+        local_store::upsert_folder(&app, &name, color, false, false);
+        scheduler::trigger_sync(&app);
     }
-
-    Ok(build_full_folder_list(client.as_ref(), &app).await)
+    list_folders(app).await
 }
 
-/// Server-Sync ausführen: Notizen herunter-/hochladen, Konflikte und Löschungen erkennen.
-/// Exklusiver Sync-Lock verhindert parallele Läufe.
 #[tauri::command]
 async fn sync(
     app: AppHandle,
@@ -1645,12 +815,10 @@ async fn sync(
     state: State<'_, WebDavState>,
     sync_lock: State<'_, SyncLockState>,
 ) -> Result<()> {
-    // Bei bereits laufendem Sync sofort zurückkehren (kein Fehler, kein zweiter Lauf)
     let _guard = match sync_lock.0.try_lock() {
         Ok(g) => g,
         Err(_) => return Ok(()),
     };
-
     let client = {
         let lock = lock_recover(&state.0);
         lock.clone()
@@ -1659,50 +827,39 @@ async fn sync(
         Some(c) => c,
         None => return Ok(()),
     };
-
     let device_id = get_or_create_device_id(&app, &device_id_state)?;
     sync_engine::run_sync(&client, &app, &device_id, TRASH_RETENTION_MS).await;
+    let _ = app.emit("notes-synced", ());
     Ok(())
 }
 
-/// Einen Sync-Konflikt auflösen: eigene Version behalten oder Server-Version übernehmen.
 #[tauri::command]
 async fn resolve_conflict(
     id: String,
-    resolution: String, // "keep_mine" oder "use_server"
-    folder_name: Option<String>,
+    resolution: String,
     app: AppHandle,
     state: State<'_, WebDavState>,
 ) -> Result<()> {
     let now = chrono::Utc::now().timestamp_millis();
-    let cache_entry = sync_engine::load_note_cache(&app).get(&id).cloned();
-
     match resolution.as_str() {
         "keep_mine" => {
-            // Eigene Version behalten: als PENDING markieren → nächster Sync lädt hoch
-            if let Some(mut entry) = cache_entry {
-                entry.note.sync_status = models::SyncStatus::Pending;
-                entry.note.updated_at = now;
-                sync_engine::update_cache_entry(&app, entry);
+            if let Some(mut note) = local_store::get_note(&app, &id) {
+                note.sync_status = SyncStatus::Pending;
+                note.updated_at = now;
+                local_store::put_note(&app, &note);
+                scheduler::trigger_sync(&app);
             }
         }
         "use_server" => {
-            // Server-Version übernehmen: aktuellen Stand laden und Cache überschreiben
             let client = {
                 let lock = lock_recover(&state.0);
                 lock.clone()
             };
             let client = client.ok_or(AppError::NotConnected)?;
-            let mut note = client.get_note(&id, folder_name.as_deref()).await?;
-            note.sync_status = models::SyncStatus::Synced;
-            sync_engine::update_cache_entry(
-                &app,
-                sync_engine::NoteCacheEntry {
-                    note,
-                    last_synced_at: now,
-                    etag: None,
-                },
-            );
+            let folder = local_store::get_note(&app, &id).and_then(|n| n.folder_name);
+            let mut note = client.get_note(&id, folder.as_deref()).await?;
+            note.sync_status = SyncStatus::Synced;
+            local_store::put_note(&app, &note);
         }
         other => {
             return Err(AppError::WebDav(format!(
@@ -1717,29 +874,15 @@ async fn resolve_conflict(
 /// State to track minimize-to-tray setting at runtime
 struct TraySettings(Mutex<bool>);
 
-/// Restore a hidden or minimized window safely on all platforms.
-///
-/// On Linux/Wayland (KDE Plasma), tao's `set_focus()` silently drops the
-/// focus request because the GTK widget isn't visible yet when checked
-/// synchronously after the async `show()`. The GTK-CSD titlebar also
-/// corrupts its internal input state during hide/show cycles on Wayland.
-///
-/// Fix: Use `gtk_window().present()` which handles show + focus in a single
-/// call, correctly re-negotiating the compositor focus and fixing frozen
-/// titlebar buttons after tray restore.
 fn restore_window(window: &tauri::WebviewWindow) {
     #[cfg(target_os = "linux")]
     {
         use gtk::prelude::GtkWindowExt;
 
-        // present() both shows and focuses the window, bypassing tao's
-        // set_focus() race condition. It also re-negotiates compositor
-        // focus, fixing frozen titlebar buttons after hide/show cycles.
         if let Ok(gtk_window) = window.gtk_window() {
             gtk_window.present();
         }
 
-        // Unminimize separately in case the window was minimized (not hidden)
         if let Ok(true) = window.is_minimized() {
             let _ = window.unminimize();
         }
@@ -1759,12 +902,13 @@ fn restore_window(window: &tauri::WebviewWindow) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // ponytail: Arc<Notify> für den Scheduler — einmal erstellt, dann geteilt zw. manage() und spawn()
+    let notify = Arc::new(tokio::sync::Notify::new());
+    let notify_for_manage = notify.clone();
+
     let builder = tauri::Builder::default()
         .plugin(
             tauri_plugin_window_state::Builder::default()
-                // Position-Restore deaktiviert: Wayland erlaubt Apps nicht,
-                // ihre eigene Position zu setzen; gespeicherte Koordinaten
-                // würden vom Compositor ignoriert oder das Fenster off-screen legen.
                 .with_state_flags(
                     tauri_plugin_window_state::StateFlags::SIZE
                         | tauri_plugin_window_state::StateFlags::MAXIMIZED,
@@ -1778,9 +922,6 @@ pub fn run() {
             Some(vec!["--minimized"]),
         ))
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            // F8: Callback wird aufgerufen wenn eine zweite Instanz gestartet wird.
-            // Die zweite Instanz beendet sich automatisch.
-            // Hier bringen wir das Fenster der ersten Instanz in den Vordergrund.
             #[cfg(debug_assertions)]
             eprintln!(
                 "[SingleInstance] Second instance detected with args: {:?}",
@@ -1791,7 +932,6 @@ pub fn run() {
             }
         }));
 
-    // Windows-only: In-App-Updater — Linux-Nutzer verwenden AUR/deb/rpm
     #[cfg(target_os = "windows")]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
 
@@ -1800,8 +940,27 @@ pub fn run() {
         .manage(DeviceIdState(Mutex::new(None)))
         .manage(TraySettings(Mutex::new(false)))
         .manage(SyncLockState(tokio::sync::Mutex::new(())))
-        .setup(|app| {
-            // Load minimize_to_tray setting
+        .manage(scheduler::SyncTrigger(notify_for_manage))
+        .setup(move |app| {
+            // Einmalige Migration: note_cache → local_store
+            local_store::migrate_from_note_cache(app.handle());
+
+            // Einmalige Migration: Upgrade von einer Version ohne Offline-Modus.
+            // Fehlt der offline_mode-Key, aber Credentials sind vorhanden, war der Nutzer
+            // vorher online → online lassen (sonst erscheint die Notizliste nach dem Update leer).
+            if let Ok(store) = app.store("settings.json") {
+                let has_offline_key = store.get("offline_mode").is_some();
+                let has_credentials = store.get("server_url").is_some();
+                if !has_offline_key && has_credentials {
+                    store.set("offline_mode", serde_json::json!(false));
+                    let _ = store.save();
+                }
+            }
+
+            // Hintergrund-Sync starten
+            scheduler::spawn(app.handle().clone(), notify.clone());
+
+            // Minimize-to-tray und Autostart aus gespeicherten Settings laden
             if let Ok(store) = app.store("settings.json") {
                 let minimize = store
                     .get("minimize_to_tray")
@@ -1810,7 +969,6 @@ pub fn run() {
                 let state = app.state::<TraySettings>();
                 *lock_recover(&state.0) = minimize;
 
-                // Sync autostart state
                 let autostart = store
                     .get("autostart")
                     .and_then(|v| v.as_bool())
@@ -1820,7 +978,7 @@ pub fn run() {
                 }
             }
 
-            // Build tray menu
+            // Tray-Menü aufbauen
             let show_item = MenuItemBuilder::with_id("show", "Show Window").build(app)?;
             let quit_item = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
 
@@ -1830,13 +988,11 @@ pub fn run() {
                 .item(&quit_item)
                 .build()?;
 
-            // Load tray icon embedded at compile time
             let icon_bytes = include_bytes!("../icons/32x32.png");
             let icon = tauri::image::Image::from_bytes(icon_bytes)
                 .expect("failed to load tray icon")
                 .to_owned();
 
-            // Create tray icon
             let _tray = TrayIconBuilder::new()
                 .icon(icon)
                 .menu(&tray_menu)
@@ -1866,7 +1022,6 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // Set window icon for taskbar (KDE Plasma, etc.)
             let window_icon_bytes = include_bytes!("../icons/128x128.png");
             let window_icon = tauri::image::Image::from_bytes(window_icon_bytes)
                 .expect("failed to load window icon")
@@ -1874,25 +1029,12 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_icon(window_icon);
 
-                // Bug 1 Fix: Remove GTK Client-Side Decorations (CSD) so the
-                // compositor (KWin) renders Server-Side Decorations (SSD).
-                // Without this, tao PR #979 forces GTK-drawn GNOME-style
-                // titlebars on Wayland, even under KDE Plasma.
                 #[cfg(target_os = "linux")]
                 {
                     use gtk::prelude::{GtkWindowExt, WidgetExt};
                     if let Ok(gtk_window) = window.gtk_window() {
                         gtk_window.set_titlebar(Option::<&gtk::Widget>::None);
 
-                        // Bug 2 Fix: Wayland-Taskleiste zeigt generisches Icon statt App-Icon.
-                        // Tauri setzt die GTK-GApplication-ID auf den Identifier
-                        // "com.inventory69.simple-notes-desktop", der direkt als Wayland
-                        // xdg_toplevel app_id landet. KDE sucht dann nach
-                        // "com.inventory69.simple-notes-desktop.desktop", installiert ist
-                        // aber "simple-notes-desktop.desktop" → kein Match → falsches Icon.
-                        // gdk_wayland_window_set_application_id() (GTK ≥ 3.24.22) setzt die
-                        // app_id direkt am GDK-Surface und hat Vorrang vor der GApplication-ID.
-                        // Beide Pfade: Fenster bereits realized (GTK-Warning oben) oder noch nicht.
                         if std::env::var("WAYLAND_DISPLAY").is_ok() {
                             extern "C" {
                                 fn gdk_wayland_window_set_application_id(
@@ -1901,7 +1043,6 @@ pub fn run() {
                                 );
                             }
 
-                            // Fenster ist beim Tauri-Setup bereits realized → direkt anwenden.
                             if let Some(gdk_win) = gtk_window.window() {
                                 use glib::translate::ToGlibPtr;
                                 let app_id =
@@ -1914,7 +1055,6 @@ pub fn run() {
                                     );
                                 }
                             } else {
-                                // Fallback: noch nicht realized – beim Realize-Signal anwenden.
                                 gtk_window.connect_realize(|w| {
                                     use glib::translate::ToGlibPtr;
                                     if let Some(gdk_win) = w.window() {
@@ -1945,15 +1085,16 @@ pub fn run() {
                 let minimize = *lock_recover(&tray_settings.0);
 
                 if minimize {
-                    // Prevent window from closing, hide instead
                     api.prevent_close();
                     let _ = window.hide();
                 }
-                // If minimize_to_tray is false, window closes normally (app quits)
             }
         })
         .invoke_handler(tauri::generate_handler![
             connect,
+            disconnect,
+            test_connection,
+            is_connected,
             list_notes,
             get_note,
             save_note,

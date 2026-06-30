@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 
+use crate::folders::FolderMeta;
 use crate::local_store;
 use crate::models::{Note, SyncStatus};
 use crate::sync_queue;
@@ -13,8 +14,7 @@ const SYNC_STORE: &str = "sync_state.json";
 const KEY_NOTE_CACHE: &str = "note_cache";
 const KEY_LAST_SYNC: &str = "last_sync_at";
 
-/// Ein Eintrag im lokalen Notiz-Cache (sync_state.json).
-/// Enthält die vollständige Notiz und Sync-Metadaten.
+/// Ein Eintrag im lokalen Notiz-Cache (für Migration aus alter Architektur).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NoteCacheEntry {
     pub note: Note,
@@ -32,7 +32,7 @@ pub struct SyncSummary {
     pub notes_deleted_on_server: usize,
 }
 
-// ── Cache-Zugriff ────────────────────────────────────────────────────────────
+// ── Cache-Zugriff (für Migration) ───────────────────────────────────────────
 
 pub fn load_note_cache(app: &AppHandle) -> HashMap<String, NoteCacheEntry> {
     app.store(SYNC_STORE)
@@ -42,6 +42,7 @@ pub fn load_note_cache(app: &AppHandle) -> HashMap<String, NoteCacheEntry> {
         .unwrap_or_default()
 }
 
+#[allow(dead_code)]
 pub fn save_note_cache(app: &AppHandle, cache: &HashMap<String, NoteCacheEntry>) {
     if let Ok(store) = app.store(SYNC_STORE) {
         store.set(
@@ -52,25 +53,12 @@ pub fn save_note_cache(app: &AppHandle, cache: &HashMap<String, NoteCacheEntry>)
     }
 }
 
-/// Einzelnen Cache-Eintrag aktualisieren und sofort persistieren.
-pub fn update_cache_entry(app: &AppHandle, entry: NoteCacheEntry) {
-    let mut cache = load_note_cache(app);
-    cache.insert(entry.note.id.clone(), entry);
-    save_note_cache(app, &cache);
-}
-
-/// Mehrere Cache-Einträge per ID entfernen und sofort persistieren.
-/// Wird beim Wieder-Einschluss eines local-only-Ordners aufgerufen, damit veraltete
-/// Conflict/DeletedOnServer-Badges aus list_notes() verschwinden.
-pub fn remove_cache_entries(app: &AppHandle, ids: &[String]) {
-    if ids.is_empty() {
-        return;
+/// note_cache-Key löschen — wird nach der einmaligen Migration aufgerufen.
+pub fn clear_note_cache(app: &AppHandle) {
+    if let Ok(store) = app.store(SYNC_STORE) {
+        store.delete(KEY_NOTE_CACHE);
+        let _ = store.save();
     }
-    let mut cache = load_note_cache(app);
-    for id in ids {
-        cache.remove(id);
-    }
-    save_note_cache(app, &cache);
 }
 
 fn save_last_sync_at(app: &AppHandle, ts: i64) {
@@ -82,10 +70,99 @@ fn save_last_sync_at(app: &AppHandle, ts: i64) {
 
 // ── Sync-Logik ───────────────────────────────────────────────────────────────
 
-/// Server-Sync: Notizen herunterladen, Konflikte erkennen, Löschungen erkennen,
-/// ausstehende lokale Änderungen hochladen.
+/// Alle Server-Notizen abrufen (PROPFIND + GET je UUID).
+async fn fetch_server_notes(client: &WebDavClient) -> crate::error::Result<Vec<Note>> {
+    let note_locations = client.list_notes_with_folders().await?;
+    let mut notes = Vec::new();
+    for (id, folder) in note_locations {
+        match client.get_note(&id, folder.as_deref()).await {
+            Ok(note) => notes.push(note),
+            Err(e) => eprintln!("[sync] get_note {} fehlgeschlagen: {}", id, e),
+        }
+    }
+    Ok(notes)
+}
+
+/// Menge aller Ordnernamen, die auf dem Server existieren (lowercased).
+/// Quelle: Ordner aus Notiz-Pfaden ∪ folders.json ∪ physische Verzeichnisse.
+async fn collect_server_folder_names(
+    client: &WebDavClient,
+) -> crate::error::Result<HashSet<String>> {
+    let mut names = HashSet::new();
+    for (_id, folder) in client.list_notes_with_folders().await? {
+        if let Some(f) = folder {
+            names.insert(f.to_lowercase());
+        }
+    }
+    for m in client.read_folders_meta().await {
+        if !m.deleted {
+            names.insert(m.name.to_lowercase());
+        }
+    }
+    for d in client.discover_folders().await {
+        names.insert(d.to_lowercase());
+    }
+    Ok(names)
+}
+
+/// Ordner-Sync: lokale (nicht local-only) Ordner mit Server-folders.json LWW-mergen
+/// und fehlende Server-Verzeichnisse anlegen.
+async fn sync_folders(client: &WebDavClient, app: &AppHandle) {
+    let server_meta = client.read_folders_meta().await;
+
+    // Lokale nicht-local-only Ordner für den Merge aufbereiten
+    let local_meta: Vec<FolderMeta> = local_store::active_folders(app)
+        .into_iter()
+        .filter(|f| !f.local_only)
+        .map(|f| FolderMeta {
+            name: f.name,
+            color: f.color,
+            updated_at: f.updated_at,
+            deleted: false,
+            local_only: false,
+        })
+        .collect();
+
+    // LWW-Merge
+    let merged = crate::folders::merge_by_name(local_meta, server_meta);
+
+    // Neue Server-Ordner in local_store aufnehmen (ohne local_only-Flag)
+    for m in &merged {
+        if !m.deleted && !local_store::is_local_only(app, Some(&m.name)) {
+            let already = local_store::active_folders(app)
+                .iter()
+                .any(|f| f.name.eq_ignore_ascii_case(&m.name));
+            if !already {
+                local_store::upsert_folder(app, &m.name, m.color.clone(), false, false);
+            }
+        }
+    }
+
+    // Server-Verzeichnisse für aktive lokale Nicht-local-only-Ordner anlegen
+    for f in local_store::active_folders(app) {
+        if !f.local_only {
+            client.ensure_folder_dirs(&f.name).await;
+        }
+    }
+
+    // folders.json auf dem Server mit gemergten Daten aktualisieren.
+    // write_folders_meta_merged liest den Server unter „Lock" frisch neu — wir mergen unsere
+    // Änderungen dort hinein (LWW), statt sie mit einem veralteten Stand zu überschreiben.
+    // Sonst gehen Ordner-Änderungen verloren, die ein anderes Gerät zwischen unserem ersten
+    // Read (oben) und diesem Write geschrieben hat.
+    let to_write: Vec<FolderMeta> = merged.into_iter().filter(|m| !m.local_only).collect();
+    if !to_write.is_empty() {
+        let _ = client
+            .write_folders_meta_merged(move |existing| {
+                crate::folders::merge_by_name(to_write, existing)
+            })
+            .await;
+    }
+}
+
+/// Server-Sync: local_store ↔ Server reconcilen.
 ///
-/// Port von Android's `WebDavSyncService.syncNotes()` (Phasen 5+6).
+/// Port von Android's `WebDavSyncService.syncNotes()`.
 /// Sicherheitswächter verhindern Massen-Löschungen durch leere PROPFIND-Antworten.
 pub async fn run_sync(
     client: &WebDavClient,
@@ -94,51 +171,39 @@ pub async fn run_sync(
     retention_ms: i64,
 ) -> SyncSummary {
     let mut summary = SyncSummary::default();
+    let now = chrono::Utc::now().timestamp_millis();
 
-    // 1. Offline-Queue abarbeiten (Phase 2)
+    // 1. Offline-Queue abarbeiten (ausstehende Löschungen + Move-Cleanups + Ordner-Tombstones)
     sync_queue::drain_sync_queue(client, app, device_id, retention_ms).await;
 
-    // 2. Aktuellen lokalen Cache laden
-    let mut cache = load_note_cache(app);
+    // 1.5 Einmalige local_only-Reconciliation (nur bei erreichbarem Server)
+    if !local_store::local_only_reconciled(app) {
+        if let Ok(server_names) = collect_server_folder_names(client).await {
+            local_store::reconcile_local_only(app, &server_names);
+        }
+        // Err → Server nicht erreichbar → Marker NICHT setzen, nächster Lauf versucht es erneut
+    }
 
-    // 3. Alle Server-Notizen abrufen
-    let note_locations = match client.list_notes_with_folders().await {
-        Ok(locs) => locs,
+    // 2. Ordner-Sync
+    sync_folders(client, app).await;
+
+    // 3. Server-Notizen abrufen
+    let server_notes = match fetch_server_notes(client).await {
+        Ok(v) => v,
         Err(e) => {
-            eprintln!("[sync] list_notes_with_folders fehlgeschlagen: {}", e);
+            eprintln!("[sync] fetch fehlgeschlagen: {}", e);
             return summary;
         }
     };
-
-    let mut server_notes: Vec<Note> = Vec::new();
-    for (id, folder) in &note_locations {
-        match client.get_note(id, folder.as_deref()).await {
-            Ok(note) => server_notes.push(note),
-            Err(e) => eprintln!("[sync] get_note {} fehlgeschlagen: {}", id, e),
-        }
-    }
-
-    // Sicherheitswächter 1: Leerer Server-Scan bei gefülltem Cache → Löscherkennung überspringen
-    // (schützt vor Massen-Trash durch leere PROPFIND-Antwort bei Server-Problem)
-    let abort_deletion = server_notes.is_empty() && !cache.is_empty();
-    if abort_deletion {
-        eprintln!(
-            "[sync] Sicherheitswächter: Server lieferte 0 Notizen, Cache hat {} Einträge \
-             — Löscherkennung übersprungen",
-            cache.len()
-        );
-    }
-
     let server_ids: HashSet<String> = server_notes.iter().map(|n| n.id.clone()).collect();
-    let now = chrono::Utc::now().timestamp_millis();
 
-    // Lokal-exklusive Ordner einmal vorberechnen (verhindert O(n) Store-Reads in den Loops).
-    let local_only_folders: HashSet<String> = local_store::active_folders(app)
+    // Local-only-Ordner einmal vorberechnen
+    let local_only_set: HashSet<String> = local_store::active_folders(app)
         .into_iter()
+        .filter(|f| f.local_only)
         .map(|f| f.name.to_lowercase())
         .collect();
 
-    // 4. Lösch-Ledger lesen (für Unterscheidung absichtlich vs. unerwartet gelöscht)
     let ledger = client.read_deletions().await;
     let deletion_map: HashMap<String, i64> = ledger
         .deleted_notes
@@ -146,148 +211,136 @@ pub async fn run_sync(
         .map(|r| (r.id.clone(), r.deleted_at))
         .collect();
 
-    // 5. Download-Phase: Server-Notizen mit Cache vergleichen (LWW-Merge)
-    for server_note in &server_notes {
-        // Server-Notizen aus lokal-exklusiven Ordnern überspringen (Phase 3)
-        if server_note
+    // Sicherheitswächter 1: leerer Server-Scan bei gefülltem Store → keine Löscherkennung
+    let local_synced: Vec<Note> = local_store::list_notes(app)
+        .into_iter()
+        .filter(|n| {
+            n.sync_status == SyncStatus::Synced
+                && n.trashed_at.is_none()
+                && !n
+                    .folder_name
+                    .as_deref()
+                    .map(|f| local_only_set.contains(&f.to_lowercase()))
+                    .unwrap_or(false)
+        })
+        .collect();
+    let abort_deletion = server_notes.is_empty() && !local_synced.is_empty();
+    if abort_deletion {
+        eprintln!(
+            "[sync] Sicherheitswächter: Server lieferte 0 Notizen, {} lokale SYNCED — Löscherkennung übersprungen",
+            local_synced.len()
+        );
+    }
+
+    // 4. Download / LWW-Merge → in local_store schreiben
+    for sn in &server_notes {
+        if sn
             .folder_name
             .as_deref()
-            .map(|f| local_only_folders.contains(&f.to_lowercase()))
+            .map(|f| local_only_set.contains(&f.to_lowercase()))
             .unwrap_or(false)
         {
             continue;
         }
-
-        if let Some(entry) = cache.get_mut(&server_note.id) {
-            if server_note.updated_at > entry.note.updated_at {
-                if entry.note.sync_status == SyncStatus::Pending {
-                    // Lokale ausstehende Änderung + Server neuer → Konflikt (Phase 6)
-                    entry.note.sync_status = SyncStatus::Conflict;
-                    summary.conflicts_detected += 1;
-                    eprintln!("[sync] Konflikt erkannt für Notiz {}", server_note.id);
-                } else {
-                    // Server-Version ist neuer → lokalen Cache überschreiben
-                    entry.note = server_note.clone();
-                    entry.note.sync_status = SyncStatus::Synced;
-                    entry.last_synced_at = now;
-                    summary.notes_downloaded += 1;
-                }
-            } else {
-                // Lokale Version gleich alt oder neuer → Sync-Zeitstempel auffrischen
-                entry.last_synced_at = now;
+        match local_store::get_note(app, &sn.id) {
+            None => {
+                let mut n = sn.clone();
+                n.sync_status = SyncStatus::Synced;
+                local_store::put_note(app, &n);
+                summary.notes_downloaded += 1;
             }
-        } else {
-            // Neue Notiz vom Server → in Cache aufnehmen
-            let mut n = server_note.clone();
-            n.sync_status = SyncStatus::Synced;
-            cache.insert(
-                n.id.clone(),
-                NoteCacheEntry {
-                    note: n,
-                    last_synced_at: now,
-                    etag: None,
-                },
-            );
-            summary.notes_downloaded += 1;
-        }
-    }
-
-    // 6. Server-Löscherkennung (Port von NoteDownloader.detectDeletions)
-    if !abort_deletion {
-        // Alle SYNCED-Cache-Einträge die NICHT in einem local-only Ordner sind
-        let synced_ids: Vec<String> = cache
-            .values()
-            .filter(|e| {
-                e.note.sync_status == SyncStatus::Synced
-                    && !e
-                        .note
-                        .folder_name
-                        .as_deref()
-                        .map(|f| local_only_folders.contains(&f.to_lowercase()))
-                        .unwrap_or(false)
-            })
-            .map(|e| e.note.id.clone())
-            .collect();
-
-        let missing: Vec<String> = synced_ids
-            .iter()
-            .filter(|id| !server_ids.contains(*id))
-            .cloned()
-            .collect();
-
-        // Sicherheitswächter 2: Zu viele gleichzeitig verschwunden → Erkennung abbrechen
-        // Schwellenwert: ≥10 fehlende UND ≥80% aller SYNCED-Notizen fehlen
-        let too_many_missing = !synced_ids.is_empty()
-            && missing.len() >= 10
-            && missing.len() * 10 >= synced_ids.len() * 8;
-
-        if too_many_missing {
-            eprintln!(
-                "[sync] Sicherheitswächter: {}/{} SYNCED-Notizen fehlen im Server-Scan \
-                 — Löscherkennung abgebrochen (Schutz vor Massen-Trash)",
-                missing.len(),
-                synced_ids.len()
-            );
-        } else {
-            for id in &missing {
-                if let Some(entry) = cache.get_mut(id) {
-                    let already_trashed = entry.note.trashed_at.is_some();
-                    // Im Lösch-Ledger mit deleted_at ≥ note.updated_at → absichtlich gelöscht
-                    let in_ledger = deletion_map
-                        .get(id)
-                        .map(|&deleted_at| deleted_at >= entry.note.updated_at)
-                        .unwrap_or(false);
-
-                    if already_trashed || in_ledger {
-                        // Sauber gelöscht — aus Cache entfernen
-                        cache.remove(id);
-                        summary.notes_deleted_on_server += 1;
+            Some(local) => {
+                if sn.updated_at > local.updated_at {
+                    if matches!(
+                        local.sync_status,
+                        SyncStatus::Pending | SyncStatus::Conflict
+                    ) {
+                        // Beide Seiten editiert → Konflikt
+                        let mut c = local.clone();
+                        c.sync_status = SyncStatus::Conflict;
+                        local_store::put_note(app, &c);
+                        summary.conflicts_detected += 1;
+                        eprintln!("[sync] Konflikt erkannt für {}", sn.id);
                     } else {
-                        // Unerwartet verschwunden → als "auf Server gelöscht" markieren.
-                        // In den lokalen Store legen, damit die Notiz im Papierkorb sichtbar ist
-                        // und der Nutzer sie wiederherstellen oder endgültig löschen kann.
-                        entry.note.sync_status = SyncStatus::DeletedOnServer;
-                        entry.note.trashed_at = Some(now);
-                        entry.note.updated_at = now;
-                        local_store::put_note(app, &entry.note);
-                        summary.notes_deleted_on_server += 1;
-                        eprintln!(
-                            "[sync] Notiz {} auf Server verschwunden → DELETED_ON_SERVER",
-                            id
-                        );
+                        // Server neuer → überschreiben
+                        let mut n = sn.clone();
+                        n.sync_status = SyncStatus::Synced;
+                        local_store::put_note(app, &n);
+                        summary.notes_downloaded += 1;
                     }
                 }
+                // sonst: lokal neuer/gleich → wird ggf. in Upload-Phase behandelt
             }
         }
     }
 
-    // 7. PENDING-Notizen hochladen (lokale Änderungen aus Cache)
-    // Hinweis: Derzeit schreibt save_note() direkt zum Server (SYNCED).
-    // Dieser Pfad wird aktiv wenn die Architektur auf local-first umgestellt wird (Phase 4 voll).
-    let pending_ids: Vec<String> = cache
-        .values()
-        .filter(|e| e.note.sync_status == SyncStatus::Pending)
-        .map(|e| e.note.id.clone())
-        .collect();
+    // 5. Löscherkennung: SYNCED-Notizen, die nicht (mehr) am Server sind
+    if !abort_deletion {
+        let missing: Vec<&Note> = local_synced
+            .iter()
+            .filter(|n| !server_ids.contains(&n.id))
+            .collect();
 
-    for id in &pending_ids {
-        if let Some(entry) = cache.get_mut(id) {
-            entry.note.updated_at = now;
-            match client.save_note(&entry.note).await {
-                Ok(()) => {
-                    entry.note.sync_status = SyncStatus::Synced;
-                    entry.last_synced_at = now;
-                    summary.notes_uploaded += 1;
+        let too_many = !local_synced.is_empty()
+            && missing.len() >= 10
+            && missing.len() * 10 >= local_synced.len() * 8;
+        if too_many {
+            eprintln!(
+                "[sync] Sicherheitswächter: {}/{} SYNCED fehlen — Löscherkennung abgebrochen",
+                missing.len(),
+                local_synced.len()
+            );
+        } else {
+            for n in missing {
+                let intentional = n.trashed_at.is_some()
+                    || deletion_map
+                        .get(&n.id)
+                        .map(|&d| d >= n.updated_at)
+                        .unwrap_or(false);
+                if intentional {
+                    local_store::remove_note(app, &n.id);
+                } else {
+                    let mut z = n.clone();
+                    z.sync_status = SyncStatus::DeletedOnServer;
+                    z.trashed_at = Some(now);
+                    local_store::put_note(app, &z);
+                    eprintln!(
+                        "[sync] {} auf Server verschwunden → DELETED_ON_SERVER",
+                        n.id
+                    );
                 }
-                Err(e) => eprintln!("[sync] Upload {} fehlgeschlagen: {}", id, e),
+                summary.notes_deleted_on_server += 1;
             }
         }
     }
 
-    // 8. Cache und letzten Sync-Zeitstempel persistieren
-    save_note_cache(app, &cache);
-    save_last_sync_at(app, now);
+    // 6. Upload: PENDING (nicht local-only-Ordner) → Server, dann SYNCED
+    let mut uploaded_ids: Vec<String> = Vec::new();
+    for n in local_store::list_notes(app) {
+        let skip = n
+            .folder_name
+            .as_deref()
+            .map(|f| local_only_set.contains(&f.to_lowercase()))
+            .unwrap_or(false);
+        if skip || !matches!(n.sync_status, SyncStatus::Pending | SyncStatus::LocalOnly) {
+            continue;
+        }
+        match client.save_note(&n).await {
+            Ok(()) => {
+                local_store::mark_synced_if_unchanged(app, &n.id, n.updated_at);
+                uploaded_ids.push(n.id.clone());
+                summary.notes_uploaded += 1;
+            }
+            Err(e) => eprintln!("[sync] upload {} fehlgeschlagen: {}", n.id, e),
+        }
+    }
+    // Frisch (wieder-)hochgeladene Notizen aus dem Server-Lösch-Ledger streichen,
+    // damit ein alter Tombstone sie nicht beim nächsten Sync wieder „löscht".
+    if !uploaded_ids.is_empty() {
+        client.remove_deletions(&uploaded_ids).await;
+    }
 
+    save_last_sync_at(app, now);
     eprintln!(
         "[sync] Abgeschlossen: {} heruntergeladen, {} hochgeladen, {} Konflikte, {} auf Server gelöscht",
         summary.notes_downloaded,
@@ -295,7 +348,6 @@ pub async fn run_sync(
         summary.conflicts_detected,
         summary.notes_deleted_on_server
     );
-
     summary
 }
 

@@ -17,6 +17,16 @@ export class SettingsDialog {
     this.autostartCheckbox = document.getElementById('autostart-checkbox');
     this.deviceIdInput = document.getElementById('device-id');
     this.syncFolderInput = document.getElementById('sync-folder-input');
+    this.offlineCheckbox = document.getElementById('offline-mode-checkbox');
+    this.serverUrlInput = document.getElementById('settings-server-url');
+    this.serverUsernameInput = document.getElementById('settings-username');
+    this.serverPasswordInput = document.getElementById('settings-password');
+    this.connectionStatus = document.getElementById('connection-status');
+    this.testConnBtn = document.getElementById('test-connection-btn');
+    this.homeView = document.getElementById('settings-home');
+    this.backBtn = document.getElementById('settings-back-btn');
+    this.updatesCard = document.getElementById('updates-card');
+    this.headerTitle = this.dialog.querySelector('.settings-dialog-header h2');
     this.saveBtn = document.getElementById('save-settings-btn');
     this.cancelBtn = document.getElementById('cancel-settings-btn');
     this.appVersionEl = document.getElementById('app-version');
@@ -52,6 +62,12 @@ export class SettingsDialog {
     this.saveBtn.addEventListener('click', () => this.handleSave());
     this.cancelBtn.addEventListener('click', () => this.handleCancel());
 
+    this.backBtn.addEventListener('click', () => this._showHome());
+    this.homeView.addEventListener('click', (e) => {
+      const card = e.target.closest('.settings-nav-card');
+      if (card) this._showSection(card.dataset.section);
+    });
+
     this.renderThemeGrid();
 
     // Font size chip handler - live preview
@@ -62,6 +78,11 @@ export class SettingsDialog {
       this._setActiveChip(value);
       this.applyFontSize(value);
     });
+
+    this.testConnBtn.addEventListener('click', () => this._testConnection());
+
+    // Offline toggle: update status label live
+    this.offlineCheckbox.addEventListener('change', () => this._applyOfflineState());
 
     // Sync folder input sanitization (Android parity: only alphanumeric, dash, underscore)
     this.syncFolderInput.addEventListener('input', () => {
@@ -91,7 +112,7 @@ export class SettingsDialog {
       .then((platform) => {
         this._platform = platform;
         if (platform === 'windows') {
-          this.updatesSection.classList.remove('hidden');
+          this.updatesCard.classList.remove('hidden');
         }
       })
       .catch((err) => {
@@ -185,6 +206,69 @@ export class SettingsDialog {
     }
   }
 
+  _applyOfflineState() {
+    const offline = this.offlineCheckbox.checked;
+    for (const el of [
+      this.serverUrlInput,
+      this.serverUsernameInput,
+      this.serverPasswordInput,
+      this.syncFolderInput,
+      this.testConnBtn,
+    ]) {
+      if (el) el.disabled = offline;
+    }
+    if (offline) {
+      this.connectionStatus.textContent = 'Status: Offline';
+      return;
+    }
+    // Online-Modus: "Online" bedeutet nur den Modus, nicht Erreichbarkeit. Die echte
+    // Verbindung asynchron prüfen, damit der Status nicht "Online" lügt während der
+    // Server (z.B. in einem anderen Netzwerk) gar nicht erreichbar ist.
+    this.connectionStatus.textContent = 'Status: Online';
+    this._refreshConnectionStatus();
+  }
+
+  async _refreshConnectionStatus() {
+    try {
+      const connected = await tauri.isConnected();
+      if (this.offlineCheckbox.checked) return; // zwischenzeitlich auf Offline umgeschaltet
+      this.connectionStatus.textContent = connected ? 'Status: Online' : 'Status: Online (not connected)';
+    } catch (_e) {
+      /* Status unverändert lassen */
+    }
+  }
+
+  async _testConnection() {
+    const url = this.serverUrlInput.value.trim();
+    const username = this.serverUsernameInput.value.trim();
+    const password = this.serverPasswordInput.value;
+    if (!url || !username || !password) {
+      await dialogService.error({ title: 'Missing details', message: 'Enter server details first.' });
+      return;
+    }
+    const syncFolder = this.syncFolderInput.value.trim() || 'notes';
+    const prevStatus = this.connectionStatus.textContent;
+    this.testConnBtn.disabled = true;
+    this.connectionStatus.textContent = 'Status: Testing…';
+    try {
+      // test_connection has no side effects (unlike connect, which stores the client
+      // and uploads local notes) — so testing never silently changes the offline state.
+      const ok = await tauri.testConnection(url, username, password, syncFolder);
+      if (ok) {
+        this.connectionStatus.textContent = 'Status: Reachable';
+        await dialogService.info({ title: 'Connection OK', message: 'Server reachable.' });
+      } else {
+        this.connectionStatus.textContent = prevStatus;
+        await dialogService.error({ title: 'Connection Failed', message: 'Could not connect to the server.' });
+      }
+    } catch (e) {
+      this.connectionStatus.textContent = prevStatus;
+      await dialogService.error({ title: 'Connection Failed', message: `Could not connect: ${e.message || e}` });
+    } finally {
+      this.testConnBtn.disabled = false;
+    }
+  }
+
   async show() {
     // Load current settings
     try {
@@ -195,8 +279,9 @@ export class SettingsDialog {
       this.originalTheme = settings.theme;
       // Store original font size for cancel
       this._originalFontSize = settings.font_size || 'system';
-      // Store original sync folder for change detection
+      // Store original values for change detection
       this._previousSyncFolder = settings.sync_folder || 'notes';
+      this._previousOffline = settings.offline_mode !== false;
 
       this.selectTheme(settings.theme);
       this.autosaveCheckbox.checked = settings.autosave;
@@ -207,14 +292,54 @@ export class SettingsDialog {
       this.defaultOpenModeSelect.value = settings.default_open_mode || 'edit';
       this.deviceIdInput.value = deviceId;
       this._setActiveChip(this._originalFontSize);
+      this.offlineCheckbox.checked = this._previousOffline;
+
+      let creds = null;
+      try {
+        creds = await tauri.getCredentials();
+      } catch (_e) {
+        /* leave empty */
+      }
+      this.serverUrlInput.value = creds?.url || '';
+      this.serverUsernameInput.value = creds?.username || '';
+      this.serverPasswordInput.value = creds?.password || '';
+      // Snapshot for change detection (reconnect when online creds are edited)
+      this._loadedCreds = {
+        url: creds?.url || '',
+        username: creds?.username || '',
+        password: creds?.password || '',
+      };
+
+      this._applyOfflineState();
 
       // Update-Status korrekt anzeigen (verhindert stale Zustand aus vorheriger Session)
       this._restoreUpdateState();
 
       this.dialog.classList.remove('hidden');
+      this._showHome();
     } catch (error) {
       console.error('Failed to load settings:', error);
     }
+  }
+
+  _showHome() {
+    this.homeView.classList.remove('hidden');
+    for (const s of this.dialog.querySelectorAll('.settings-section')) {
+      s.classList.add('hidden');
+    }
+    this.backBtn.classList.add('hidden');
+    if (this.headerTitle) this.headerTitle.textContent = 'Settings';
+  }
+
+  _showSection(id) {
+    this.homeView.classList.add('hidden');
+    for (const s of this.dialog.querySelectorAll('.settings-section')) {
+      s.classList.toggle('hidden', s.dataset.section !== id);
+    }
+    this.backBtn.classList.remove('hidden');
+    const section = this.dialog.querySelector(`.settings-section[data-section="${id}"]`);
+    const title = section?.querySelector('h3')?.textContent;
+    if (this.headerTitle && title) this.headerTitle.textContent = title;
   }
 
   hide() {
@@ -234,6 +359,7 @@ export class SettingsDialog {
 
   async handleSave() {
     try {
+      const offline = this.offlineCheckbox.checked;
       const syncFolderValue = this.syncFolderInput.value.trim();
       const settings = {
         theme: this._currentTheme,
@@ -244,6 +370,7 @@ export class SettingsDialog {
         update_notifications: this.updateNotificationsCheckbox.checked,
         default_open_mode: this.defaultOpenModeSelect.value,
         font_size: this._currentFontSize,
+        offline_mode: offline,
       };
 
       await tauri.saveSettings(settings);
@@ -251,19 +378,39 @@ export class SettingsDialog {
       await tauri.updateTraySetting(settings.minimize_to_tray);
       this.applyTheme(settings.theme);
 
-      // Reconnect with new sync folder if it changed
-      if (this._previousSyncFolder !== undefined && this._previousSyncFolder !== settings.sync_folder) {
+      const url = this.serverUrlInput.value.trim();
+      const username = this.serverUsernameInput.value.trim();
+      const password = this.serverPasswordInput.value;
+      if (url && username && password) {
+        await tauri.saveCredentials({ url, username, password });
+      }
+
+      // Reconcile connection only when something connection-relevant changed.
+      const credsChanged =
+        !!this._loadedCreds &&
+        (url !== this._loadedCreds.url ||
+          username !== this._loadedCreds.username ||
+          password !== this._loadedCreds.password);
+      const connChanged =
+        offline !== this._previousOffline ||
+        settings.sync_folder !== this._previousSyncFolder ||
+        (!offline && credsChanged);
+      if (connChanged) {
         try {
-          const credentials = await tauri.getCredentials();
-          if (credentials) {
-            await tauri.connect(credentials.url, credentials.username, credentials.password, settings.sync_folder);
-            // Notify app to reload notes after reconnect
-            if (this.onReconnectCallback) {
-              await this.onReconnectCallback();
+          if (offline) {
+            await tauri.disconnect();
+          } else if (url && username && password) {
+            const ok = await tauri.connect(url, username, password, settings.sync_folder);
+            if (!ok) {
+              await dialogService.error({
+                title: 'Connection Failed',
+                message: 'Could not connect. Saved offline; check server details.',
+              });
             }
           }
+          if (this.onReconnectCallback) await this.onReconnectCallback();
         } catch (e) {
-          console.error('Failed to reconnect with new sync folder:', e);
+          console.error('Connection reconcile failed:', e);
         }
       }
 

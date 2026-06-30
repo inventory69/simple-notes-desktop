@@ -20,6 +20,7 @@ pub struct Settings {
     pub update_notifications: bool, // Show popup when an update is available (Windows only)
     pub default_open_mode: String, // "edit" | "preview" — open text notes in edit vs preview
     pub font_size: String,      // "system"|"small"|"normal"|"large"|"xlarge"
+    pub offline_mode: bool,     // Offline-Modus: kein Server nötig (Android-Parität, default true)
 }
 
 impl Default for Settings {
@@ -33,6 +34,7 @@ impl Default for Settings {
             update_notifications: true,
             default_open_mode: "edit".to_string(),
             font_size: "system".to_string(),
+            offline_mode: true,
         }
     }
 }
@@ -51,6 +53,7 @@ mod tests {
         assert_eq!(settings.sync_folder, "notes");
         assert!(settings.update_notifications);
         assert_eq!(settings.font_size, "system");
+        assert!(settings.offline_mode);
     }
 
     #[test]
@@ -64,6 +67,7 @@ mod tests {
             update_notifications: false,
             default_open_mode: "edit".to_string(),
             font_size: "large".to_string(),
+            offline_mode: false,
         };
 
         let json = serde_json::to_string(&settings).unwrap();
@@ -106,6 +110,7 @@ mod tests {
                 update_notifications: true,
                 default_open_mode: "edit".to_string(),
                 font_size: "system".to_string(),
+                offline_mode: true,
             };
 
             let json = serde_json::to_string(&settings).unwrap();
@@ -135,6 +140,7 @@ mod tests {
             update_notifications: false,
             default_open_mode: "edit".to_string(),
             font_size: "xlarge".to_string(),
+            offline_mode: true,
         };
 
         let json = serde_json::to_string(&settings).unwrap();
@@ -174,6 +180,7 @@ mod tests {
             update_notifications: false,
             default_open_mode: "edit".to_string(),
             font_size: "normal".to_string(),
+            offline_mode: false,
         };
 
         let cloned = settings.clone();
@@ -209,6 +216,7 @@ mod tests {
             "update_notifications",
             "default_open_mode",
             "font_size",
+            "offline_mode",
         ]
         .iter()
         .map(|s| s.to_string())

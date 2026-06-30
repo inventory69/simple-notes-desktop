@@ -1,8 +1,12 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+fn is_false(b: &bool) -> bool {
+    !b
+}
+
 /// Ordner-Metadaten für `folders.json`
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FolderMeta {
     pub name: String,
@@ -12,6 +16,9 @@ pub struct FolderMeta {
     pub updated_at: i64,
     #[serde(default)]
     pub deleted: bool,
+    /// Nur lokal, nie zum Server synchronisiert (Desktop-intern, Android ignoriert es).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub local_only: bool,
 }
 
 /// UI-facing Ordner-Typ (an das Frontend zurückgegeben)
@@ -89,6 +96,7 @@ pub fn parse_folders_json(text: &str) -> Vec<FolderMeta> {
                     color: None,
                     updated_at: 0,
                     deleted: false,
+                    local_only: false,
                 });
             }
         } else if item.is_object() {
@@ -269,20 +277,20 @@ mod tests {
 
     // ── Merge ────────────────────────────────────────────────────────────────────
 
+    fn fm(name: &str, color: Option<&str>, updated_at: i64, deleted: bool) -> FolderMeta {
+        FolderMeta {
+            name: name.into(),
+            color: color.map(Into::into),
+            updated_at,
+            deleted,
+            local_only: false,
+        }
+    }
+
     #[test]
     fn test_merge_remote_higher_ts_wins() {
-        let local = vec![FolderMeta {
-            name: "Work".into(),
-            color: None,
-            updated_at: 100,
-            deleted: false,
-        }];
-        let remote = vec![FolderMeta {
-            name: "Work".into(),
-            color: Some("#FF0000".into()),
-            updated_at: 200,
-            deleted: false,
-        }];
+        let local = vec![fm("Work", None, 100, false)];
+        let remote = vec![fm("Work", Some("#FF0000"), 200, false)];
         let merged = merge_by_name(local, remote);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].color.as_deref(), Some("#FF0000"));
@@ -290,80 +298,32 @@ mod tests {
 
     #[test]
     fn test_merge_local_higher_ts_wins() {
-        let local = vec![FolderMeta {
-            name: "Work".into(),
-            color: Some("#00FF00".into()),
-            updated_at: 300,
-            deleted: false,
-        }];
-        let remote = vec![FolderMeta {
-            name: "Work".into(),
-            color: Some("#FF0000".into()),
-            updated_at: 200,
-            deleted: false,
-        }];
+        let local = vec![fm("Work", Some("#00FF00"), 300, false)];
+        let remote = vec![fm("Work", Some("#FF0000"), 200, false)];
         let merged = merge_by_name(local, remote);
         assert_eq!(merged[0].color.as_deref(), Some("#00FF00"));
     }
 
     #[test]
     fn test_merge_tombstone_wins_on_tie() {
-        let local = vec![FolderMeta {
-            name: "Work".into(),
-            color: None,
-            updated_at: 100,
-            deleted: true,
-        }];
-        let remote = vec![FolderMeta {
-            name: "Work".into(),
-            color: None,
-            updated_at: 100,
-            deleted: false,
-        }];
+        let local = vec![fm("Work", None, 100, true)];
+        let remote = vec![fm("Work", None, 100, false)];
         let merged = merge_by_name(local, remote);
         assert!(merged[0].deleted, "tombstone should win on timestamp tie");
     }
 
     #[test]
     fn test_merge_case_insensitive_key() {
-        let local = vec![FolderMeta {
-            name: "work".into(),
-            color: None,
-            updated_at: 100,
-            deleted: false,
-        }];
-        let remote = vec![FolderMeta {
-            name: "Work".into(),
-            color: Some("#FF0000".into()),
-            updated_at: 200,
-            deleted: false,
-        }];
+        let local = vec![fm("work", None, 100, false)];
+        let remote = vec![fm("Work", Some("#FF0000"), 200, false)];
         let merged = merge_by_name(local, remote);
         assert_eq!(merged.len(), 1, "case-insensitive dedup");
     }
 
     #[test]
     fn test_merge_new_remote_folder_appended() {
-        let local = vec![FolderMeta {
-            name: "Work".into(),
-            color: None,
-            updated_at: 100,
-            deleted: false,
-        }];
-        let remote = vec![
-            FolderMeta {
-                name: "Work".into(),
-                color: None,
-                updated_at: 100,
-                deleted: false,
-            },
-            FolderMeta {
-                name: "Home".into(),
-                color: None,
-                updated_at: 150,
-                deleted: false,
-            },
-        ];
+        let local = vec![fm("Work", None, 100, false)];
+        let remote = vec![fm("Work", None, 100, false), fm("Home", None, 150, false)];
         let merged = merge_by_name(local, remote);
         assert_eq!(merged.len(), 2);
     }

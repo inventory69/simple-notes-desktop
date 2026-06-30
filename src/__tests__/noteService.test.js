@@ -131,14 +131,13 @@ describe('NoteService', () => {
 
       await noteService.deleteNote('1');
 
-      // Now passes (id, folderName) — note has no folderName so null
-      expect(tauri.deleteNote).toHaveBeenCalledWith('1', null);
+      expect(tauri.deleteNote).toHaveBeenCalledWith('1');
       expect(noteService.notes.length).toBe(1);
       expect(noteService.notes[0].id).toBe('2');
       expect(noteService.currentNote).toBeNull();
     });
 
-    it('should pass folderName from cached note to tauri.deleteNote', async () => {
+    it('should delete note regardless of folderName', async () => {
       noteService.notes = [
         { id: '1', title: 'Note 1', folderName: 'Work' },
         { id: '2', title: 'Note 2' },
@@ -148,7 +147,7 @@ describe('NoteService', () => {
 
       await noteService.deleteNote('1');
 
-      expect(tauri.deleteNote).toHaveBeenCalledWith('1', 'Work');
+      expect(tauri.deleteNote).toHaveBeenCalledWith('1');
     });
 
     it('should not clear currentNote if different note deleted', async () => {
@@ -257,7 +256,7 @@ describe('NoteService', () => {
       noteService.folders = [];
     });
 
-    it('calls tauri.moveNotes with currentFolder as source', async () => {
+    it('calls tauri.moveNotes with target folder', async () => {
       noteService.currentFolder = 'Work';
       tauri.moveNotes.mockResolvedValue();
       tauri.listNotes.mockResolvedValue([]);
@@ -265,18 +264,18 @@ describe('NoteService', () => {
 
       await noteService.moveNotes(['id-1', 'id-2'], 'Home');
 
-      expect(tauri.moveNotes).toHaveBeenCalledWith(['id-1', 'id-2'], 'Work', 'Home');
+      expect(tauri.moveNotes).toHaveBeenCalledWith(['id-1', 'id-2'], 'Home');
     });
 
-    it('calls tauri.moveNotes with null source when at root', async () => {
-      noteService.currentFolder = null;
+    it('calls tauri.moveNotes with null target to move to root', async () => {
+      noteService.currentFolder = 'Work';
       tauri.moveNotes.mockResolvedValue();
       tauri.listNotes.mockResolvedValue([]);
       tauri.listFolders.mockResolvedValue([]);
 
       await noteService.moveNotes(['id-1'], null);
 
-      expect(tauri.moveNotes).toHaveBeenCalledWith(['id-1'], null, null);
+      expect(tauri.moveNotes).toHaveBeenCalledWith(['id-1'], null);
     });
   });
 

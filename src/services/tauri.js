@@ -22,11 +22,10 @@ export async function listNotes() {
 /**
  * Get a specific note by ID
  * @param {string} id - Note ID
- * @param {string|null} folderName - Folder name (null = root)
  * @returns {Promise<Object>} Note object
  */
-export async function getNote(id, folderName = null) {
-  return await invoke('get_note', { id, folderName });
+export async function getNote(id) {
+  return await invoke('get_note', { id });
 }
 
 /**
@@ -49,12 +48,11 @@ export async function createNote(title, noteType) {
 }
 
 /**
- * Delete a note
+ * Delete a note (soft-delete → trash)
  * @param {string} id - Note ID to delete
- * @param {string|null} folderName - Folder name (null = root)
  */
-export async function deleteNote(id, folderName = null) {
-  return await invoke('delete_note', { id, folderName });
+export async function deleteNote(id) {
+  return await invoke('delete_note', { id });
 }
 
 /**
@@ -132,20 +130,18 @@ export async function updateTraySetting(enabled) {
  * Pin or unpin multiple notes
  * @param {string[]} ids - Array of note IDs
  * @param {boolean} pinned - true = pin, false = unpin
- * @param {string|null} folderName - Current folder context (null = root)
  */
-export async function pinNotes(ids, pinned, folderName = null) {
-  return await invoke('pin_notes', { ids, pinned, folderName });
+export async function pinNotes(ids, pinned) {
+  return await invoke('pin_notes', { ids, pinned });
 }
 
 /**
  * Set or remove the background color of multiple notes
  * @param {string[]} ids - Array of note IDs
  * @param {string|null} color - Hex color string (e.g. "#F28B82") or null to remove
- * @param {string|null} folderName - Current folder context (null = root)
  */
-export async function colorNotes(ids, color, folderName = null) {
-  return await invoke('color_notes', { ids, color: color ?? null, folderName });
+export async function colorNotes(ids, color) {
+  return await invoke('color_notes', { ids, color: color ?? null });
 }
 
 /**
@@ -211,13 +207,11 @@ export async function setFolderColor(name, color) {
 /**
  * Move notes to a different folder
  * @param {string[]} ids - Note IDs to move
- * @param {string|null} sourceFolder - Current folder (null = root)
  * @param {string|null} targetFolder - Target folder (null = root)
  */
-export async function moveNotes(ids, sourceFolder, targetFolder) {
+export async function moveNotes(ids, targetFolder) {
   return await invoke('move_notes', {
     ids,
-    sourceFolder: sourceFolder ?? null,
     targetFolder: targetFolder ?? null,
   });
 }
@@ -250,16 +244,16 @@ export async function installUpdate() {
   return await invoke('install_update');
 }
 
-export async function trashNote(id, folderName = null) {
-  return await invoke('trash_note', { id, folderName });
+export async function trashNote(id) {
+  return await invoke('trash_note', { id });
 }
 
-export async function restoreNote(id, folderName = null) {
-  return await invoke('restore_note', { id, folderName });
+export async function restoreNote(id) {
+  return await invoke('restore_note', { id });
 }
 
-export async function deleteNotePermanent(id, folderName = null) {
-  return await invoke('delete_note_permanent', { id, folderName });
+export async function deleteNotePermanent(id) {
+  return await invoke('delete_note_permanent', { id });
 }
 
 export async function listTrash() {
@@ -282,9 +276,20 @@ export async function sync() {
  * Resolve a sync conflict for a note.
  * @param {string} id - Note ID
  * @param {'keep_mine'|'use_server'} resolution - Which version to keep
- * @param {string|null} folderName - Folder context (needed for "use_server")
  * @returns {Promise<void>}
  */
-export async function resolveConflict(id, resolution, folderName = null) {
-  return await invoke('resolve_conflict', { id, resolution, folderName });
+export async function resolveConflict(id, resolution) {
+  return await invoke('resolve_conflict', { id, resolution });
+}
+
+export async function disconnect() {
+  return await invoke('disconnect');
+}
+
+export async function testConnection(url, username, password, syncFolder = null) {
+  return await invoke('test_connection', { url, username, password, syncFolder });
+}
+
+export async function isConnected() {
+  return await invoke('is_connected');
 }

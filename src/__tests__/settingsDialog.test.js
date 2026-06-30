@@ -1,9 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { dialogService } from '../services/DialogService.js';
 import * as tauri from '../services/tauri.js';
 
 vi.mock('../services/tauri.js');
 vi.mock('@tauri-apps/plugin-opener', () => ({
   openUrl: vi.fn(),
+}));
+vi.mock('../services/DialogService.js', () => ({
+  dialogService: {
+    error: vi.fn().mockResolvedValue(undefined),
+    info: vi.fn().mockResolvedValue(undefined),
+    alert: vi.fn().mockResolvedValue(undefined),
+    success: vi.fn().mockResolvedValue(undefined),
+  },
 }));
 
 // Minimal DOM setup for SettingsDialog
@@ -11,30 +20,52 @@ function setupDOM() {
   document.body.innerHTML = `
     <div id="settings-dialog" class="dialog hidden">
       <div class="dialog-content">
+        <button id="settings-back-btn" class="hidden"></button>
         <div id="theme-grid"></div>
-        <select id="default-open-mode-select">
-          <option value="edit">Edit mode</option>
-          <option value="preview">Preview</option>
-        </select>
-        <input type="checkbox" id="autosave-checkbox" />
-        <input type="checkbox" id="tray-checkbox" />
-        <input type="checkbox" id="autostart-checkbox" />
-        <input type="text" id="sync-folder-input" placeholder="notes" maxlength="50" />
-        <input type="text" id="device-id" readonly />
+        <div id="settings-home">
+          <button class="settings-nav-card" data-section="appearance" type="button">Appearance</button>
+          <button class="settings-nav-card" data-section="connection" type="button">Connection</button>
+          <button class="settings-nav-card" data-section="system" type="button">System</button>
+          <button id="updates-card" class="settings-nav-card hidden" data-section="updates" type="button">Updates</button>
+          <button class="settings-nav-card" data-section="about" type="button">About</button>
+        </div>
+        <div class="settings-section hidden" data-section="appearance">
+          <select id="default-open-mode-select">
+            <option value="edit">Edit mode</option>
+            <option value="preview">Preview</option>
+          </select>
+          <input type="checkbox" id="autosave-checkbox" />
+        </div>
+        <div class="settings-section hidden" data-section="connection">
+          <input type="checkbox" id="offline-mode-checkbox" />
+          <input type="text" id="settings-server-url" />
+          <input type="text" id="settings-username" />
+          <input type="password" id="settings-password" />
+          <button id="test-connection-btn" class="btn-secondary" type="button">Test connection</button>
+          <span id="connection-status"></span>
+          <input type="text" id="sync-folder-input" placeholder="notes" maxlength="50" />
+        </div>
+        <div class="settings-section hidden" data-section="system">
+          <input type="checkbox" id="tray-checkbox" />
+          <input type="checkbox" id="autostart-checkbox" />
+          <input type="text" id="device-id" readonly />
+        </div>
+        <div id="updates-section" class="settings-section hidden" data-section="updates">
+          <input type="checkbox" id="update-notifications-checkbox" />
+          <button id="check-updates-btn">Check for Updates</button>
+          <span id="update-status" class="hidden"></span>
+          <button id="install-update-btn" class="hidden">Install Update</button>
+        </div>
+        <div class="settings-section hidden" data-section="about">
+          <span id="app-version">Loading...</span>
+          <a href="#" id="github-link">GitHub</a>
+        </div>
         <div class="chip-selector" id="font-size-chips">
           <button class="chip" data-value="small" type="button"><span class="chip-preview">Aa</span><span>Small</span></button>
           <button class="chip" data-value="system" type="button"><span class="chip-preview">Aa</span><span>System</span></button>
           <button class="chip" data-value="normal" type="button"><span class="chip-preview">Aa</span><span>Normal</span></button>
           <button class="chip" data-value="large" type="button"><span class="chip-preview">Aa</span><span>Large</span></button>
           <button class="chip" data-value="xlarge" type="button"><span class="chip-preview">Aa</span><span>XLarge</span></button>
-        </div>
-        <span id="app-version">Loading...</span>
-        <a href="#" id="github-link">GitHub</a>
-        <div id="updates-section" class="hidden">
-          <input type="checkbox" id="update-notifications-checkbox" />
-          <button id="check-updates-btn">Check for Updates</button>
-          <span id="update-status" class="hidden"></span>
-          <button id="install-update-btn" class="hidden">Install Update</button>
         </div>
         <button id="save-settings-btn">Save</button>
         <button id="cancel-settings-btn">Cancel</button>
@@ -61,10 +92,16 @@ describe('SettingsDialog', () => {
       update_notifications: true,
       default_open_mode: 'edit',
       font_size: 'system',
+      offline_mode: true,
     });
     tauri.getDeviceId.mockResolvedValue('tauri-abc123');
+    tauri.getCredentials.mockResolvedValue(null);
     tauri.saveSettings.mockResolvedValue();
+    tauri.saveCredentials.mockResolvedValue();
     tauri.updateTraySetting.mockResolvedValue();
+    tauri.disconnect.mockResolvedValue();
+    tauri.connect.mockResolvedValue(true);
+    tauri.testConnection.mockResolvedValue(true);
     tauri.getPlatform.mockResolvedValue('linux');
     tauri.checkForUpdates.mockResolvedValue(null);
     tauri.installUpdate.mockResolvedValue();
@@ -168,7 +205,78 @@ describe('SettingsDialog', () => {
     });
   });
 
+  describe('_applyOfflineState()', () => {
+    it('should disable server inputs when offline', async () => {
+      const dialog = new SettingsDialog();
+      await dialog.show(); // offline_mode: true from default mock
+      expect(dialog.serverUrlInput.disabled).toBe(true);
+      expect(dialog.serverUsernameInput.disabled).toBe(true);
+      expect(dialog.serverPasswordInput.disabled).toBe(true);
+    });
+
+    it('should set status label to Offline when offline', async () => {
+      const dialog = new SettingsDialog();
+      await dialog.show(); // offline_mode: true
+      expect(dialog.connectionStatus.textContent).toBe('Status: Offline');
+    });
+  });
+
+  describe('_testConnection()', () => {
+    it('should show error when server fields are empty', async () => {
+      const dialog = new SettingsDialog();
+      await dialog._testConnection();
+      expect(dialogService.error).toHaveBeenCalled();
+      expect(tauri.connect).not.toHaveBeenCalled();
+    });
+
+    it('should test (not connect) and show info on success, without side effects', async () => {
+      const dialog = new SettingsDialog();
+      await dialog.show(); // offline_mode: true
+      dialog.serverUrlInput.value = 'http://test.local';
+      dialog.serverUsernameInput.value = 'admin';
+      dialog.serverPasswordInput.value = 'pw';
+      await dialog._testConnection();
+      expect(tauri.testConnection).toHaveBeenCalledWith('http://test.local', 'admin', 'pw', 'notes');
+      expect(dialogService.info).toHaveBeenCalled();
+      expect(dialog.connectionStatus.textContent).toBe('Status: Reachable');
+      // test_connection has no side effects: never stores a client, never disconnects
+      expect(tauri.connect).not.toHaveBeenCalled();
+      expect(tauri.disconnect).not.toHaveBeenCalled();
+    });
+
+    it('should show error dialog when test returns false', async () => {
+      tauri.testConnection.mockResolvedValue(false);
+      const dialog = new SettingsDialog();
+      dialog.serverUrlInput.value = 'http://test.local';
+      dialog.serverUsernameInput.value = 'admin';
+      dialog.serverPasswordInput.value = 'pw';
+      await dialog._testConnection();
+      expect(dialogService.error).toHaveBeenCalled();
+    });
+  });
+
   describe('handleSave()', () => {
+    it('should save credentials whenever server fields are filled, even if offline', async () => {
+      const dialog = new SettingsDialog();
+      await dialog.show(); // offline_mode: true
+      dialog.serverUrlInput.value = 'http://test.local';
+      dialog.serverUsernameInput.value = 'admin';
+      dialog.serverPasswordInput.value = 'pw';
+      await dialog.handleSave();
+      expect(tauri.saveCredentials).toHaveBeenCalledWith({
+        url: 'http://test.local',
+        username: 'admin',
+        password: 'pw',
+      });
+    });
+
+    it('should NOT save credentials when server fields are empty', async () => {
+      const dialog = new SettingsDialog();
+      await dialog.show();
+      await dialog.handleSave();
+      expect(tauri.saveCredentials).not.toHaveBeenCalled();
+    });
+
     it('should save all settings including tray and autostart', async () => {
       const dialog = new SettingsDialog();
       await dialog.show();
@@ -188,6 +296,7 @@ describe('SettingsDialog', () => {
           minimize_to_tray: true,
           autostart: true,
           sync_folder: 'notes',
+          offline_mode: true,
         }),
       );
     });
@@ -216,6 +325,7 @@ describe('SettingsDialog', () => {
           autosave: true,
           minimize_to_tray: false,
           autostart: false,
+          offline_mode: true,
         }),
       );
     });
@@ -226,6 +336,34 @@ describe('SettingsDialog', () => {
       await dialog.handleSave();
 
       expect(dialog.dialog.classList.contains('hidden')).toBe(true);
+    });
+
+    it('should call disconnect when toggling from online to offline', async () => {
+      tauri.getSettings.mockResolvedValue({
+        theme: 'system',
+        autosave: true,
+        minimize_to_tray: false,
+        autostart: false,
+        sync_folder: 'notes',
+        update_notifications: true,
+        default_open_mode: 'edit',
+        font_size: 'system',
+        offline_mode: false, // starts online
+      });
+      const dialog = new SettingsDialog();
+      await dialog.show();
+      dialog.offlineCheckbox.checked = true; // user toggles to offline
+      await dialog.handleSave();
+
+      expect(tauri.disconnect).toHaveBeenCalled();
+    });
+
+    it('should include offline_mode in saved settings', async () => {
+      const dialog = new SettingsDialog();
+      await dialog.show();
+      await dialog.handleSave();
+
+      expect(tauri.saveSettings).toHaveBeenCalledWith(expect.objectContaining({ offline_mode: true }));
     });
   });
 

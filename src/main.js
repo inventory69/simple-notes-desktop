@@ -1,5 +1,5 @@
+import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
-import { ConnectionDialog } from './components/ConnectionDialog.js';
 import { NoteEditor } from './components/NoteEditor.js';
 import { NotesList } from './components/NotesList.js';
 import { SettingsDialog } from './components/SettingsDialog.js';
@@ -13,7 +13,6 @@ import * as tauri from './services/tauri.js';
  */
 class App {
   constructor() {
-    this.connectionDialog = new ConnectionDialog();
     this.notesList = new NotesList();
     this.noteEditor = new NoteEditor();
     this.settingsDialog = new SettingsDialog();
@@ -25,7 +24,6 @@ class App {
     this.syncBtn = document.getElementById('sync-btn');
     this.selectModeBtn = document.getElementById('select-mode-btn');
     this.settingsBtn = document.getElementById('settings-btn');
-    this.disconnectBtn = document.getElementById('disconnect-btn');
 
     // F6: Batch Actions
     this.batchActionsBar = document.getElementById('batch-actions');
@@ -61,6 +59,26 @@ class App {
 
     // Check for saved credentials and auto-connect
     await this.checkAutoConnect();
+
+    // Hintergrund-Sync-Events: Notizen aus local_store neu laden (günstig, kein Netzwerk)
+    listen('notes-synced', async () => {
+      noteService.firstSyncPending = false;
+      const openNote = this.noteEditor.currentNote;
+      await Promise.all([noteService.loadNotes(), noteService.loadFolders()]);
+      if (!openNote) return;
+      const updated = noteService.notes.find((n) => n.id === openNote.id);
+      if (!updated) return;
+      // Backend CONFLICT ist das autoritative Signal für „anderes Gerät hat editiert".
+      // updatedAt-Vergleich allein liefert False-Positives: eigener Autosave bumpt den Timestamp.
+      if (updated.syncStatus === 'CONFLICT') {
+        await this.noteEditor.handleServerConflict();
+      } else if (!this.noteEditor.isDirty() && updated.updatedAt > openNote.updatedAt) {
+        // Konfliktfreies Update von einem anderen Gerät, keine lokalen ungespeicherten Edits.
+        // noteService.notes enthält NoteMetadata (kein deviceId) — volles Note-Objekt holen.
+        const fullNote = await noteService.getNote(updated.id);
+        this.noteEditor.loadNote(fullNote);
+      }
+    });
 
     // Startup-Update-Check fire-and-forget (Windows-only, wenn update_notifications aktiv)
     this._startupUpdateCheck();
@@ -183,9 +201,6 @@ class App {
   }
 
   setupEventListeners() {
-    // Connection dialog callback
-    this.connectionDialog.onConnect(() => this.handleConnected());
-
     // Notes list selection
     this.notesList.onSelect((note) => this.noteEditor.loadNote(note));
 
@@ -210,8 +225,14 @@ class App {
       this.noteEditor.setDefaultOpenMode(settings.default_open_mode);
     });
 
-    // Settings reconnect callback (sync folder changed)
+    // Settings reconnect callback (offline toggle or sync folder changed)
     this.settingsDialog.onReconnect(async () => {
+      try {
+        const s = await tauri.getSettings();
+        this._setOnline(s.offline_mode === false);
+      } catch (_e) {
+        /* keep current state */
+      }
       await this.handleConnected();
     });
 
@@ -227,7 +248,6 @@ class App {
       }
     });
     this.settingsBtn.addEventListener('click', () => this.settingsDialog.show());
-    this.disconnectBtn.addEventListener('click', () => this.handleDisconnect());
 
     // F6: Batch action buttons
     this.batchDeleteBtn?.addEventListener('click', () => {
@@ -316,31 +336,44 @@ class App {
     });
   }
 
-  async checkAutoConnect() {
-    try {
-      const credentials = await tauri.getCredentials();
-      if (credentials) {
-        // Try to connect with sync folder setting
-        let syncFolder = null;
-        try {
-          const settings = await tauri.getSettings();
-          syncFolder = settings.sync_folder || null;
-        } catch (_e) {
-          /* use default */
-        }
-        const success = await tauri.connect(credentials.url, credentials.username, credentials.password, syncFolder);
+  _setOnline(online) {
+    this.online = online;
+    document.documentElement.classList.toggle('is-offline', !online);
+    if (this.syncBtn) this.syncBtn.style.display = online ? '' : 'none';
+  }
 
-        if (success) {
-          await this.handleConnected();
-          return;
-        }
-      }
-    } catch (error) {
-      console.log('Auto-connect failed:', error);
+  async checkAutoConnect() {
+    let settings = null;
+    try {
+      settings = await tauri.getSettings();
+    } catch (_e) {
+      /* defaults below */
     }
 
-    // Show connection dialog if auto-connect failed
-    this.connectionDialog.show();
+    // Sync button visibility tracks the offline_mode SETTING, not whether the
+    // connection currently succeeds — otherwise a momentarily-unreachable server
+    // at startup hides the button even though the user is in online mode.
+    const online = !!settings && settings.offline_mode === false;
+    this._setOnline(online);
+
+    // Online mode: best-effort connect with saved credentials. A failure just
+    // means sync isn't live yet; the button stays visible and sync can retry.
+    if (online) {
+      try {
+        const credentials = await tauri.getCredentials();
+        if (credentials) {
+          await tauri.connect(
+            credentials.url,
+            credentials.username,
+            credentials.password,
+            settings.sync_folder || null,
+          );
+        }
+      } catch (error) {
+        console.log('Auto-connect failed:', error);
+      }
+    }
+    await this.handleConnected();
   }
 
   async handleConnected() {
@@ -353,9 +386,12 @@ class App {
     this.mainContainer.classList.remove('hidden');
 
     // Load notes and folders in parallel
+    if (this.online) noteService.firstSyncPending = true;
     try {
       await Promise.all([noteService.loadNotes(), noteService.loadFolders()]);
+      if (noteService.notes.length > 0) noteService.firstSyncPending = false;
     } catch (error) {
+      noteService.firstSyncPending = false;
       console.error('Failed to load notes:', error);
       await dialogService.error({
         title: 'Load Failed',
@@ -441,72 +477,64 @@ class App {
     try {
       this.syncBtn.disabled = true;
       this.syncBtn.classList.add('spinning');
+      this._flashSync(null);
 
-      // Capture the open note's identity and timestamp BEFORE the refresh
-      const openNote = this.noteEditor.currentNote;
+      // Online mode but the client was dropped (e.g. server down at startup):
+      // reconnect first, so a success flash actually means the server was reached.
+      if (this.online) await this._ensureConnected();
 
-      await Promise.all([noteService.loadNotes(), noteService.loadFolders()]);
-
+      await noteService.sync();
       this.syncBtn.disabled = false;
       this.syncBtn.classList.remove('spinning');
 
-      // If a note was open, check whether the server returned a newer version
-      if (openNote) {
-        const serverNote = noteService.notes.find((n) => n.id === openNote.id);
-        if (serverNote && serverNote.updatedAt > openNote.updatedAt) {
-          await this.noteEditor.notifyServerRefresh(serverNote);
-        }
-      }
+      // Die offene Notiz wird zentral vom globalen 'notes-synced'-Listener aktualisiert
+      // (Backend emittiert das Event nach jedem Sync). Hier nichts Eigenes nötig.
 
-      await dialogService.success({
-        title: 'Sync Complete',
-        message: 'Notes synchronized successfully',
-      });
+      this._flashSync(true, 'Notes synchronized');
     } catch (error) {
       console.error('Sync failed:', error);
-      await dialogService.error({
-        title: 'Sync Failed',
-        message: error.message || 'Could not synchronize notes',
-      });
       this.syncBtn.disabled = false;
       this.syncBtn.classList.remove('spinning');
+      this._flashSync(false, error.message || 'Could not synchronize notes');
     }
   }
 
-  async handleDisconnect() {
-    const confirmed = await dialogService.confirm({
-      title: 'Disconnect',
-      message: 'Do you really want to disconnect?',
-      confirmText: 'Disconnect',
-      cancelText: 'Cancel',
-      type: 'warning',
-    });
+  // Ensure a live WebDAV client before syncing (online mode). Throws on failure so
+  // handleSync surfaces it via the error badge instead of a silent local-only no-op.
+  async _ensureConnected() {
+    if (await tauri.isConnected()) return;
+    const creds = await tauri.getCredentials();
+    if (!creds) throw new Error('No server credentials saved');
+    let syncFolder = null;
+    try {
+      const s = await tauri.getSettings();
+      syncFolder = s.sync_folder || null;
+    } catch (_e) {
+      /* use default */
+    }
+    const ok = await tauri.connect(creds.url, creds.username, creds.password, syncFolder);
+    if (!ok) throw new Error('Could not reach server');
+  }
 
-    if (!confirmed) {
+  // Inline sync feedback on the button (badge + tooltip) instead of a modal dialog.
+  _flashSync(ok, message) {
+    clearTimeout(this._syncFlashTimer);
+    this.syncBtn.classList.remove('sync-ok', 'sync-err');
+    if (ok === null) {
+      this.syncBtn.title = 'Sync';
       return;
     }
-
-    try {
-      await tauri.clearCredentials();
-
-      // Clear UI
-      this.mainContainer.classList.add('hidden');
-      this.noteEditor.clear();
-      noteService.notes = [];
-      noteService.folders = [];
-      noteService.currentNote = null;
-      noteService.currentFolder = null;
-      noteService.notify();
-
-      // Show connection dialog
-      this.connectionDialog.show();
-    } catch (error) {
-      console.error('Failed to disconnect:', error);
-      await dialogService.error({
-        title: 'Disconnect Failed',
-        message: 'Error disconnecting from server',
-      });
-    }
+    // Restart the badge animation if the class was just removed.
+    void this.syncBtn.offsetWidth;
+    this.syncBtn.classList.add(ok ? 'sync-ok' : 'sync-err');
+    this.syncBtn.title = message;
+    this._syncFlashTimer = setTimeout(
+      () => {
+        this.syncBtn.classList.remove('sync-ok', 'sync-err');
+        this.syncBtn.title = 'Sync';
+      },
+      ok ? 2500 : 6000,
+    );
   }
 }
 

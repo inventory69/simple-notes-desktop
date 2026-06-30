@@ -317,6 +317,7 @@ impl WebDavClient {
     }
 
     /// Gibt alle Ordner-Namen zurück, die als physische Verzeichnisse auf dem Server existieren.
+    #[allow(dead_code)]
     pub async fn discover_folders(&self) -> Vec<String> {
         let root_url = format!("{}/{}/", self.base_url, self.sync_folder);
         match self.propfind_text(&root_url, "1").await {
@@ -461,6 +462,7 @@ impl WebDavClient {
     }
 
     /// Löscht eine Notiz (JSON + Markdown) aus dem in `note.folder_name` angegebenen Ordner.
+    #[allow(dead_code)]
     pub async fn delete_note(&self, note: &Note) -> Result<()> {
         let folder = note.folder_name.as_deref();
 
@@ -486,6 +488,7 @@ impl WebDavClient {
 
     /// Verschiebt eine Notiz von `from_folder` nach `to_folder` (Copy-then-Delete).
     /// Toleriert 404 beim Löschen des alten Pfades.
+    #[allow(dead_code)]
     pub async fn move_note_file(
         &self,
         id: &str,
@@ -652,6 +655,7 @@ impl WebDavClient {
 
     /// Fügt einen Lösch-Eintrag ins gemeinsame Ledger ein (read-modify-write).
     /// Best-effort: Fehler werden geloggt, aber nicht propagiert.
+    #[allow(dead_code)]
     pub async fn append_deletion(&self, id: &str, device_id: &str, now: i64, retention_ms: i64) {
         let id = id.to_string();
         let device_id = device_id.to_string();
@@ -696,6 +700,7 @@ impl WebDavClient {
     /// Entfernt Lösch-Einträge per ID aus dem geteilten Ledger (read-modify-write).
     /// Wird beim Wieder-Einschluss eines local-only-Ordners aufgerufen, damit re-uploadete
     /// Notizen nicht als gelöscht markiert bleiben. Best-effort: Fehler werden geloggt.
+    #[allow(dead_code)]
     pub async fn remove_deletions(&self, ids: &[String]) {
         if ids.is_empty() {
             return;

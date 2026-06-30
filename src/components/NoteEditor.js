@@ -1070,23 +1070,26 @@ export class NoteEditor {
    * is newer than what the editor holds.  Reloads silently if there are no unsaved
    * changes; shows a conflict dialog otherwise.
    */
-  async notifyServerRefresh(serverNote) {
-    if (this._isDirty) {
-      const confirmed = await dialogService.confirm({
-        title: 'Note Updated on Server',
-        message: 'This note was changed on another device. Load the server version and discard your unsaved changes?',
-        confirmText: 'Load Server Version',
-        cancelText: 'Keep Mine',
-        type: 'warning',
-      });
-      if (!confirmed) return;
-    }
-    // Cancel any pending autosave so loadNote() does not flush stale content
+  /** Echter Server-Konflikt (Backend hat SyncStatus=CONFLICT gesetzt). */
+  async handleServerConflict() {
+    if (!this.currentNote) return;
+    const id = this.currentNote.id;
+    const confirmed = await dialogService.confirm({
+      title: 'Note Updated on Server',
+      message: 'This note was changed on another device. Load the server version and discard your local changes?',
+      confirmText: 'Load Server Version',
+      cancelText: 'Keep Mine',
+      type: 'warning',
+    });
     if (this.saveTimeout) {
       clearTimeout(this.saveTimeout);
       this.saveTimeout = null;
     }
-    this.loadNote(serverNote);
+    if (!confirmed && this._isDirty) await this.save();
+    await noteService.resolveConflict(id, confirmed ? 'use_server' : 'keep_mine');
+    // notes enthält NoteMetadata (kein deviceId) — volles Note-Objekt holen.
+    const resolved = await noteService.getNote(id);
+    if (resolved) this.loadNote(resolved);
   }
 
   /** Fire-and-forget save for a specific note snapshot (used to flush pending saves). */
@@ -1209,6 +1212,10 @@ export class NoteEditor {
 
   updateSyncStatus(text) {
     this.syncStatus.textContent = text;
+  }
+
+  isDirty() {
+    return this._isDirty;
   }
 
   setAutosave(enabled) {

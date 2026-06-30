@@ -321,7 +321,8 @@ export class NotesList {
     }
 
     if (pinnedNotes.length === 0 && folders.length === 0 && unpinnedNotes.length === 0) {
-      html.push('<div class="empty-placeholder">No notes found</div>');
+      const msg = noteService.firstSyncPending ? 'Syncing…' : 'No notes found';
+      html.push(`<div class="empty-placeholder">${msg}</div>`);
     }
   }
 

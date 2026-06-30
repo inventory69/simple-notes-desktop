@@ -13,6 +13,7 @@ class NoteService {
     this._saveQueues = new Map(); // note id → last in-flight save Promise
     this.trashedNotes = [];
     this.trashMode = false;
+    this.firstSyncPending = false;
   }
 
   /**
@@ -100,10 +101,7 @@ class NoteService {
    */
   async getNote(id) {
     try {
-      // Look up cached note's folderName so we query the right server path
-      const cached = this.notes.find((n) => n.id === id);
-      const folderName = cached?.folderName ?? null;
-      const note = await tauri.getNote(id, folderName);
+      const note = await tauri.getNote(id);
       this.currentNote = note;
       this.notify();
       return note;
@@ -197,8 +195,7 @@ class NoteService {
    */
   async deleteNote(id) {
     try {
-      const cached = this.notes.find((n) => n.id === id);
-      await tauri.deleteNote(id, cached?.folderName ?? null);
+      await tauri.deleteNote(id);
 
       this.notes = this.notes.filter((n) => n.id !== id);
 
@@ -223,8 +220,7 @@ class NoteService {
 
     for (const id of ids) {
       try {
-        const cached = this.notes.find((n) => n.id === id);
-        await tauri.deleteNote(id, cached?.folderName ?? null);
+        await tauri.deleteNote(id);
         results.success.push(id);
       } catch (error) {
         console.error(`Failed to delete note ${id}:`, error);
@@ -248,7 +244,7 @@ class NoteService {
    * @param {boolean} pinned - true = pin, false = unpin
    */
   async pinNotes(ids, pinned) {
-    await tauri.pinNotes(ids, pinned, this.currentFolder);
+    await tauri.pinNotes(ids, pinned);
     await this.loadNotes();
     this.notify();
   }
@@ -259,7 +255,7 @@ class NoteService {
    * @param {string|null} color - Hex color string or null to remove
    */
   async colorNotes(ids, color) {
-    await tauri.colorNotes(ids, color, this.currentFolder);
+    await tauri.colorNotes(ids, color);
     await this.loadNotes();
     this.notify();
   }
@@ -304,8 +300,7 @@ class NoteService {
    * @param {'keep_mine'|'use_server'} resolution
    */
   async resolveConflict(id, resolution) {
-    const cached = this.notes.find((n) => n.id === id);
-    await tauri.resolveConflict(id, resolution, cached?.folderName ?? null);
+    await tauri.resolveConflict(id, resolution);
     await this.loadNotes();
     this.notify();
   }
@@ -356,7 +351,7 @@ class NoteService {
    * @param {string|null} targetFolder - Target folder (null = root)
    */
   async moveNotes(ids, targetFolder) {
-    await tauri.moveNotes(ids, this.currentFolder, targetFolder);
+    await tauri.moveNotes(ids, targetFolder);
     await this.loadNotes();
     await this.loadFolders();
     this.notify();
@@ -380,13 +375,13 @@ class NoteService {
     this.notify();
   }
 
-  async restoreNote(id, folderName) {
-    await tauri.restoreNote(id, folderName ?? null);
+  async restoreNote(id) {
+    await tauri.restoreNote(id);
     await Promise.all([this.loadTrash(), this.loadNotes()]);
   }
 
-  async deleteNotePermanent(id, folderName) {
-    await tauri.deleteNotePermanent(id, folderName ?? null);
+  async deleteNotePermanent(id) {
+    await tauri.deleteNotePermanent(id);
     await this.loadTrash();
   }
 

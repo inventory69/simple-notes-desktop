@@ -16,6 +16,9 @@ const KEY_TOMBSTONES: &str = "pending_folder_tombstones";
 pub struct PendingDeletion {
     pub id: String,
     pub folder: Option<String>,
+    /// true → nur alte Datei löschen, NICHT ins Lösch-Ledger schreiben (Move-Cleanup).
+    #[serde(default)]
+    pub is_move: bool,
 }
 
 // ── Interne Lade-/Speicherfunktionen ────────────────────────────────────────
@@ -70,6 +73,25 @@ pub fn enqueue_deletions(app: &AppHandle, items: &[(String, Option<String>)]) {
             existing.push(PendingDeletion {
                 id: id.clone(),
                 folder: folder.clone(),
+                is_move: false,
+            });
+        }
+    }
+    save_deletions(app, &existing);
+}
+
+/// Hängt Move-Cleanup-Einträge in die Queue ein (löscht alte Server-Datei, kein Ledger-Eintrag).
+pub fn enqueue_move_deletions(app: &AppHandle, items: &[(String, Option<String>)]) {
+    if items.is_empty() {
+        return;
+    }
+    let mut existing = load_deletions(app);
+    for (id, folder) in items {
+        if !existing.iter().any(|d| d.id == *id) {
+            existing.push(PendingDeletion {
+                id: id.clone(),
+                folder: folder.clone(),
+                is_move: true,
             });
         }
     }
@@ -152,14 +174,21 @@ pub async fn drain_sync_queue(
     let deletions = all_deletions(app);
     if !deletions.is_empty() {
         let now = chrono::Utc::now().timestamp_millis();
-        let mut success_ids: Vec<String> = Vec::new();
+        let mut ledger_ids: Vec<String> = Vec::new(); // echte Löschungen → ins Ledger
+        let mut move_ids: Vec<String> = Vec::new(); // Move-Cleanup → kein Ledger
 
         for d in &deletions {
             match client
                 .delete_note_by_id_folder(&d.id, d.folder.as_deref())
                 .await
             {
-                Ok(()) => success_ids.push(d.id.clone()),
+                Ok(()) => {
+                    if d.is_move {
+                        move_ids.push(d.id.clone());
+                    } else {
+                        ledger_ids.push(d.id.clone());
+                    }
+                }
                 Err(e) => eprintln!(
                     "[drain_sync_queue] delete {} fehlgeschlagen, bleibt in Queue: {}",
                     d.id, e
@@ -167,11 +196,14 @@ pub async fn drain_sync_queue(
             }
         }
 
-        if !success_ids.is_empty() {
+        if !ledger_ids.is_empty() {
             client
-                .append_deletions(&success_ids, device_id, now, retention_ms)
+                .append_deletions(&ledger_ids, device_id, now, retention_ms)
                 .await;
-            remove_deletions(app, &success_ids);
+        }
+        let all_done: Vec<String> = ledger_ids.into_iter().chain(move_ids).collect();
+        if !all_done.is_empty() {
+            remove_deletions(app, &all_done);
         }
     }
 
@@ -193,6 +225,7 @@ pub async fn drain_sync_queue(
                         color: None,
                         updated_at: now,
                         deleted: true,
+                        local_only: false,
                     });
                 }
                 existing
@@ -220,11 +253,13 @@ mod tests {
         let item = PendingDeletion {
             id: "abc-123".to_string(),
             folder: Some("Work".to_string()),
+            is_move: false,
         };
         let json = serde_json::to_string(&item).unwrap();
         let restored: PendingDeletion = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.id, "abc-123");
         assert_eq!(restored.folder.as_deref(), Some("Work"));
+        assert!(!restored.is_move);
     }
 
     #[test]
@@ -232,9 +267,18 @@ mod tests {
         let item = PendingDeletion {
             id: "def-456".to_string(),
             folder: None,
+            is_move: false,
         };
         let json = serde_json::to_string(&item).unwrap();
         let restored: PendingDeletion = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.folder, None);
+    }
+
+    #[test]
+    fn test_pending_deletion_is_move_default() {
+        // Alte JSON-Einträge ohne is_move-Feld müssen als false deserialisiert werden
+        let json = r#"{"id":"x","folder":null}"#;
+        let item: PendingDeletion = serde_json::from_str(json).unwrap();
+        assert!(!item.is_move);
     }
 }
