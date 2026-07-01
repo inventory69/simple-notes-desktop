@@ -293,3 +293,10 @@ export async function testConnection(url, username, password, syncFolder = null)
 export async function isConnected() {
   return await invoke('is_connected');
 }
+
+/**
+ * Show the main window (initially created hidden to avoid a blank-white frame before first paint)
+ */
+export async function showMainWindow() {
+  return await invoke('show_main_window');
+}

@@ -1023,6 +1023,39 @@ body {
   display: none;
 }
 
+/* Splash screen — visible from first paint (no "hidden" class in HTML), before any JS/theme
+   runs. Colored via prefers-color-scheme since data-theme isn't set yet at that point. */
+#splash {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+  transition: opacity 0.15s ease;
+}
+
+@media (prefers-color-scheme: dark) {
+  #splash {
+    background: #1a1a1a;
+  }
+}
+
+#splash.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+#splash .spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid rgba(128, 128, 128, 0.25);
+  border-top-color: #4a9eff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
 /* Main Container */
 #main-container {
   flex: 1;

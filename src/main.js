@@ -18,6 +18,7 @@ class App {
     this.settingsDialog = new SettingsDialog();
     this.updateToast = new UpdateToast();
 
+    this.splash = document.getElementById('splash');
     this.mainContainer = document.getElementById('main-container');
     this.newNoteBtn = document.getElementById('new-note-btn');
     this.newChecklistBtn = document.getElementById('new-checklist-btn');
@@ -41,7 +42,10 @@ class App {
   }
 
   async init() {
-    await this.clampWindowToMonitor();
+    // Nicht awaiten — resized/positioniert nur das Fenster, hat keine Abhängigkeit zu
+    // Theme/Notes-Loading. Awaiten würde den 200ms-Delay darin unnötig vor den Splash-Screen
+    // schieben.
+    this.clampWindowToMonitor();
 
     // Set up event listeners
     this.setupEventListeners();
@@ -393,6 +397,7 @@ class App {
     noteService.setCurrentFolder(null);
 
     // Show main container
+    this.splash?.classList.add('hidden');
     this.mainContainer.classList.remove('hidden');
 
     // Load notes and folders in parallel
@@ -550,5 +555,8 @@ class App {
 
 // Initialize app when DOM is ready
 window.addEventListener('DOMContentLoaded', () => {
+  // Fenster wurde mit visible: false erstellt — jetzt zeigen, wo der Splash schon im DOM ist
+  // (kein weißer Frame vor dem ersten Paint mehr).
+  tauri.showMainWindow();
   new App();
 });

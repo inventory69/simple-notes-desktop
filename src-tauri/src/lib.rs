@@ -874,6 +874,15 @@ async fn resolve_conflict(
 /// State to track minimize-to-tray setting at runtime
 struct TraySettings(Mutex<bool>);
 
+/// Zeigt das (per `visible: false` initial versteckte) Hauptfenster. Vom Frontend aufgerufen,
+/// sobald die Splash-Markup im DOM ist — verhindert einen weißen Frame vor dem ersten Paint.
+#[tauri::command]
+fn show_main_window(app: tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+    }
+}
+
 fn restore_window(window: &tauri::WebviewWindow) {
     #[cfg(target_os = "linux")]
     {
@@ -1074,6 +1083,16 @@ pub fn run() {
                         }
                     }
                 }
+
+                // ponytail: Sicherheitsnetz, falls das Frontend show_main_window nie aufruft
+                // (JS-Fehler o.ä.) — sonst bliebe das Fenster (visible: false) für immer versteckt.
+                let window_for_timeout = window.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    if let Ok(false) = window_for_timeout.is_visible() {
+                        let _ = window_for_timeout.show();
+                    }
+                });
             }
 
             Ok(())
@@ -1128,6 +1147,7 @@ pub fn run() {
             move_notes,
             sync,
             resolve_conflict,
+            show_main_window,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
