@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-01
+
+### Added
+
+- Post-update "what's new" changelog dialog: a teaser popup after an app update (or on first launch) highlights recent changes, with a link to a full changelog view rendering `CHANGELOG.md` as per-version cards ([1d5aa72](https://github.com/inventory69/simple-notes-desktop/commit/1d5aa7287ac48f65cd20b964b4574e26dc1c68c7))
+  - Also reachable anytime via Settings → About → View changelog
+- Collapse toggle on note list section headers (Pinned, Folders, Notes), useful for long pinned or folder lists; collapsed state persists across restarts ([9d5f3f0](https://github.com/inventory69/simple-notes-desktop/commit/9d5f3f09e4e82fd93c0bd2a17f77ff8e459da6dc))
+
+### Fixed
+
+- Folder options menu ("...") now closes on a second click of its own trigger, matching the sort menu, instead of requiring a click elsewhere ([1f777b7](https://github.com/inventory69/simple-notes-desktop/commit/1f777b71755d64b9d518fccb567ad1feeef45aee))
+- Startup now shows a splash loader instead of a white screen while the WebView paints and the theme loads ([f2e2db0](https://github.com/inventory69/simple-notes-desktop/commit/f2e2db093d8e0cdc4f727802b52d7a9f70cbc694))
+- Note list now shows immediately at startup instead of waiting for the background WebDAV connection to finish ([556fbf1](https://github.com/inventory69/simple-notes-desktop/commit/556fbf189bbaddfb572370d666a89903954acdf3))
+
+### Changed
+
+- Removed the divider line above the settings save/cancel buttons ([2225810](https://github.com/inventory69/simple-notes-desktop/commit/22258104f2faa5d6293baefaad85e1bf2f4b8c86))
+
+### Technical
+
+- Guarded intentional `!important` CSS rules with biome-ignore comments so `pnpm lint:fix` can no longer strip them ([675686d](https://github.com/inventory69/simple-notes-desktop/commit/675686d07e71e6d3348de7dbeafd89626178b9d5))
+
 ## [0.9.1] - 2026-06-30
 
 ### Fixed
