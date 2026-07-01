@@ -2265,6 +2265,102 @@ select.dialog-input option {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
 }
 
+/* Changelog Teaser (small popup, reuses .update-toast base) */
+.changelog-teaser {
+  max-width: 340px;
+}
+
+.changelog-teaser-title {
+  color: var(--color-primary);
+  font-size: 0.95rem;
+}
+
+.changelog-teaser-text {
+  white-space: pre-line;
+  color: var(--color-fg);
+  font-size: 0.85rem;
+}
+
+/* Changelog Dialog (full history, per-version cards) */
+#changelog-dialog .dialog-content {
+  max-height: 85vh;
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 0;
+  overflow: hidden;
+}
+
+#changelog-dialog .settings-dialog-header {
+  justify-content: space-between;
+}
+
+#changelog-dialog .dialog-scroll-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding-bottom: 1.5rem;
+}
+
+.changelog-card {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.changelog-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.changelog-version-badge {
+  background: var(--color-selected);
+  color: var(--color-primary);
+  font-weight: 600;
+  font-size: 0.85rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 6px;
+}
+
+.changelog-date {
+  color: var(--color-muted);
+  font-size: 0.8rem;
+}
+
+.changelog-card-body :is(h3, h4) {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-primary);
+  margin: 0.9rem 0 0.4rem;
+  padding-bottom: 0.2rem;
+  border-bottom: 2px solid var(--color-selected);
+}
+
+.changelog-card-body :is(h3, h4):first-child {
+  margin-top: 0;
+}
+
+.changelog-card-body ul {
+  margin: 0.25rem 0 0.5rem 1.25rem;
+}
+
+.changelog-card-body a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.changelog-card-body a:hover {
+  text-decoration: underline;
+}
+
 /* ── Folder UI ──────────────────────────────────────────────────────────────── */
 
 /* Back-Header im Ordner-View */

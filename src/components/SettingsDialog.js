@@ -30,6 +30,7 @@ export class SettingsDialog {
     this.saveBtn = document.getElementById('save-settings-btn');
     this.cancelBtn = document.getElementById('cancel-settings-btn');
     this.appVersionEl = document.getElementById('app-version');
+    this.viewChangelogBtn = document.getElementById('view-changelog-btn');
     this.githubLink = document.getElementById('github-link');
     this.updatesSection = document.getElementById('updates-section');
     this.updateNotificationsCheckbox = document.getElementById('update-notifications-checkbox');
@@ -40,6 +41,7 @@ export class SettingsDialog {
     this.fontSizeChips = document.getElementById('font-size-chips');
     this.onSaveCallback = null;
     this.onReconnectCallback = null;
+    this.onViewChangelogCallback = null;
     this.originalTheme = null;
     this._originalFontSize = null;
     this._currentFontSize = 'system';
@@ -91,6 +93,8 @@ export class SettingsDialog {
         this.syncFolderInput.value = sanitized;
       }
     });
+
+    this.viewChangelogBtn?.addEventListener('click', () => this.onViewChangelogCallback?.());
 
     // GitHub link handler
     this.githubLink.addEventListener('click', async (e) => {
@@ -502,5 +506,9 @@ export class SettingsDialog {
 
   onReconnect(callback) {
     this.onReconnectCallback = callback;
+  }
+
+  onViewChangelog(callback) {
+    this.onViewChangelogCallback = callback;
   }
 }

@@ -1,5 +1,6 @@
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
+import { ChangelogDialog } from './components/ChangelogDialog.js';
 import { NoteEditor } from './components/NoteEditor.js';
 import { NotesList } from './components/NotesList.js';
 import { SettingsDialog } from './components/SettingsDialog.js';
@@ -17,6 +18,7 @@ class App {
     this.noteEditor = new NoteEditor();
     this.settingsDialog = new SettingsDialog();
     this.updateToast = new UpdateToast();
+    this.changelogDialog = new ChangelogDialog();
 
     this.splash = document.getElementById('splash');
     this.mainContainer = document.getElementById('main-container');
@@ -87,6 +89,10 @@ class App {
     // sind unmittelbar, kein Netzwerk. Der eigentliche Server-Connect (Netzwerk-Roundtrip,
     // bis zu 30s Timeout) läuft dahinter im Hintergrund weiter (siehe _backgroundConnect).
     await this.checkAutoConnect();
+
+    // Post-Update "What's new"-Teaser (alle Plattformen, kein Netzwerk) — unabhängig vom
+    // Windows-only Update-Check weiter unten.
+    this.changelogDialog.maybeShowTeaser().catch(() => {});
 
     // Startup-Update-Check fire-and-forget (Windows-only, wenn update_notifications aktiv)
     this._startupUpdateCheck();
@@ -232,6 +238,9 @@ class App {
       this.noteEditor.setAutosave(settings.autosave);
       this.noteEditor.setDefaultOpenMode(settings.default_open_mode);
     });
+
+    // Settings "View changelog" callback
+    this.settingsDialog.onViewChangelog(() => this.changelogDialog.showFull());
 
     // Settings reconnect callback (offline toggle or sync folder changed)
     this.settingsDialog.onReconnect(async () => {
