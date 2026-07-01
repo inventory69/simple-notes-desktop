@@ -26,6 +26,8 @@ export class NotesList {
     // Sortierung: persistiert in localStorage
     this.sortOption = localStorage.getItem('noteListSortOption') || 'UPDATED_AT';
     this.sortDirection = localStorage.getItem('noteListSortDirection') || 'DESC';
+    // Section-Header collapse state: persistiert in localStorage
+    this.collapsedSections = new Set(JSON.parse(localStorage.getItem('noteListCollapsedSections') || '[]'));
     this._sortMenuCloseHandler = null;
     this._folderMenuCloseHandler = null;
     this._renderedFolder = undefined;
@@ -288,6 +290,46 @@ export class NotesList {
     this.container.innerHTML = html.join('');
     this._attachNoteHandlers();
     this._attachFolderHandlers();
+    this._attachSectionHandlers();
+  }
+
+  _isSectionCollapsed(key) {
+    return this.collapsedSections.has(key);
+  }
+
+  _renderSectionHeader(label, key) {
+    const collapsed = this._isSectionCollapsed(key);
+    return `
+      <div class="notes-section-header">
+        <span class="notes-section-title">${label}</span>
+        <button class="notes-section-toggle btn-icon-small" data-section="${key}" type="button"
+          title="${collapsed ? 'Expand' : 'Collapse'} ${label}"
+          aria-label="${collapsed ? 'Expand' : 'Collapse'} ${label}" aria-expanded="${!collapsed}">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="notes-section-chevron${collapsed ? ' collapsed' : ''}">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </button>
+      </div>
+    `;
+  }
+
+  _toggleSection(key) {
+    if (this.collapsedSections.has(key)) {
+      this.collapsedSections.delete(key);
+    } else {
+      this.collapsedSections.add(key);
+    }
+    localStorage.setItem('noteListCollapsedSections', JSON.stringify([...this.collapsedSections]));
+    this.render(this.searchInput.value);
+  }
+
+  _attachSectionHandlers() {
+    this.container.querySelectorAll('.notes-section-toggle').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._toggleSection(btn.dataset.section);
+      });
+    });
   }
 
   _renderRootView(html) {
@@ -300,25 +342,32 @@ export class NotesList {
     const unpinnedNotes = sortedNotes.filter((n) => !n.isPinned);
 
     if (pinnedNotes.length > 0) {
-      html.push('<div class="notes-section-header">Pinned</div>');
-      for (const note of pinnedNotes) {
-        html.push(this.renderNoteItem(note));
+      html.push(this._renderSectionHeader('Pinned', 'pinned'));
+      if (!this._isSectionCollapsed('pinned')) {
+        for (const note of pinnedNotes) {
+          html.push(this.renderNoteItem(note));
+        }
       }
     }
 
     if (folders.length > 0) {
-      html.push('<div class="notes-section-header">Folders</div>');
-      for (const folder of folders) {
-        html.push(this.renderFolderCard(folder, counts.get(folder.name) ?? 0));
+      html.push(this._renderSectionHeader('Folders', 'folders'));
+      if (!this._isSectionCollapsed('folders')) {
+        for (const folder of folders) {
+          html.push(this.renderFolderCard(folder, counts.get(folder.name) ?? 0));
+        }
       }
     }
 
     if (unpinnedNotes.length > 0) {
-      if (pinnedNotes.length > 0 || folders.length > 0) {
-        html.push('<div class="notes-section-header">Notes</div>');
+      const showHeader = pinnedNotes.length > 0 || folders.length > 0;
+      if (showHeader) {
+        html.push(this._renderSectionHeader('Notes', 'notes'));
       }
-      for (const note of unpinnedNotes) {
-        html.push(this.renderNoteItem(note));
+      if (!showHeader || !this._isSectionCollapsed('notes')) {
+        for (const note of unpinnedNotes) {
+          html.push(this.renderNoteItem(note));
+        }
       }
     }
 
@@ -346,18 +395,23 @@ export class NotesList {
     const unpinnedNotes = sortedNotes.filter((n) => !n.isPinned);
 
     if (pinnedNotes.length > 0) {
-      html.push('<div class="notes-section-header">Pinned</div>');
-      for (const note of pinnedNotes) {
-        html.push(this.renderNoteItem(note));
+      html.push(this._renderSectionHeader('Pinned', 'pinned'));
+      if (!this._isSectionCollapsed('pinned')) {
+        for (const note of pinnedNotes) {
+          html.push(this.renderNoteItem(note));
+        }
       }
     }
 
-    if (pinnedNotes.length > 0 && unpinnedNotes.length > 0) {
-      html.push('<div class="notes-section-header">Notes</div>');
+    const showNotesHeader = pinnedNotes.length > 0 && unpinnedNotes.length > 0;
+    if (showNotesHeader) {
+      html.push(this._renderSectionHeader('Notes', 'notes'));
     }
 
-    for (const note of unpinnedNotes) {
-      html.push(this.renderNoteItem(note));
+    if (!showNotesHeader || !this._isSectionCollapsed('notes')) {
+      for (const note of unpinnedNotes) {
+        html.push(this.renderNoteItem(note));
+      }
     }
 
     if (pinnedNotes.length === 0 && unpinnedNotes.length === 0) {
