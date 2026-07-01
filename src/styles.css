@@ -358,6 +358,7 @@
 }
 
 .hidden {
+  /* biome-ignore lint/complexity/noImportantStyles: must beat inline styles/higher-specificity rules that toggle visibility */
   display: none !important;
 }
 
@@ -1560,6 +1561,7 @@ body {
 
 /* ponytail: !important needed — CM baseTheme rule has higher specificity (7 classes vs our 4) and no !important */
 .cm-selectionBackground {
+  /* biome-ignore lint/complexity/noImportantStyles: must beat CM's higher-specificity baseTheme rule (see comment above) */
   background-color: color-mix(in srgb, var(--color-primary) 35%, var(--color-bg)) !important;
 }
 
