@@ -27,6 +27,7 @@ export class NotesList {
     this.sortOption = localStorage.getItem('noteListSortOption') || 'UPDATED_AT';
     this.sortDirection = localStorage.getItem('noteListSortDirection') || 'DESC';
     this._sortMenuCloseHandler = null;
+    this._folderMenuCloseHandler = null;
     this._renderedFolder = undefined;
     this._inTrashMode = false;
 
@@ -530,8 +531,18 @@ export class NotesList {
   }
 
   _showFolderMenu(anchorBtn, folderName) {
-    // Remove any existing menu
-    for (const m of document.querySelectorAll('.folder-options-menu')) m.remove();
+    if (this._folderMenuCloseHandler) {
+      document.removeEventListener('click', this._folderMenuCloseHandler);
+      this._folderMenuCloseHandler = null;
+    }
+
+    // Second click on the same button that opened the menu just closes it
+    const existing = document.querySelector('.folder-options-menu');
+    if (existing) {
+      const wasSameAnchor = existing._anchorBtn === anchorBtn;
+      existing.remove();
+      if (wasSameAnchor) return;
+    }
 
     const folder = noteService.getFolders().find((f) => f.name === folderName);
     const isLocalOnly = folder?.localOnly ?? false;
@@ -546,6 +557,8 @@ export class NotesList {
       <div class="sort-menu-item sort-menu-item-danger" data-action="delete">Delete folder</div>
     `;
 
+    menu._anchorBtn = anchorBtn;
+
     const rect = anchorBtn.getBoundingClientRect();
     menu.style.position = 'fixed';
     menu.style.top = `${rect.bottom + 4}px`;
@@ -556,7 +569,10 @@ export class NotesList {
       const item = e.target.closest('.sort-menu-item');
       if (!item) return;
       menu.remove();
-      closeHandler && document.removeEventListener('click', closeHandler);
+      if (this._folderMenuCloseHandler) {
+        document.removeEventListener('click', this._folderMenuCloseHandler);
+        this._folderMenuCloseHandler = null;
+      }
 
       switch (item.dataset.action) {
         case 'rename':
@@ -589,13 +605,14 @@ export class NotesList {
       }
     });
 
-    let closeHandler;
-    closeHandler = (e) => {
+    const closeHandler = (e) => {
       if (!menu.contains(e.target) && e.target !== anchorBtn) {
         menu.remove();
         document.removeEventListener('click', closeHandler);
+        this._folderMenuCloseHandler = null;
       }
     };
+    this._folderMenuCloseHandler = closeHandler;
     setTimeout(() => document.addEventListener('click', closeHandler), 0);
   }
 
