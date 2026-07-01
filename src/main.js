@@ -57,10 +57,9 @@ class App {
       this.noteEditor.setDefaultOpenMode(settings.default_open_mode);
     }
 
-    // Check for saved credentials and auto-connect
-    await this.checkAutoConnect();
-
-    // Hintergrund-Sync-Events: Notizen aus local_store neu laden (günstig, kein Netzwerk)
+    // 'notes-synced' zuerst registrieren (lokale IPC, quasi sofort) — läuft damit
+    // garantiert vor dem Hintergrund-Connect weiter unten, der das Event irgendwann
+    // emittieren kann.
     listen('notes-synced', async () => {
       noteService.firstSyncPending = false;
       const openNote = this.noteEditor.currentNote;
@@ -79,6 +78,11 @@ class App {
         this.noteEditor.loadNote(fullNote);
       }
     });
+
+    // Lokalen Online/Offline-Status prüfen und Haupt-UI SOFORT zeigen — local_store-Reads
+    // sind unmittelbar, kein Netzwerk. Der eigentliche Server-Connect (Netzwerk-Roundtrip,
+    // bis zu 30s Timeout) läuft dahinter im Hintergrund weiter (siehe _backgroundConnect).
+    await this.checkAutoConnect();
 
     // Startup-Update-Check fire-and-forget (Windows-only, wenn update_notifications aktiv)
     this._startupUpdateCheck();
@@ -356,24 +360,30 @@ class App {
     const online = !!settings && settings.offline_mode === false;
     this._setOnline(online);
 
-    // Online mode: best-effort connect with saved credentials. A failure just
-    // means sync isn't live yet; the button stays visible and sync can retry.
-    if (online) {
-      try {
-        const credentials = await tauri.getCredentials();
-        if (credentials) {
-          await tauri.connect(
-            credentials.url,
-            credentials.username,
-            credentials.password,
-            settings.sync_folder || null,
-          );
-        }
-      } catch (error) {
-        console.log('Auto-connect failed:', error);
-      }
-    }
+    // Lokale Notizen sofort laden & UI zeigen — muss NICHT auf den Server-Connect warten,
+    // local_store ist die sofortige Quelle der Wahrheit (local-first seit v0.9.0).
     await this.handleConnected();
+
+    // Online mode: best-effort connect with saved credentials, als Fire-and-Forget im
+    // Hintergrund. Fehlerbehandlung bleibt wie zuvor rein informativ (console.log),
+    // kein blockierender Dialog — die UI ist zu diesem Zeitpunkt bereits sichtbar.
+    if (online) this._backgroundConnect(settings);
+  }
+
+  // Netzwerk-Connect + ggf. Hintergrund-Sync, entkoppelt von der UI-Anzeige (checkAutoConnect
+  // wartet NICHT auf dieses Promise). Fehler werden nur geloggt, kein Dialog — ein
+  // Verbindungsfehlschlag beim Start bedeutet nur, dass Sync noch nicht live ist; der
+  // Sync-Button bleibt sichtbar und ein manueller/periodischer Sync kann es später erneut
+  // versuchen.
+  async _backgroundConnect(settings) {
+    try {
+      const credentials = await tauri.getCredentials();
+      if (credentials) {
+        await tauri.connect(credentials.url, credentials.username, credentials.password, settings.sync_folder || null);
+      }
+    } catch (error) {
+      console.log('Auto-connect failed:', error);
+    }
   }
 
   async handleConnected() {
