@@ -458,8 +458,6 @@ body {
   background-color: var(--color-bg);
   padding-top: 1rem;
   padding-bottom: 1rem;
-  border-top: 1px solid var(--color-border);
-  box-shadow: 0 -4px 8px rgba(0, 0, 0, 0.05);
 }
 
 /* F7: Responsiv - bei sehr kleinen Fenstern weniger Padding */
