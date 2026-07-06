@@ -43,12 +43,12 @@ Windows-Installationen aktualisieren sich über den eingebauten Updater. Unter L
 ## 📱 Screenshots
 
 <p align="center">
-  <img src="screenshots/note_with_preview.png" width="700" alt="Notiz-Editor mit Markdown-Vorschau">
+  <img src="screenshots/note_with_editmode.png" width="700" alt="Notiz-Editor mit Markdown-Vorschau">
 </p>
 
 <p align="center">
-  <img src="screenshots/checklist.png" width="400" alt="Checklisten-Ansicht">
-  <img src="screenshots/settings.png" width="400" alt="Einstellungen">
+  <img src="screenshots/checklist.png" height="380" alt="Checklisten-Ansicht">
+  <img src="screenshots/settings1.png" height="380" alt="Einstellungen">
 </p>
 
 <div align="center">

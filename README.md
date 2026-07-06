@@ -43,12 +43,12 @@ Windows installs update themselves via the built-in updater. On Linux, update th
 ## 📱 Screenshots
 
 <p align="center">
-  <img src="screenshots/note_with_preview.png" width="700" alt="Note Editor with Markdown Preview">
+  <img src="screenshots/note_with_editmode.png" width="700" alt="Note Editor with Markdown Preview">
 </p>
 
 <p align="center">
-  <img src="screenshots/checklist.png" width="400" alt="Checklist View">
-  <img src="screenshots/settings.png" width="400" alt="Settings">
+  <img src="screenshots/checklist.png" height="380" alt="Checklist View">
+  <img src="screenshots/settings1.png" height="380" alt="Settings">
 </p>
 
 <div align="center">
