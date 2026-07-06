@@ -224,6 +224,29 @@ impl WebDavClient {
         Ok(())
     }
 
+    /// Prüft, ob der Markdown-Spiegelordner `{sync_folder}-md/` bereits auf dem Server existiert.
+    /// `200`/`207` → true, `404` → false. Nur informativ (für die Verbindungstest-Meldung).
+    pub async fn md_mirror_exists(&self) -> Result<bool> {
+        let url = format!("{}/{}-md/", self.base_url, self.sync_folder);
+        let response = self
+            .client
+            .request(PROPFIND.clone(), &url)
+            .header("Authorization", &self.auth_header)
+            .header("Depth", "0")
+            .send()
+            .await
+            .map_err(|e| AppError::NetworkError(e.to_string()))?;
+        match response.status() {
+            StatusCode::OK | StatusCode::MULTI_STATUS => Ok(true),
+            StatusCode::NOT_FOUND => Ok(false),
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(AppError::InvalidCredentials),
+            status => Err(AppError::WebDav(format!(
+                "Markdown mirror check failed: {}",
+                status
+            ))),
+        }
+    }
+
     // ── Notiz-Listing ────────────────────────────────────────────────────────────
 
     /// Listet alle Notizen mit ihrer Ordner-Zuordnung.

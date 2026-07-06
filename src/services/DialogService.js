@@ -577,6 +577,70 @@ class DialogService {
   }
 
   /**
+   * Remote-target change gate (server URL and/or sync folder). Offers Migrate/Replace/Cancel.
+   * @param {{kind: 'server'|'folder'|'both', atRisk: number}} opts
+   * @returns {Promise<'migrate'|'replace'|null>} null = cancelled
+   */
+  confirmRemoteTargetChange({ kind, atRisk }) {
+    return new Promise((resolve) => {
+      const titles = {
+        server: 'Change Server',
+        folder: 'Change Sync Folder',
+        both: 'Change Sync Target',
+      };
+      this.titleEl.textContent = titles[kind] || titles.both;
+
+      const riskLine =
+        atRisk > 0
+          ? `<div style="margin-top:0.5rem;font-size:0.85em;color:var(--color-fg);opacity:0.7">
+               ${atRisk} unsynced note(s) could be affected by this change.
+             </div>`
+          : '';
+      this.messageEl.innerHTML = `
+        <div><strong>Take notes along</strong> uploads your current notes to the new target and merges in whatever is already there.</div>
+        <div style="margin-top:0.5rem"><strong>Don't take along</strong> discards your local notes and replaces them with the new target's content.</div>
+        ${riskLine}
+      `;
+      this.iconContainer.innerHTML = this._getIcon('warning');
+      this.iconContainer.className = 'dialog-icon dialog-icon-warning';
+
+      const origActions = this.actionsContainer.innerHTML;
+      this.actionsContainer.innerHTML = `
+        <button id="rtc-cancel" class="btn-secondary">Cancel</button>
+        <button id="rtc-replace" class="btn-danger">Don't take along</button>
+        <button id="rtc-migrate" class="btn-primary">Take notes along</button>
+      `;
+
+      this.dialog.classList.remove('hidden');
+
+      const done = (result) => {
+        this.actionsContainer.innerHTML = origActions;
+        this.confirmBtn = document.getElementById('dialog-confirm-btn');
+        this.cancelBtn = document.getElementById('dialog-cancel-btn');
+        this._cleanup();
+        resolve(result);
+      };
+
+      document.getElementById('rtc-migrate').onclick = () => done('migrate');
+      document.getElementById('rtc-replace').onclick = () => done('replace');
+      document.getElementById('rtc-cancel').onclick = () => done(null);
+
+      const handleKeydown = (e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          done(null);
+        }
+      };
+
+      this.keydownHandler = handleKeydown;
+      this._attachBackdropHandler(() => done(null));
+      document.addEventListener('keydown', handleKeydown);
+
+      setTimeout(() => document.getElementById('rtc-migrate')?.focus(), 100);
+    });
+  }
+
+  /**
    * Resolve a sync conflict or server-deletion for a note.
    * @param {{ isDeleted: boolean }} opts - isDeleted true = DELETED_ON_SERVER, false = CONFLICT
    * @returns {Promise<'keep_mine'|'use_server'|null>} null = dismissed

@@ -871,6 +871,84 @@ async fn resolve_conflict(
     Ok(())
 }
 
+/// Zähl-Ergebnis für den Remote-Ziel-Wechsel-Dialog (Migrate/Replace/Cancel).
+#[derive(serde::Serialize)]
+struct UnsyncedCounts {
+    at_risk: usize,
+    local_only: usize,
+}
+
+#[tauri::command]
+async fn count_unsynced(app: AppHandle) -> Result<UnsyncedCounts> {
+    let notes = local_store::list_notes(&app);
+    let (at_risk, local_only) = local_store::unsynced_counts(&notes);
+    Ok(UnsyncedCounts {
+        at_risk,
+        local_only,
+    })
+}
+
+/// "Notizen mitnehmen": alle Notizen auf PENDING zurücksetzen und den local_only-Reconcile-
+/// Marker löschen. Der Frontend-Aufrufer verbindet danach mit dem neuen Ziel (`connect`), was
+/// einen normalen Merge-Sync anstößt — nichts wird hier gelöscht oder heruntergeladen.
+#[tauri::command]
+async fn migrate_to_new_target(app: AppHandle) -> Result<()> {
+    local_store::mark_all_dirty(&app);
+    local_store::reset_local_only_reconciled(&app);
+    Ok(())
+}
+
+/// "Nicht mitnehmen": lokalen Stand (Notizen + Ordner-Metadaten + Offline-Queue) verwerfen und
+/// durch den Inhalt des neuen Ziels ersetzen. Prüft zuerst die Erreichbarkeit (Guard); ein leeres
+/// neues Ziel ist kein Fehler. Läuft exklusiv zum Scheduler-Sync und kehrt erst nach dem
+/// vollständigen Download zurück (Race-Fix: das Frontend darf erst danach schließen/neu laden).
+#[tauri::command]
+async fn replace_with_new_target(
+    url: String,
+    username: String,
+    password: String,
+    sync_folder: Option<String>,
+    app: AppHandle,
+    device_id_state: State<'_, DeviceIdState>,
+    state: State<'_, WebDavState>,
+    sync_lock: State<'_, SyncLockState>,
+) -> Result<()> {
+    let folder = sync_folder.unwrap_or_else(|| "notes".to_string());
+    let client = WebDavClient::new(&url, &username, &password, &folder)?;
+    if !client.test_connection().await? {
+        return Err(AppError::NotConnected);
+    }
+
+    let _guard = sync_lock.0.lock().await;
+
+    local_store::clear_all_notes(&app);
+    local_store::clear_all_folders(&app);
+    local_store::reset_local_only_reconciled(&app);
+    sync_queue::clear_all(&app);
+
+    {
+        let mut lock = lock_recover(&state.0);
+        *lock = Some(client.clone());
+    }
+    let device_id = get_or_create_device_id(&app, &device_id_state)?;
+    sync_engine::run_sync(&client, &app, &device_id, TRASH_RETENTION_MS).await;
+    let _ = app.emit("notes-synced", ());
+    Ok(())
+}
+
+/// Informativ für die Verbindungstest-Meldung: existiert der Markdown-Spiegelordner schon?
+#[tauri::command]
+async fn md_mirror_exists(
+    url: String,
+    username: String,
+    password: String,
+    sync_folder: Option<String>,
+) -> Result<bool> {
+    let folder = sync_folder.unwrap_or_else(|| "notes".to_string());
+    let client = WebDavClient::new(&url, &username, &password, &folder)?;
+    client.md_mirror_exists().await
+}
+
 /// State to track minimize-to-tray setting at runtime
 struct TraySettings(Mutex<bool>);
 
@@ -1147,6 +1225,10 @@ pub fn run() {
             move_notes,
             sync,
             resolve_conflict,
+            count_unsynced,
+            migrate_to_new_target,
+            replace_with_new_target,
+            md_mirror_exists,
             show_main_window,
         ])
         .run(tauri::generate_context!())

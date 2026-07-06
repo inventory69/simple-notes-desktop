@@ -302,6 +302,80 @@ pub fn list_notes(app: &AppHandle) -> Vec<Note> {
         .collect()
 }
 
+/// Alle Notizen auf PENDING zurücksetzen (Migrate zu neuem Sync-Ziel). Notizen in local-only-
+/// Ordnern werden LOCAL_ONLY (nie hochgeladen). Ersetzt Androids clearServerCaches + reset-to-pending
+/// (Desktop hat keinen ETag/Content-Hash-Cache — der Upload-Skip hängt allein am sync_status).
+pub fn mark_all_dirty(app: &AppHandle) {
+    use crate::models::SyncStatus;
+    let local_only: std::collections::HashSet<String> = load_folders(app)
+        .iter()
+        .filter(|f| !f.deleted && f.local_only)
+        .map(|f| f.name.to_lowercase())
+        .collect();
+    let _g = STORE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let mut map = load_notes_map(app);
+    for v in map.values_mut() {
+        if let Ok(mut note) = serde_json::from_value::<Note>(v.clone()) {
+            note.sync_status = if note
+                .folder_name
+                .as_deref()
+                .map(|f| local_only.contains(&f.to_lowercase()))
+                .unwrap_or(false)
+            {
+                SyncStatus::LocalOnly
+            } else {
+                SyncStatus::Pending
+            };
+            if let Ok(nv) = serde_json::to_value(&note) {
+                *v = nv;
+            }
+        }
+    }
+    save_notes_map(app, &map);
+}
+
+/// Alle Notizen hart entfernen (Replace-Vorbereitung: lokalen Stand verwerfen).
+pub fn clear_all_notes(app: &AppHandle) {
+    let _g = STORE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    save_notes_map(app, &serde_json::Map::new());
+}
+
+/// Alle Ordner-Metadaten entfernen (Replace). Nötig weil der Downloader beim Wiederaufbau nur
+/// neue Ordner hinzufügt, aber nie alte entfernt — sonst blieben Geister-Ordner vom alten Ziel.
+pub fn clear_all_folders(app: &AppHandle) {
+    let _g = STORE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    save_folders(app, &Vec::new());
+}
+
+/// Reconcile-Marker zurücksetzen, damit das local_only-Flag nach einem Zielwechsel neu anhand
+/// der Server-Präsenz des neuen Ziels bestimmt wird (nächster run_sync).
+pub fn reset_local_only_reconciled(app: &AppHandle) {
+    if let Ok(store) = app.store(STORE_FILE) {
+        store.delete(KEY_LOCAL_ONLY_RECONCILED);
+        let _ = store.save();
+    }
+}
+
+/// Zählt nicht-synchronisierte Notizen für den Remote-Ziel-Wechsel-Dialog.
+/// `at_risk` = Pending|LocalOnly (könnten beim Wechsel verloren gehen),
+/// `local_only` = LocalOnly (nie hochgeladen → beim Replace endgültig weg).
+pub fn unsynced_counts(notes: &[Note]) -> (usize, usize) {
+    use crate::models::SyncStatus;
+    let mut at_risk = 0;
+    let mut local_only = 0;
+    for n in notes {
+        match n.sync_status {
+            SyncStatus::LocalOnly => {
+                at_risk += 1;
+                local_only += 1;
+            }
+            SyncStatus::Pending => at_risk += 1,
+            _ => {}
+        }
+    }
+    (at_risk, local_only)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -335,5 +409,28 @@ mod tests {
         note.updated_at = 100;
         note.sync_status = SyncStatus::Synced;
         assert!(!should_mark_synced(&note, 100));
+    }
+
+    #[test]
+    fn test_unsynced_counts() {
+        let mk = |status| {
+            let mut n = Note::new("t".into(), "tauri-x".into());
+            n.sync_status = status;
+            n
+        };
+        let notes = vec![
+            mk(SyncStatus::Synced),
+            mk(SyncStatus::Pending),
+            mk(SyncStatus::LocalOnly),
+            mk(SyncStatus::LocalOnly),
+            mk(SyncStatus::Conflict),
+        ];
+        // at_risk = 1 Pending + 2 LocalOnly = 3; local_only = 2
+        assert_eq!(unsynced_counts(&notes), (3, 2));
+    }
+
+    #[test]
+    fn test_unsynced_counts_empty() {
+        assert_eq!(unsynced_counts(&[]), (0, 0));
     }
 }

@@ -159,6 +159,17 @@ pub fn cancel_folder_deletions(app: &AppHandle, folder_name: &str) {
     remove_folder_tombstone(app, folder_name);
 }
 
+/// Gesamte Offline-Queue leeren (ausstehende Löschungen + Ordner-Tombstones). Wird beim Replace
+/// aufgerufen: die für das alte Ziel eingereihten Operationen sind für das neue Ziel irrelevant
+/// und würden dort sonst fälschlich löschen/tombstonen.
+pub fn clear_all(app: &AppHandle) {
+    if let Ok(store) = app.store(STORE_FILE) {
+        store.delete(KEY_DELETIONS);
+        store.delete(KEY_TOMBSTONES);
+        let _ = store.save();
+    }
+}
+
 // ── Drain ────────────────────────────────────────────────────────────────────
 
 /// Verarbeitet die Offline-Queue: führt ausstehende Löschungen und

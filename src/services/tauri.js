@@ -295,6 +295,40 @@ export async function isConnected() {
 }
 
 /**
+ * Count notes at risk of being lost on a remote-target change.
+ * @returns {Promise<{at_risk: number, local_only: number}>}
+ */
+export async function countUnsynced() {
+  return await invoke('count_unsynced');
+}
+
+/**
+ * "Take notes along": reset all notes to PENDING so the next connect/sync uploads them
+ * to the new target and merges its existing content in. Non-destructive.
+ * @returns {Promise<void>}
+ */
+export async function migrateToNewTarget() {
+  return await invoke('migrate_to_new_target');
+}
+
+/**
+ * "Don't take along": discard local notes/folders and replace them with the new target's
+ * content. Rejects if the new target is unreachable. Resolves only after the download completes.
+ * @returns {Promise<void>}
+ */
+export async function replaceWithNewTarget(url, username, password, syncFolder = null) {
+  return await invoke('replace_with_new_target', { url, username, password, syncFolder });
+}
+
+/**
+ * Check whether the Markdown mirror folder ({syncFolder}-md/) already exists on the server.
+ * @returns {Promise<boolean>}
+ */
+export async function mdMirrorExists(url, username, password, syncFolder = null) {
+  return await invoke('md_mirror_exists', { url, username, password, syncFolder });
+}
+
+/**
  * Show the main window (initially created hidden to avoid a blank-white frame before first paint)
  */
 export async function showMainWindow() {

@@ -12,6 +12,8 @@ vi.mock('../services/DialogService.js', () => ({
     info: vi.fn().mockResolvedValue(undefined),
     alert: vi.fn().mockResolvedValue(undefined),
     success: vi.fn().mockResolvedValue(undefined),
+    confirm: vi.fn().mockResolvedValue(true),
+    confirmRemoteTargetChange: vi.fn().mockResolvedValue(null),
   },
 }));
 
@@ -105,6 +107,10 @@ describe('SettingsDialog', () => {
     tauri.getPlatform.mockResolvedValue('linux');
     tauri.checkForUpdates.mockResolvedValue(null);
     tauri.installUpdate.mockResolvedValue();
+    tauri.countUnsynced.mockResolvedValue({ at_risk: 0, local_only: 0 });
+    tauri.migrateToNewTarget.mockResolvedValue();
+    tauri.replaceWithNewTarget.mockResolvedValue();
+    tauri.mdMirrorExists.mockResolvedValue(false);
 
     // Dynamic import to get fresh module with fresh DOM
     const mod = await import('../components/SettingsDialog.js');
@@ -364,6 +370,185 @@ describe('SettingsDialog', () => {
       await dialog.handleSave();
 
       expect(tauri.saveSettings).toHaveBeenCalledWith(expect.objectContaining({ offline_mode: true }));
+    });
+  });
+
+  describe('remote-target-change gate', () => {
+    async function showConfirmedOnline(dialog, overrides = {}) {
+      tauri.getSettings.mockResolvedValue({
+        theme: 'system',
+        autosave: true,
+        minimize_to_tray: false,
+        autostart: false,
+        sync_folder: 'notes',
+        update_notifications: true,
+        default_open_mode: 'edit',
+        font_size: 'system',
+        offline_mode: false,
+        ...overrides,
+      });
+      tauri.getCredentials.mockResolvedValue({ url: 'http://a.local', username: 'admin', password: 'pw' });
+      await dialog.show();
+    }
+
+    describe('_isServerReallyChanged()', () => {
+      it('treats empty->filled as first-time setup, not a change', () => {
+        const dialog = new SettingsDialog();
+        expect(dialog._isServerReallyChanged('', 'http://new.local')).toBe(false);
+      });
+
+      it('treats filled->empty as server removal, not a change', () => {
+        const dialog = new SettingsDialog();
+        expect(dialog._isServerReallyChanged('http://old.local', '')).toBe(false);
+      });
+
+      it('treats a real URL swap as a change', () => {
+        const dialog = new SettingsDialog();
+        expect(dialog._isServerReallyChanged('http://old.local', 'http://new.local')).toBe(true);
+      });
+
+      it('ignores a trailing slash difference', () => {
+        const dialog = new SettingsDialog();
+        expect(dialog._isServerReallyChanged('http://a.local/', 'http://a.local')).toBe(false);
+      });
+    });
+
+    it('does not show the gate on first-time setup (no prior confirmed connection)', async () => {
+      const dialog = new SettingsDialog();
+      // offline_mode true, no stored creds -> no confirmed connection yet
+      await dialog.show();
+      dialog.offlineCheckbox.checked = false;
+      dialog.serverUrlInput.value = 'http://first.local';
+      dialog.serverUsernameInput.value = 'admin';
+      dialog.serverPasswordInput.value = 'pw';
+      dialog.syncFolderInput.value = 'custom';
+
+      await dialog.handleSave();
+
+      expect(dialogService.confirmRemoteTargetChange).not.toHaveBeenCalled();
+      expect(tauri.connect).toHaveBeenCalledWith('http://first.local', 'admin', 'pw', 'custom');
+    });
+
+    it('does not show the gate for credential-only changes (same URL)', async () => {
+      const dialog = new SettingsDialog();
+      await showConfirmedOnline(dialog);
+      dialog.serverPasswordInput.value = 'new-password';
+
+      await dialog.handleSave();
+
+      expect(dialogService.confirmRemoteTargetChange).not.toHaveBeenCalled();
+      expect(tauri.connect).toHaveBeenCalledWith('http://a.local', 'admin', 'new-password', 'notes');
+    });
+
+    it('shows the gate on a real server URL change', async () => {
+      const dialog = new SettingsDialog();
+      await showConfirmedOnline(dialog);
+      dialog.serverUrlInput.value = 'http://b.local';
+      dialogService.confirmRemoteTargetChange.mockResolvedValue(null);
+
+      await dialog.handleSave();
+
+      expect(dialogService.confirmRemoteTargetChange).toHaveBeenCalledWith(expect.objectContaining({ kind: 'server' }));
+    });
+
+    it('shows the gate on a folder change with a confirmed connection', async () => {
+      const dialog = new SettingsDialog();
+      await showConfirmedOnline(dialog);
+      dialog.syncFolderInput.value = 'other-folder';
+      dialogService.confirmRemoteTargetChange.mockResolvedValue(null);
+
+      await dialog.handleSave();
+
+      expect(dialogService.confirmRemoteTargetChange).toHaveBeenCalledWith(expect.objectContaining({ kind: 'folder' }));
+    });
+
+    it('cancel: reverts fields and keeps the dialog open without backend calls', async () => {
+      const dialog = new SettingsDialog();
+      await showConfirmedOnline(dialog);
+      dialog.serverUrlInput.value = 'http://b.local';
+      dialogService.confirmRemoteTargetChange.mockResolvedValue(null);
+
+      await dialog.handleSave();
+
+      expect(dialog.serverUrlInput.value).toBe('http://a.local');
+      expect(tauri.migrateToNewTarget).not.toHaveBeenCalled();
+      expect(tauri.replaceWithNewTarget).not.toHaveBeenCalled();
+      expect(dialog.dialog.classList.contains('hidden')).toBe(false);
+    });
+
+    it('migrate: resets notes to pending and connects to the new target', async () => {
+      const dialog = new SettingsDialog();
+      await showConfirmedOnline(dialog);
+      dialog.serverUrlInput.value = 'http://b.local';
+      dialogService.confirmRemoteTargetChange.mockResolvedValue('migrate');
+
+      await dialog.handleSave();
+
+      expect(tauri.migrateToNewTarget).toHaveBeenCalled();
+      expect(tauri.connect).toHaveBeenCalledWith('http://b.local', 'admin', 'pw', 'notes');
+      expect(tauri.replaceWithNewTarget).not.toHaveBeenCalled();
+      expect(dialog.dialog.classList.contains('hidden')).toBe(true);
+    });
+
+    it('replace with no local-only notes: calls replaceWithNewTarget without a sub-confirm', async () => {
+      const dialog = new SettingsDialog();
+      await showConfirmedOnline(dialog);
+      dialog.serverUrlInput.value = 'http://b.local';
+      dialogService.confirmRemoteTargetChange.mockResolvedValue('replace');
+      tauri.countUnsynced.mockResolvedValue({ at_risk: 0, local_only: 0 });
+
+      await dialog.handleSave();
+
+      expect(dialogService.confirm).not.toHaveBeenCalled();
+      expect(tauri.replaceWithNewTarget).toHaveBeenCalledWith('http://b.local', 'admin', 'pw', 'notes');
+      expect(dialog.dialog.classList.contains('hidden')).toBe(true);
+    });
+
+    it('replace with local-only notes: asks a sub-confirmation naming the count first', async () => {
+      const dialog = new SettingsDialog();
+      await showConfirmedOnline(dialog);
+      dialog.serverUrlInput.value = 'http://b.local';
+      dialogService.confirmRemoteTargetChange.mockResolvedValue('replace');
+      tauri.countUnsynced.mockResolvedValue({ at_risk: 3, local_only: 2 });
+      dialogService.confirm.mockResolvedValue(true);
+
+      await dialog.handleSave();
+
+      expect(dialogService.confirm).toHaveBeenCalledWith(
+        expect.objectContaining({ message: expect.stringContaining('2') }),
+      );
+      expect(tauri.replaceWithNewTarget).toHaveBeenCalledWith('http://b.local', 'admin', 'pw', 'notes');
+    });
+
+    it('replace with local-only notes: declining the sub-confirm aborts and reverts', async () => {
+      const dialog = new SettingsDialog();
+      await showConfirmedOnline(dialog);
+      dialog.serverUrlInput.value = 'http://b.local';
+      dialogService.confirmRemoteTargetChange.mockResolvedValue('replace');
+      tauri.countUnsynced.mockResolvedValue({ at_risk: 2, local_only: 2 });
+      dialogService.confirm.mockResolvedValue(false);
+
+      await dialog.handleSave();
+
+      expect(tauri.replaceWithNewTarget).not.toHaveBeenCalled();
+      expect(dialog.serverUrlInput.value).toBe('http://a.local');
+      expect(dialog.dialog.classList.contains('hidden')).toBe(false);
+    });
+
+    it('replace failure (unreachable): reverts fields, shows an error, keeps the dialog open', async () => {
+      const dialog = new SettingsDialog();
+      await showConfirmedOnline(dialog);
+      dialog.serverUrlInput.value = 'http://unreachable.local';
+      dialogService.confirmRemoteTargetChange.mockResolvedValue('replace');
+      tauri.countUnsynced.mockResolvedValue({ at_risk: 0, local_only: 0 });
+      tauri.replaceWithNewTarget.mockRejectedValue(new Error('Not connected to server'));
+
+      await dialog.handleSave();
+
+      expect(dialog.serverUrlInput.value).toBe('http://a.local');
+      expect(dialogService.error).toHaveBeenCalledWith(expect.objectContaining({ title: 'Switch Failed' }));
+      expect(dialog.dialog.classList.contains('hidden')).toBe(false);
+      expect(dialog.saveBtn.disabled).toBe(false);
     });
   });
 

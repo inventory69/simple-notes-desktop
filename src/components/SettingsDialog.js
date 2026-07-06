@@ -260,7 +260,16 @@ export class SettingsDialog {
       const ok = await tauri.testConnection(url, username, password, syncFolder);
       if (ok) {
         this.connectionStatus.textContent = 'Status: Reachable';
-        await dialogService.info({ title: 'Connection OK', message: 'Server reachable.' });
+        let mirrorMsg = '';
+        try {
+          const mirrorExists = await tauri.mdMirrorExists(url, username, password, syncFolder);
+          mirrorMsg = mirrorExists
+            ? ' Markdown mirror already exists.'
+            : ' Markdown mirror will be created automatically.';
+        } catch (_e) {
+          /* informational only — ignore failures */
+        }
+        await dialogService.info({ title: 'Connection OK', message: `Server reachable.${mirrorMsg}` });
       } else {
         this.connectionStatus.textContent = prevStatus;
         await dialogService.error({ title: 'Connection Failed', message: 'Could not connect to the server.' });
@@ -314,6 +323,14 @@ export class SettingsDialog {
         password: creds?.password || '',
       };
 
+      // Remote-target-change gate snapshots (Android parity): the last CONFIRMED server/folder,
+      // separate from what's currently typed in the fields. "Confirmed" means a connection was
+      // successfully established with these values, not just saved to the credentials store.
+      this._confirmedServerUrl = this._normalizeUrl(this._loadedCreds.url);
+      this._confirmedSyncFolder = this._previousSyncFolder;
+      this._hadConfirmedConnection = !this._previousOffline && this._loadedCreds.url !== '';
+
+      this._updateConnectionSubtitle(this._previousSyncFolder);
       this._applyOfflineState();
 
       // Update-Status korrekt anzeigen (verhindert stale Zustand aus vorheriger Session)
@@ -361,6 +378,45 @@ export class SettingsDialog {
     this.hide();
   }
 
+  _normalizeUrl(u) {
+    return (u || '').trim().replace(/\/+$/, '');
+  }
+
+  /**
+   * A server change only counts if a real URL swap happened while already connected.
+   * Empty→filled (first-time setup) and filled→empty (server removed) are NOT changes —
+   * both are handled by the existing silent connect/disconnect path (Android parity).
+   */
+  _isServerReallyChanged(oldUrl, newUrl) {
+    const o = this._normalizeUrl(oldUrl);
+    const n = this._normalizeUrl(newUrl);
+    if (!o && n) return false;
+    if (o && !n) return false;
+    return o !== n;
+  }
+
+  _revertTargetFields() {
+    this.serverUrlInput.value = this._confirmedServerUrl;
+    this.syncFolderInput.value = this._confirmedSyncFolder;
+  }
+
+  _setSaveBusy(busy) {
+    this.saveBtn.disabled = busy;
+    this.cancelBtn.disabled = busy;
+    this.saveBtn.textContent = busy ? 'Switching…' : 'Save';
+  }
+
+  _updateConnectionSubtitle(folder) {
+    const el = document.getElementById('connection-folder-subtitle');
+    if (el) el.textContent = folder ? `Folder: ${folder}` : '';
+  }
+
+  _finishSave(settings) {
+    this._updateConnectionSubtitle(settings.sync_folder);
+    if (this.onSaveCallback) this.onSaveCallback(settings);
+    this.hide();
+  }
+
   async handleSave() {
     try {
       const offline = this.offlineCheckbox.checked;
@@ -389,40 +445,82 @@ export class SettingsDialog {
         await tauri.saveCredentials({ url, username, password });
       }
 
-      // Reconcile connection only when something connection-relevant changed.
-      const credsChanged =
-        !!this._loadedCreds &&
-        (url !== this._loadedCreds.url ||
-          username !== this._loadedCreds.username ||
-          password !== this._loadedCreds.password);
-      const connChanged =
-        offline !== this._previousOffline ||
-        settings.sync_folder !== this._previousSyncFolder ||
-        (!offline && credsChanged);
-      if (connChanged) {
-        try {
-          if (offline) {
-            await tauri.disconnect();
-          } else if (url && username && password) {
-            const ok = await tauri.connect(url, username, password, settings.sync_folder);
+      if (offline) {
+        // Going offline never needs the remote-target gate.
+        if (!this._previousOffline) {
+          await tauri.disconnect();
+        }
+        if (this.onReconnectCallback) await this.onReconnectCallback();
+        this._finishSave(settings);
+        return;
+      }
+
+      const serverChanged = this._isServerReallyChanged(this._confirmedServerUrl, url);
+      const folderChanged = this._hadConfirmedConnection && settings.sync_folder !== this._confirmedSyncFolder;
+      const pending = serverChanged || folderChanged;
+
+      if (!pending) {
+        // Silent path: first-time setup, credential-only edits, or offline→online with the
+        // same target — none of these move notes between different remote destinations.
+        if (url && username && password) {
+          const ok = await tauri.connect(url, username, password, settings.sync_folder);
+          if (!ok) {
+            await dialogService.error({
+              title: 'Connection Failed',
+              message: 'Could not connect. Saved offline; check server details.',
+            });
+          } else {
+            this._confirmedServerUrl = this._normalizeUrl(url);
+            this._confirmedSyncFolder = settings.sync_folder;
+          }
+        }
+        if (this.onReconnectCallback) await this.onReconnectCallback();
+        this._finishSave(settings);
+        return;
+      }
+
+      // Gate: server and/or folder actually changed on an already-confirmed connection.
+      const kind = serverChanged && folderChanged ? 'both' : serverChanged ? 'server' : 'folder';
+      const { at_risk } = await tauri.countUnsynced();
+      const choice = await dialogService.confirmRemoteTargetChange({ kind, atRisk: at_risk });
+      if (choice === null) {
+        this._revertTargetFields();
+        return; // stay open, nothing changed
+      }
+
+      this._setSaveBusy(true);
+      try {
+        if (choice === 'migrate') {
+          await tauri.migrateToNewTarget();
+          const ok = await tauri.connect(url, username, password, settings.sync_folder);
+          if (!ok) throw new Error('Could not connect to the new target.');
+        } else {
+          const { local_only } = await tauri.countUnsynced();
+          if (local_only > 0) {
+            const ok = await dialogService.confirm({
+              title: 'Delete local-only notes?',
+              type: 'danger',
+              confirmText: 'Switch & Delete',
+              cancelText: 'Cancel',
+              message: `${local_only} note(s) exist only on this device and were never uploaded. They will be permanently deleted when switching to the new target.`,
+            });
             if (!ok) {
-              await dialogService.error({
-                title: 'Connection Failed',
-                message: 'Could not connect. Saved offline; check server details.',
-              });
+              this._revertTargetFields();
+              return;
             }
           }
-          if (this.onReconnectCallback) await this.onReconnectCallback();
-        } catch (e) {
-          console.error('Connection reconcile failed:', e);
+          await tauri.replaceWithNewTarget(url, username, password, settings.sync_folder);
         }
+        this._confirmedServerUrl = this._normalizeUrl(url);
+        this._confirmedSyncFolder = settings.sync_folder;
+        if (this.onReconnectCallback) await this.onReconnectCallback();
+        this._finishSave(settings);
+      } catch (e) {
+        this._revertTargetFields();
+        await dialogService.error({ title: 'Switch Failed', message: `${e.message || e}` });
+      } finally {
+        this._setSaveBusy(false);
       }
-
-      if (this.onSaveCallback) {
-        this.onSaveCallback(settings);
-      }
-
-      this.hide();
     } catch (error) {
       console.error('Failed to save settings:', error);
       await dialogService.error({

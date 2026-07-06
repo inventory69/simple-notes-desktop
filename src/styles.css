@@ -695,6 +695,13 @@ body {
   font-weight: 500;
 }
 
+.settings-nav-sublabel {
+  display: block;
+  font-size: 0.75em;
+  font-weight: 400;
+  opacity: 0.6;
+}
+
 .settings-nav-chevron {
   opacity: 0.4;
   flex-shrink: 0;
