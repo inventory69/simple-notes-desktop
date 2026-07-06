@@ -39,6 +39,7 @@ export class NoteEditor {
     this.titleInput = document.getElementById('note-title');
     this.syncStatus = document.getElementById('sync-status');
     this.deleteBtn = document.getElementById('delete-note-btn');
+    this.archiveBtn = document.getElementById('note-archive-btn');
     this.previewToggleBtn = document.getElementById('preview-toggle-btn');
     this.sortBtn = document.getElementById('checklist-sort-btn');
     this.checklistContainer = document.getElementById('checklist-container');
@@ -107,6 +108,9 @@ export class NoteEditor {
 
     // Delete button
     this.deleteBtn.addEventListener('click', () => this.handleDelete());
+
+    // Archive button
+    this.archiveBtn?.addEventListener('click', () => this.handleArchiveToggle());
 
     // Preview toggle
     this.previewToggleBtn.addEventListener('click', () => this.togglePreview());
@@ -950,6 +954,7 @@ export class NoteEditor {
 
     this._updateUndoButton();
     this._updateColorBtn();
+    this._updateArchiveBtn();
     this.updateSyncStatus('Saved');
   }
 
@@ -979,6 +984,7 @@ export class NoteEditor {
     this.mdToolbar?.classList.add('hidden');
     if (this.undoBtn) this.undoBtn.disabled = true;
     this._updateColorBtn();
+    this._updateArchiveBtn();
 
     if (this.editorView) {
       this.editorView.destroy();
@@ -1009,6 +1015,14 @@ export class NoteEditor {
       this.container.style.removeProperty('--nc-d');
       this.container.classList.remove('has-color');
     }
+  }
+
+  /** Setzt den Archive-Button-Zustand basierend auf dem archivedAt-Feld der Notiz. */
+  _updateArchiveBtn() {
+    if (!this.archiveBtn) return;
+    const archived = !!this.currentNote?.archivedAt;
+    this.archiveBtn.classList.toggle('active', archived);
+    this.archiveBtn.title = archived ? 'Unarchive' : 'Archive';
   }
 
   // ── Undo helpers ────────────────────────────────────────────────────────────
@@ -1245,6 +1259,39 @@ export class NoteEditor {
       await dialogService.error({
         title: 'Move to Trash Failed',
         message: 'Failed to move note to trash. Please check your connection and try again.',
+      });
+    }
+  }
+
+  async handleArchiveToggle() {
+    if (!this.currentNote) {
+      return;
+    }
+
+    // Flush a pending autosave/dirty edit first so archive_notes doesn't overwrite it
+    // with the last-persisted state (mirrors Android's toggleArchive() flush-before-toggle).
+    if (this.saveTimeout) {
+      clearTimeout(this.saveTimeout);
+      this.saveTimeout = null;
+    }
+    if (this._isDirty) {
+      await this.save();
+    }
+
+    const archived = !this.currentNote.archivedAt;
+
+    try {
+      await noteService.archiveNotes([this.currentNote.id], archived);
+      this.clear();
+
+      if (this.onDeleteCallback) {
+        this.onDeleteCallback();
+      }
+    } catch (error) {
+      console.error('Failed to archive note:', error);
+      await dialogService.error({
+        title: 'Archive Failed',
+        message: 'Failed to update the note. Please check your connection and try again.',
       });
     }
   }

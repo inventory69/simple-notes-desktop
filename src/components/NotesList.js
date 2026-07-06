@@ -32,6 +32,7 @@ export class NotesList {
     this._folderMenuCloseHandler = null;
     this._renderedFolder = undefined;
     this._inTrashMode = false;
+    this._inArchiveMode = false;
 
     this.init();
   }
@@ -60,6 +61,11 @@ export class NotesList {
       // Escape in trash view → leave trash
       if (e.key === 'Escape' && !this.selectionMode && noteService.isTrashMode()) {
         noteService.setTrashMode(false);
+        return;
+      }
+      // Escape in archive view → leave archive
+      if (e.key === 'Escape' && !this.selectionMode && noteService.isArchiveMode()) {
+        noteService.setArchiveMode(false);
         return;
       }
       // Escape inside a folder → go back to root
@@ -164,6 +170,20 @@ export class NotesList {
     this.exitSelectionMode();
   }
 
+  // Archive/Unarchive selected notes
+  async archiveSelected(archived) {
+    const count = this.selectedIds.size;
+    if (count === 0) return;
+    const ids = this.getSelectedIds();
+    try {
+      await noteService.archiveNotes(ids, archived);
+    } catch (e) {
+      console.error('[NotesList] archiveSelected failed:', e);
+      await dialogService.error({ title: 'Archive Failed', message: e.message || 'Could not update notes.' });
+    }
+    this.exitSelectionMode();
+  }
+
   // Farbe mehrerer Notizen setzen
   colorSelected() {
     if (this.selectedIds.size === 0) return;
@@ -253,6 +273,17 @@ export class NotesList {
     }
     if (trashMode) {
       this._renderTrashView();
+      return;
+    }
+
+    // Archive view takes priority (after trash)
+    const archiveMode = noteService.isArchiveMode();
+    if (archiveMode !== this._inArchiveMode) {
+      this.container.scrollTop = 0;
+      this._inArchiveMode = archiveMode;
+    }
+    if (archiveMode) {
+      this._renderArchiveView();
       return;
     }
 
@@ -521,6 +552,63 @@ export class NotesList {
           await noteService.deleteNotePermanent(id, folderName);
         } catch (e) {
           await dialogService.error({ title: 'Delete Failed', message: e.message || String(e) });
+        }
+      });
+    });
+  }
+
+  _renderArchiveView() {
+    const notes = noteService.getArchivedNotes();
+    const html = [];
+
+    html.push(`
+      <div class="folder-back-header" id="archive-back-btn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="15 18 9 12 15 6"></polyline>
+        </svg>
+        <span>Archive</span>
+      </div>
+    `);
+
+    if (notes.length === 0) {
+      html.push('<div class="empty-placeholder">Archive is empty</div>');
+    } else {
+      for (const note of notes) {
+        const previewLines = this.getPreviewLines(note);
+        html.push(`
+          <div class="note-item trash-note-item" data-id="${note.id}" data-folder="${this.escapeHtml(note.folderName ?? '')}">
+            <div class="note-item-content">
+              <div class="note-item-header">
+                <div class="note-item-title">${this.escapeHtml(note.title)}</div>
+              </div>
+              <div class="note-item-preview">${previewLines.map((line) => `<div class="preview-line">${note.noteType === 'CHECKLIST' ? this.escapeHtml(line) : this.renderPreviewLine(line)}</div>`).join('')}</div>
+              <div class="trash-actions">
+                <button class="btn-secondary archive-unarchive-btn" data-id="${note.id}" type="button">Unarchive</button>
+              </div>
+            </div>
+          </div>
+        `);
+      }
+    }
+
+    this.container.innerHTML = html.join('');
+    this._attachArchiveHandlers();
+  }
+
+  _attachArchiveHandlers() {
+    const backBtn = this.container.querySelector('#archive-back-btn');
+    if (backBtn) {
+      backBtn.addEventListener('click', () => noteService.setArchiveMode(false));
+    }
+
+    this.container.querySelectorAll('.archive-unarchive-btn').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.id;
+        try {
+          await noteService.archiveNotes([id], false);
+        } catch (e) {
+          await dialogService.error({ title: 'Unarchive Failed', message: e.message || String(e) });
         }
       });
     });

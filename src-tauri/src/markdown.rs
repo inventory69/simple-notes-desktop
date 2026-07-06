@@ -61,6 +61,11 @@ pub fn generate_markdown(note: &Note) -> String {
         md.push_str(&format!("\nfolder: \"{}\"", folder));
     }
 
+    // Android Archive-Feature: Zeile nach folder (Note.toMarkdown Reihenfolge)
+    if let Some(archived) = note.archived_at {
+        md.push_str(&format!("\narchived: {}", archived));
+    }
+
     md.push_str(&format!("\n---\n\n# {}\n\n", note.title));
 
     match note.note_type {
@@ -190,6 +195,41 @@ mod tests {
         assert!(
             folder_pos > pinned_pos,
             "folder: must appear after pinned: in frontmatter"
+        );
+    }
+
+    #[test]
+    fn test_generate_markdown_archived_line_present_when_set() {
+        let mut note = Note::new("Archived Note".to_string(), "tauri-abc".to_string());
+        note.archived_at = Some(1700000000000);
+        let md = generate_markdown(&note);
+        assert!(
+            md.contains("\narchived: 1700000000000"),
+            "archived line missing: {md}"
+        );
+    }
+
+    #[test]
+    fn test_generate_markdown_archived_line_absent_when_none() {
+        let note = Note::new("Plain".to_string(), "tauri-abc".to_string());
+        let md = generate_markdown(&note);
+        assert!(
+            !md.contains("archived:"),
+            "archived line should be absent: {md}"
+        );
+    }
+
+    #[test]
+    fn test_generate_markdown_archived_line_after_folder() {
+        let mut note = Note::new("Test".to_string(), "tauri-abc".to_string());
+        note.folder_name = Some("Work".to_string());
+        note.archived_at = Some(1700000000000);
+        let md = generate_markdown(&note);
+        let folder_pos = md.find("folder:").unwrap();
+        let archived_pos = md.find("archived:").unwrap();
+        assert!(
+            archived_pos > folder_pos,
+            "archived: must appear after folder: in frontmatter"
         );
     }
 }

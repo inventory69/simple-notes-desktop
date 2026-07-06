@@ -13,6 +13,8 @@ class NoteService {
     this._saveQueues = new Map(); // note id → last in-flight save Promise
     this.trashedNotes = [];
     this.trashMode = false;
+    this.archivedNotes = [];
+    this.archiveMode = false;
     this.firstSyncPending = false;
   }
 
@@ -388,6 +390,33 @@ class NoteService {
   async emptyTrash() {
     await tauri.emptyTrash();
     await this.loadTrash();
+  }
+
+  isArchiveMode() {
+    return this.archiveMode;
+  }
+
+  setArchiveMode(on) {
+    this.archiveMode = on;
+    this.notify();
+  }
+
+  getArchivedNotes() {
+    return this.archivedNotes;
+  }
+
+  async loadArchive() {
+    this.archivedNotes = await tauri.listArchive();
+    this.notify();
+  }
+
+  async archiveNotes(ids, archived) {
+    await tauri.archiveNotes(ids, archived);
+    await this.loadNotes();
+    if (this.archiveMode) {
+      await this.loadArchive();
+    }
+    this.notify();
   }
 
   /**

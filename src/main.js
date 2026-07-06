@@ -36,8 +36,10 @@ class App {
     this.batchUnpinBtn = document.getElementById('batch-unpin-btn');
     this.batchColorBtn = document.getElementById('batch-color-btn');
     this.batchMoveBtn = document.getElementById('batch-move-btn');
+    this.batchArchiveBtn = document.getElementById('batch-archive-btn');
     this.newFolderBtn = document.getElementById('new-folder-btn');
     this.trashViewBtn = document.getElementById('trash-view-btn');
+    this.archiveViewBtn = document.getElementById('archive-view-btn');
     this.selectionCount = this.batchActionsBar?.querySelector('.selection-count');
 
     this.init();
@@ -285,6 +287,12 @@ class App {
     this.batchMoveBtn?.addEventListener('click', () => {
       this.notesList.moveSelected();
     });
+    this.batchArchiveBtn?.addEventListener('click', () => {
+      const ids = this.notesList.getSelectedIds();
+      const notes = noteService.getNotes().filter((n) => ids.includes(n.id));
+      const allArchived = notes.length > 0 && notes.every((n) => !!n.archivedAt);
+      this.notesList.archiveSelected(!allArchived);
+    });
 
     // New folder button
     this.newFolderBtn?.addEventListener('click', () => this.handleNewFolder());
@@ -292,15 +300,27 @@ class App {
     // Trash view button
     this.trashViewBtn?.addEventListener('click', async () => {
       const entering = !noteService.isTrashMode();
+      noteService.setArchiveMode(false);
       noteService.setTrashMode(entering);
       if (entering) {
         await noteService.loadTrash();
       }
     });
 
-    // Keep trash button active state in sync with trash mode (handles Escape / back button exits)
+    // Archive view button
+    this.archiveViewBtn?.addEventListener('click', async () => {
+      const entering = !noteService.isArchiveMode();
+      noteService.setTrashMode(false);
+      noteService.setArchiveMode(entering);
+      if (entering) {
+        await noteService.loadArchive();
+      }
+    });
+
+    // Keep trash/archive button active state in sync with mode (handles Escape / back button exits)
     noteService.subscribe(() => {
       this.trashViewBtn?.classList.toggle('active', noteService.isTrashMode());
+      this.archiveViewBtn?.classList.toggle('active', noteService.isArchiveMode());
     });
 
     // F1: Global keyboard shortcuts

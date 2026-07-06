@@ -149,6 +149,9 @@ async fn list_notes(app: AppHandle) -> Result<Vec<NoteMetadata>> {
             }
             continue; // getrashte Notizen erscheinen nicht in der Hauptliste
         }
+        if note.archived_at.is_some() {
+            continue; // archivierte Notizen erscheinen nicht in der Hauptliste
+        }
         note.fix_note_type();
         notes.push(NoteMetadata::from(&note));
     }
@@ -594,6 +597,41 @@ async fn pin_notes(ids: Vec<String>, pinned: bool, app: AppHandle) -> Result<()>
     }
     scheduler::trigger_sync(&app);
     Ok(())
+}
+
+#[tauri::command]
+async fn archive_notes(ids: Vec<String>, archived: bool, app: AppHandle) -> Result<()> {
+    for id in &ids {
+        if let Some(mut note) = local_store::get_note(&app, id) {
+            note.archived_at = if archived {
+                Some(chrono::Utc::now().timestamp_millis())
+            } else {
+                None
+            };
+            note.updated_at = chrono::Utc::now().timestamp_millis();
+            local_store::mark_dirty(&app, &mut note);
+            local_store::put_note(&app, &note);
+        }
+    }
+    scheduler::trigger_sync(&app);
+    Ok(())
+}
+
+#[tauri::command]
+async fn list_archive(app: AppHandle) -> Result<Vec<NoteMetadata>> {
+    let mut archived: Vec<NoteMetadata> = local_store::list_notes(&app)
+        .into_iter()
+        .filter(|note| note.archived_at.is_some() && note.trashed_at.is_none())
+        .map(|note| NoteMetadata::from(&note))
+        .collect();
+    archived.sort_by(|a, b| {
+        let a_pin = a.is_pinned.unwrap_or(false);
+        let b_pin = b.is_pinned.unwrap_or(false);
+        b_pin
+            .cmp(&a_pin)
+            .then_with(|| b.updated_at.cmp(&a.updated_at))
+    });
+    Ok(archived)
 }
 
 // ── Ordner-Commands ──────────────────────────────────────────────────────────
@@ -1256,6 +1294,8 @@ pub fn run() {
             update_tray_setting,
             pin_notes,
             color_notes,
+            archive_notes,
+            list_archive,
             get_platform,
             check_for_updates,
             install_update,

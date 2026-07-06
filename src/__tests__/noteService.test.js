@@ -279,6 +279,65 @@ describe('NoteService', () => {
     });
   });
 
+  describe('archive', () => {
+    beforeEach(() => {
+      noteService.notes = [];
+      noteService.archivedNotes = [];
+      noteService.archiveMode = false;
+    });
+
+    it('isArchiveMode/setArchiveMode toggles and notifies', () => {
+      const listener = vi.fn();
+      noteService.subscribe(listener);
+      expect(noteService.isArchiveMode()).toBe(false);
+
+      noteService.setArchiveMode(true);
+
+      expect(noteService.isArchiveMode()).toBe(true);
+      expect(listener).toHaveBeenCalled();
+    });
+
+    it('loadArchive fetches and caches archived notes', async () => {
+      const archived = [{ id: '1', title: 'Archived Note', archivedAt: 1234567890 }];
+      tauri.listArchive.mockResolvedValue(archived);
+
+      await noteService.loadArchive();
+
+      expect(tauri.listArchive).toHaveBeenCalledOnce();
+      expect(noteService.getArchivedNotes()).toEqual(archived);
+    });
+
+    it('archiveNotes calls tauri wrapper and reloads notes', async () => {
+      tauri.archiveNotes.mockResolvedValue();
+      tauri.listNotes.mockResolvedValue([]);
+
+      await noteService.archiveNotes(['id-1'], true);
+
+      expect(tauri.archiveNotes).toHaveBeenCalledWith(['id-1'], true);
+      expect(tauri.listNotes).toHaveBeenCalledOnce();
+    });
+
+    it('archiveNotes also reloads archive when in archive mode', async () => {
+      noteService.archiveMode = true;
+      tauri.archiveNotes.mockResolvedValue();
+      tauri.listNotes.mockResolvedValue([]);
+      tauri.listArchive.mockResolvedValue([]);
+
+      await noteService.archiveNotes(['id-1'], false);
+
+      expect(tauri.listArchive).toHaveBeenCalledOnce();
+    });
+
+    it('archiveNotes does not reload archive when not in archive mode', async () => {
+      tauri.archiveNotes.mockResolvedValue();
+      tauri.listNotes.mockResolvedValue([]);
+
+      await noteService.archiveNotes(['id-1'], true);
+
+      expect(tauri.listArchive).not.toHaveBeenCalled();
+    });
+  });
+
   describe('subscribe', () => {
     it('should notify listeners on changes', async () => {
       const listener = vi.fn();

@@ -127,6 +127,16 @@ pub struct Note {
     #[serde(rename = "trashedAt", default, skip_serializing_if = "Option::is_none")]
     pub trashed_at: Option<i64>,
 
+    /// Android Archive-Feature: Zeitpunkt der Archivierung (Epoch ms). None = nicht archiviert.
+    /// Archivierte Notizen bleiben vollständig synchronisiert (inkl. Markdown-Export), erscheinen
+    /// aber nicht in der Hauptliste/Ordner-Zählung — im Gegensatz zu Trash.
+    #[serde(
+        rename = "archivedAt",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub archived_at: Option<i64>,
+
     /// Cross-App-Kompatibilität: Auffangbecken für alle weiteren Notiz-Felder, die
     /// die Desktop-App nicht modelliert (inkl. künftiger Android-Schema-Erweiterungen).
     /// Werden beim Round-Trip 1:1 erhalten — der Kern des Datenverlust-Fix.
@@ -155,6 +165,7 @@ impl Note {
             is_pinned: None,
             folder_name: None,
             trashed_at: None,
+            archived_at: None,
             extra: serde_json::Map::new(),
         }
     }
@@ -214,6 +225,13 @@ pub struct NoteMetadata {
     /// Zeitpunkt der Papierkorb-Verschiebung (Epoch ms). None = aktive Notiz.
     #[serde(rename = "trashedAt", default, skip_serializing_if = "Option::is_none")]
     pub trashed_at: Option<i64>,
+    /// Zeitpunkt der Archivierung (Epoch ms). None = nicht archiviert.
+    #[serde(
+        rename = "archivedAt",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub archived_at: Option<i64>,
     /// Sync-Status für Konflikt-Badge im Frontend (Phase 6).
     /// Wird aus dem Sync-Cache überlagert; default SYNCED für Server-Notizen ohne Cache-Eintrag.
     #[serde(default)]
@@ -235,6 +253,7 @@ impl From<&Note> for NoteMetadata {
             color: note.color.clone(),
             folder_name: note.folder_name.clone(),
             trashed_at: note.trashed_at,
+            archived_at: note.archived_at,
             sync_status: note.sync_status,
         }
     }
@@ -455,6 +474,49 @@ mod tests {
         assert_eq!(note.trashed_at, None);
         let out = serde_json::to_value(&note).unwrap();
         assert!(!out.as_object().unwrap().contains_key("trashedAt"));
+    }
+
+    #[test]
+    fn test_note_archived_at_round_trip() {
+        let json = r#"{
+            "id": "abc",
+            "title": "T",
+            "content": "C",
+            "createdAt": 1700000000000,
+            "updatedAt": 1700000000001,
+            "deviceId": "tauri-xyz",
+            "archivedAt": 1700000000000
+        }"#;
+        let note: Note = serde_json::from_str(json).unwrap();
+        assert_eq!(note.archived_at, Some(1700000000000));
+        assert!(
+            !note.extra.contains_key("archivedAt"),
+            "archivedAt must not be in extra"
+        );
+        let out = serde_json::to_value(&note).unwrap();
+        assert_eq!(out["archivedAt"], 1700000000000i64);
+        let obj = out.as_object().unwrap();
+        assert!(!obj.contains_key("extra"));
+    }
+
+    #[test]
+    fn test_note_archived_at_absent_when_none() {
+        let note = Note::new("T".to_string(), "tauri-x".to_string());
+        assert_eq!(note.archived_at, None);
+        let out = serde_json::to_value(&note).unwrap();
+        assert!(!out.as_object().unwrap().contains_key("archivedAt"));
+    }
+
+    #[test]
+    fn test_note_metadata_carries_archived_at() {
+        let mut note = Note::new("My Note".to_string(), "tauri-abc".to_string());
+        note.archived_at = Some(1700000000000);
+        let meta: NoteMetadata = (&note).into();
+        assert_eq!(meta.archived_at, Some(1700000000000));
+
+        let note2 = Note::new("Active".to_string(), "tauri-abc".to_string());
+        let meta2: NoteMetadata = (&note2).into();
+        assert_eq!(meta2.archived_at, None);
     }
 
     #[test]

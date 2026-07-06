@@ -265,6 +265,19 @@ export async function emptyTrash() {
 }
 
 /**
+ * Archive or unarchive multiple notes
+ * @param {string[]} ids - Array of note IDs
+ * @param {boolean} archived - true = archive, false = unarchive
+ */
+export async function archiveNotes(ids, archived) {
+  return await invoke('archive_notes', { ids, archived });
+}
+
+export async function listArchive() {
+  return await invoke('list_archive');
+}
+
+/**
  * Run a server sync: download/upload notes, detect conflicts and server-side deletions.
  * @returns {Promise<void>}
  */
