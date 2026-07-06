@@ -140,21 +140,24 @@ impl WebDavClient {
 
     // ── MKCOL-Helfer ────────────────────────────────────────────────────────────
 
-    /// Erstellt das JSON-Unterverzeichnis und das MD-Unterverzeichnis eines Ordners.
-    /// Fehler (z.B. 405 Method Not Allowed wenn das Verzeichnis bereits existiert) werden ignoriert.
-    pub async fn ensure_folder_dirs(&self, folder: &str) {
+    /// Erstellt das JSON-Unterverzeichnis und, falls `write_markdown`, das MD-Unterverzeichnis
+    /// eines Ordners. Fehler (z.B. 405 Method Not Allowed wenn das Verzeichnis bereits existiert)
+    /// werden ignoriert.
+    pub async fn ensure_folder_dirs(&self, folder: &str, write_markdown: bool) {
         let _ = self
             .client
             .request(MKCOL.clone(), self.folder_json_dir_url(folder))
             .header("Authorization", &self.auth_header)
             .send()
             .await;
-        let _ = self
-            .client
-            .request(MKCOL.clone(), self.folder_md_dir_url(folder))
-            .header("Authorization", &self.auth_header)
-            .send()
-            .await;
+        if write_markdown {
+            let _ = self
+                .client
+                .request(MKCOL.clone(), self.folder_md_dir_url(folder))
+                .header("Authorization", &self.auth_header)
+                .send()
+                .await;
+        }
     }
 
     /// Löscht das JSON-Unterverzeichnis und das MD-Unterverzeichnis eines Ordners.
@@ -176,8 +179,9 @@ impl WebDavClient {
 
     // ── Verbindungstest & Verzeichnisse ─────────────────────────────────────────
 
-    /// Testet die Verbindung zum Server
-    pub async fn test_connection(&self) -> Result<bool> {
+    /// Testet die Verbindung zum Server. `write_markdown` steuert, ob beim Anlegen fehlender
+    /// Verzeichnisse (404-Fall) auch `{sync_folder}-md/` erstellt wird.
+    pub async fn test_connection(&self, write_markdown: bool) -> Result<bool> {
         let url = format!("{}/{}/", self.base_url, self.sync_folder);
 
         let response = self
@@ -193,7 +197,7 @@ impl WebDavClient {
             StatusCode::OK | StatusCode::MULTI_STATUS => Ok(true),
             StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(AppError::InvalidCredentials),
             StatusCode::NOT_FOUND => {
-                self.ensure_directories().await?;
+                self.ensure_directories(write_markdown).await?;
                 Ok(true)
             }
             status => Err(AppError::WebDav(format!(
@@ -203,8 +207,9 @@ impl WebDavClient {
         }
     }
 
-    /// Stellt sicher, dass /{sync_folder}/ und /{sync_folder}-md/ existieren
-    pub async fn ensure_directories(&self) -> Result<()> {
+    /// Stellt sicher, dass `/{sync_folder}/` existiert; `/{sync_folder}-md/` nur wenn
+    /// `write_markdown` (der Markdown-Spiegel ist ein opt-in Export, default aus).
+    pub async fn ensure_directories(&self, write_markdown: bool) -> Result<()> {
         let notes_url = format!("{}/{}/", self.base_url, self.sync_folder);
         let _ = self
             .client
@@ -213,13 +218,15 @@ impl WebDavClient {
             .send()
             .await;
 
-        let notes_md_url = format!("{}/{}-md/", self.base_url, self.sync_folder);
-        let _ = self
-            .client
-            .request(MKCOL.clone(), &notes_md_url)
-            .header("Authorization", &self.auth_header)
-            .send()
-            .await;
+        if write_markdown {
+            let notes_md_url = format!("{}/{}-md/", self.base_url, self.sync_folder);
+            let _ = self
+                .client
+                .request(MKCOL.clone(), &notes_md_url)
+                .header("Authorization", &self.auth_header)
+                .send()
+                .await;
+        }
 
         Ok(())
     }
@@ -384,33 +391,37 @@ impl WebDavClient {
         }
     }
 
-    /// Speichert eine Notiz (Dual-Write: JSON + Markdown), ordner-bewusst.
+    /// Speichert eine Notiz (JSON immer, Markdown nur wenn `write_markdown`), ordner-bewusst.
     ///
-    /// Löscht die alte `.md`-Datei wenn der Titel geändert wurde.
-    pub async fn save_note(&self, note: &Note) -> Result<()> {
+    /// Löscht die alte `.md`-Datei wenn der Titel geändert wurde (nur wenn der Spiegel aktiv ist).
+    pub async fn save_note(&self, note: &Note, write_markdown: bool) -> Result<()> {
         let folder = note.folder_name.as_deref();
 
         // MKCOL Unterverzeichnisse, falls Notiz in einem Ordner liegt
         if let Some(f) = folder {
-            self.ensure_folder_dirs(f).await;
+            self.ensure_folder_dirs(f, write_markdown).await;
         }
 
-        // Titel-Diff: alte .md entfernen wenn der Titel sich geändert hat.
-        if let Ok(existing) = self.get_note(&note.id, folder).await {
-            if existing.title != note.title {
-                let old_safe = sanitize_filename(&existing.title, &note.id);
-                let old_md_url = self.note_md_url(folder, &old_safe);
-                let _ = self
-                    .client
-                    .delete(&old_md_url)
-                    .header("Authorization", &self.auth_header)
-                    .send()
-                    .await;
+        if write_markdown {
+            // Titel-Diff: alte .md entfernen wenn der Titel sich geändert hat.
+            if let Ok(existing) = self.get_note(&note.id, folder).await {
+                if existing.title != note.title {
+                    let old_safe = sanitize_filename(&existing.title, &note.id);
+                    let old_md_url = self.note_md_url(folder, &old_safe);
+                    let _ = self
+                        .client
+                        .delete(&old_md_url)
+                        .header("Authorization", &self.auth_header)
+                        .send()
+                        .await;
+                }
             }
         }
 
         self.save_json(note).await?;
-        self.save_markdown(note).await?;
+        if write_markdown {
+            self.save_markdown(note).await?;
+        }
         Ok(())
     }
 
@@ -529,7 +540,7 @@ impl WebDavClient {
 
         // Ziel-Verzeichnisse anlegen (falls Ordner)
         if let Some(f) = to_folder {
-            self.ensure_folder_dirs(f).await;
+            self.ensure_folder_dirs(f, true).await;
         }
 
         // Am neuen Pfad speichern (JSON + MD)

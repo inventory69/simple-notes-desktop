@@ -286,8 +286,8 @@ export async function disconnect() {
   return await invoke('disconnect');
 }
 
-export async function testConnection(url, username, password, syncFolder = null) {
-  return await invoke('test_connection', { url, username, password, syncFolder });
+export async function testConnection(url, username, password, syncFolder = null, markdownExport = false) {
+  return await invoke('test_connection', { url, username, password, syncFolder, markdownExport });
 }
 
 export async function isConnected() {
@@ -326,6 +326,15 @@ export async function replaceWithNewTarget(url, username, password, syncFolder =
  */
 export async function mdMirrorExists(url, username, password, syncFolder = null) {
   return await invoke('md_mirror_exists', { url, username, password, syncFolder });
+}
+
+/**
+ * Backfill the Markdown mirror for all existing notes after enabling the setting
+ * (false → true). Marks every note PENDING so the next sync writes its `.md` file too.
+ * @returns {Promise<void>}
+ */
+export async function backfillMarkdown() {
+  return await invoke('backfill_markdown');
 }
 
 /**

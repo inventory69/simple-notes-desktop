@@ -21,6 +21,7 @@ pub struct Settings {
     pub default_open_mode: String, // "edit" | "preview" — open text notes in edit vs preview
     pub font_size: String,      // "system"|"small"|"normal"|"large"|"xlarge"
     pub offline_mode: bool,     // Offline-Modus: kein Server nötig (Android-Parität, default true)
+    pub markdown_export: bool, // Optionaler {sync_folder}-md/ Markdown-Spiegel (Android-Parität, default false)
 }
 
 impl Default for Settings {
@@ -35,6 +36,7 @@ impl Default for Settings {
             default_open_mode: "edit".to_string(),
             font_size: "system".to_string(),
             offline_mode: true,
+            markdown_export: false,
         }
     }
 }
@@ -54,6 +56,7 @@ mod tests {
         assert!(settings.update_notifications);
         assert_eq!(settings.font_size, "system");
         assert!(settings.offline_mode);
+        assert!(!settings.markdown_export);
     }
 
     #[test]
@@ -68,6 +71,7 @@ mod tests {
             default_open_mode: "edit".to_string(),
             font_size: "large".to_string(),
             offline_mode: false,
+            markdown_export: true,
         };
 
         let json = serde_json::to_string(&settings).unwrap();
@@ -80,6 +84,7 @@ mod tests {
         assert_eq!(parsed.sync_folder, "my-notes");
         assert!(!parsed.update_notifications);
         assert_eq!(parsed.font_size, "large");
+        assert!(parsed.markdown_export);
     }
 
     #[test]
@@ -111,6 +116,7 @@ mod tests {
                 default_open_mode: "edit".to_string(),
                 font_size: "system".to_string(),
                 offline_mode: true,
+                markdown_export: false,
             };
 
             let json = serde_json::to_string(&settings).unwrap();
@@ -141,6 +147,7 @@ mod tests {
             default_open_mode: "edit".to_string(),
             font_size: "xlarge".to_string(),
             offline_mode: true,
+            markdown_export: false,
         };
 
         let json = serde_json::to_string(&settings).unwrap();
@@ -181,6 +188,7 @@ mod tests {
             default_open_mode: "edit".to_string(),
             font_size: "normal".to_string(),
             offline_mode: false,
+            markdown_export: false,
         };
 
         let cloned = settings.clone();
@@ -217,6 +225,7 @@ mod tests {
             "default_open_mode",
             "font_size",
             "offline_mode",
+            "markdown_export",
         ]
         .iter()
         .map(|s| s.to_string())

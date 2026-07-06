@@ -107,7 +107,7 @@ async fn collect_server_folder_names(
 
 /// Ordner-Sync: lokale (nicht local-only) Ordner mit Server-folders.json LWW-mergen
 /// und fehlende Server-Verzeichnisse anlegen.
-async fn sync_folders(client: &WebDavClient, app: &AppHandle) {
+async fn sync_folders(client: &WebDavClient, app: &AppHandle, write_markdown: bool) {
     let server_meta = client.read_folders_meta().await;
 
     // Lokale nicht-local-only Ordner für den Merge aufbereiten
@@ -141,7 +141,7 @@ async fn sync_folders(client: &WebDavClient, app: &AppHandle) {
     // Server-Verzeichnisse für aktive lokale Nicht-local-only-Ordner anlegen
     for f in local_store::active_folders(app) {
         if !f.local_only {
-            client.ensure_folder_dirs(&f.name).await;
+            client.ensure_folder_dirs(&f.name, write_markdown).await;
         }
     }
 
@@ -172,6 +172,9 @@ pub async fn run_sync(
 ) -> SyncSummary {
     let mut summary = SyncSummary::default();
     let now = chrono::Utc::now().timestamp_millis();
+    // Einmal pro Lauf gelesen (nicht auf dem Client gecacht), damit ein Toggle in den
+    // Einstellungen ohne Reconnect beim nächsten Sync greift.
+    let write_markdown = crate::markdown_export_enabled(app);
 
     // 1. Offline-Queue abarbeiten (ausstehende Löschungen + Move-Cleanups + Ordner-Tombstones)
     sync_queue::drain_sync_queue(client, app, device_id, retention_ms).await;
@@ -185,7 +188,7 @@ pub async fn run_sync(
     }
 
     // 2. Ordner-Sync
-    sync_folders(client, app).await;
+    sync_folders(client, app, write_markdown).await;
 
     // 3. Server-Notizen abrufen
     let server_notes = match fetch_server_notes(client).await {
@@ -325,7 +328,7 @@ pub async fn run_sync(
         if skip || !matches!(n.sync_status, SyncStatus::Pending | SyncStatus::LocalOnly) {
             continue;
         }
-        match client.save_note(&n).await {
+        match client.save_note(&n, write_markdown).await {
             Ok(()) => {
                 local_store::mark_synced_if_unchanged(app, &n.id, n.updated_at);
                 uploaded_ids.push(n.id.clone());

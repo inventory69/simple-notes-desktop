@@ -40,6 +40,16 @@ pub(crate) fn lock_recover<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// Liest die `markdown_export`-Einstellung direkt aus dem Store (kein State-Cache), damit ein
+/// Toggle beim nächsten Sync greift ohne Reconnect (Android-Parität, default false).
+pub(crate) fn markdown_export_enabled(app: &AppHandle) -> bool {
+    app.store("settings.json")
+        .ok()
+        .and_then(|s| s.get("markdown_export"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
 /// Generiert oder lädt Device ID
 pub(crate) fn get_or_create_device_id(
     app: &AppHandle,
@@ -88,7 +98,9 @@ async fn connect(
 ) -> Result<bool> {
     let folder = sync_folder.unwrap_or_else(|| "notes".to_string());
     let client = WebDavClient::new(&url, &username, &password, &folder)?;
-    let success = client.test_connection().await?;
+    let success = client
+        .test_connection(markdown_export_enabled(&app))
+        .await?;
 
     if success {
         let _ = get_or_create_device_id(&app, &device_id_state)?;
@@ -185,10 +197,13 @@ async fn test_connection(
     username: String,
     password: String,
     sync_folder: Option<String>,
+    markdown_export: Option<bool>,
 ) -> Result<bool> {
     let folder = sync_folder.unwrap_or_else(|| "notes".to_string());
     let client = WebDavClient::new(&url, &username, &password, &folder)?;
-    client.test_connection().await
+    client
+        .test_connection(markdown_export.unwrap_or(false))
+        .await
 }
 
 #[tauri::command]
@@ -390,6 +405,7 @@ async fn get_settings(app: AppHandle) -> Result<Settings> {
         "default_open_mode",
         "font_size",
         "offline_mode",
+        "markdown_export",
     ] {
         if let Some(val) = store.get(key) {
             map.insert(key.to_string(), val.clone());
@@ -898,6 +914,18 @@ async fn migrate_to_new_target(app: AppHandle) -> Result<()> {
     Ok(())
 }
 
+/// Wird aufgerufen wenn der Nutzer den Markdown-Export in den Einstellungen einschaltet (false →
+/// true). Setzt alle Notizen auf PENDING, damit der nächste Sync den `.md`-Spiegel für den
+/// gesamten Bestand nachträgt — sonst hätten nur künftig bearbeitete Notizen eine `.md`-Datei.
+// ponytail: re-uploadet dabei auch die unveränderte JSON (kein md-only Export-Pass) — auf einem
+// LAN-Server ein einmaliger, vernachlässigbarer Zusatz-Traffic; reuse statt Sonderlogik.
+#[tauri::command]
+async fn backfill_markdown(app: AppHandle) -> Result<()> {
+    local_store::mark_all_dirty(&app);
+    scheduler::trigger_sync(&app);
+    Ok(())
+}
+
 /// "Nicht mitnehmen": lokalen Stand (Notizen + Ordner-Metadaten + Offline-Queue) verwerfen und
 /// durch den Inhalt des neuen Ziels ersetzen. Prüft zuerst die Erreichbarkeit (Guard); ein leeres
 /// neues Ziel ist kein Fehler. Läuft exklusiv zum Scheduler-Sync und kehrt erst nach dem
@@ -915,7 +943,10 @@ async fn replace_with_new_target(
 ) -> Result<()> {
     let folder = sync_folder.unwrap_or_else(|| "notes".to_string());
     let client = WebDavClient::new(&url, &username, &password, &folder)?;
-    if !client.test_connection().await? {
+    if !client
+        .test_connection(markdown_export_enabled(&app))
+        .await?
+    {
         return Err(AppError::NotConnected);
     }
 
@@ -1228,6 +1259,7 @@ pub fn run() {
             count_unsynced,
             migrate_to_new_target,
             replace_with_new_target,
+            backfill_markdown,
             md_mirror_exists,
             show_main_window,
         ])
