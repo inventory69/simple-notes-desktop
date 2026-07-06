@@ -311,6 +311,13 @@
                 <span class="settings-nav-label">Connection<span id="connection-folder-subtitle" class="settings-nav-sublabel"></span></span>
                 <svg class="settings-nav-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
               </button>
+              <button class="settings-nav-card" data-section="markdown" type="button">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+                </svg>
+                <span class="settings-nav-label">Markdown Export<span id="markdown-nav-sublabel" class="settings-nav-sublabel"></span></span>
+                <svg class="settings-nav-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+              </button>
               <button class="settings-nav-card" data-section="system" type="button">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
@@ -403,18 +410,34 @@
                 <label for="settings-password">Password</label>
                 <input type="password" id="settings-password" autocomplete="current-password" />
               </div>
-              <div class="form-group">
-                <label for="sync-folder-input">Sync Folder</label>
-                <div class="sync-folder-input-wrapper">
-                  <span class="sync-folder-prefix">/</span>
-                  <input type="text" id="sync-folder-input" placeholder="notes" maxlength="50" />
-                  <span class="sync-folder-suffix">/</span>
+              <details class="advanced-toggle" id="sync-folder-advanced">
+                <summary>Advanced</summary>
+                <div class="form-group">
+                  <label for="sync-folder-input">Sync Folder</label>
+                  <div class="sync-folder-input-wrapper">
+                    <span class="sync-folder-prefix">/</span>
+                    <input type="text" id="sync-folder-input" placeholder="notes" maxlength="50" />
+                    <span class="sync-folder-suffix">/</span>
+                  </div>
+                  <small class="form-hint">WebDAV folder for notes (default: "notes"). Only letters, numbers, dash and underscore.</small>
+                  <small class="form-hint">Use the same server and folder as the Android/web app. Don't enter the "-md" markdown folder — it's derived automatically.</small>
                 </div>
-                <small class="form-hint">WebDAV folder for notes (default: "notes"). Only letters, numbers, dash and underscore.</small>
-              </div>
+              </details>
               <div class="form-group">
                 <button id="test-connection-btn" class="btn-secondary" type="button">Test connection</button>
                 <span id="connection-status" class="form-hint">Status: Offline</span>
+              </div>
+            </div>
+
+            <!-- Markdown Export -->
+            <div class="settings-section hidden" data-section="markdown">
+              <h3>Markdown Export</h3>
+              <div class="form-group">
+                <label>
+                  <input type="checkbox" id="markdown-export-checkbox" />
+                  Markdown export
+                </label>
+                <small class="form-hint">Also mirror notes as human-readable .md files in a "-md" folder next to the JSON (off by default).</small>
               </div>
             </div>
 

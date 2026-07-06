@@ -2067,7 +2067,7 @@ select.dialog-input option {
 /* Advanced Toggle (Connection Dialog) */
 .advanced-toggle {
   margin-top: 0.5rem;
-  margin-bottom: 0.25rem;
+  margin-bottom: 1.25rem;
 }
 
 .advanced-toggle summary {

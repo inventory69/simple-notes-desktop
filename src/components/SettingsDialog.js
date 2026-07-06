@@ -21,6 +21,8 @@ export class SettingsDialog {
     this.serverUrlInput = document.getElementById('settings-server-url');
     this.serverUsernameInput = document.getElementById('settings-username');
     this.serverPasswordInput = document.getElementById('settings-password');
+    this.markdownExportCheckbox = document.getElementById('markdown-export-checkbox');
+    this.advancedDetails = document.getElementById('sync-folder-advanced');
     this.connectionStatus = document.getElementById('connection-status');
     this.testConnBtn = document.getElementById('test-connection-btn');
     this.homeView = document.getElementById('settings-home');
@@ -218,6 +220,7 @@ export class SettingsDialog {
       this.serverPasswordInput,
       this.syncFolderInput,
       this.testConnBtn,
+      this.markdownExportCheckbox,
     ]) {
       if (el) el.disabled = offline;
     }
@@ -257,17 +260,20 @@ export class SettingsDialog {
     try {
       // test_connection has no side effects (unlike connect, which stores the client
       // and uploads local notes) — so testing never silently changes the offline state.
-      const ok = await tauri.testConnection(url, username, password, syncFolder);
+      const markdownExport = this.markdownExportCheckbox.checked;
+      const ok = await tauri.testConnection(url, username, password, syncFolder, markdownExport);
       if (ok) {
         this.connectionStatus.textContent = 'Status: Reachable';
         let mirrorMsg = '';
-        try {
-          const mirrorExists = await tauri.mdMirrorExists(url, username, password, syncFolder);
-          mirrorMsg = mirrorExists
-            ? ' Markdown mirror already exists.'
-            : ' Markdown mirror will be created automatically.';
-        } catch (_e) {
-          /* informational only — ignore failures */
+        if (markdownExport) {
+          try {
+            const mirrorExists = await tauri.mdMirrorExists(url, username, password, syncFolder);
+            mirrorMsg = mirrorExists
+              ? ' Markdown mirror already exists.'
+              : ' Markdown mirror will be created automatically.';
+          } catch (_e) {
+            /* informational only — ignore failures */
+          }
         }
         await dialogService.info({ title: 'Connection OK', message: `Server reachable.${mirrorMsg}` });
       } else {
@@ -306,6 +312,10 @@ export class SettingsDialog {
       this.deviceIdInput.value = deviceId;
       this._setActiveChip(this._originalFontSize);
       this.offlineCheckbox.checked = this._previousOffline;
+      this._previousMarkdownExport = settings.markdown_export || false;
+      this.markdownExportCheckbox.checked = this._previousMarkdownExport;
+      this.advancedDetails.open = false;
+      this._updateMarkdownSubtitle(this._previousMarkdownExport);
 
       let creds = null;
       try {
@@ -411,8 +421,14 @@ export class SettingsDialog {
     if (el) el.textContent = folder ? `Folder: ${folder}` : '';
   }
 
+  _updateMarkdownSubtitle(enabled) {
+    const el = document.getElementById('markdown-nav-sublabel');
+    if (el) el.textContent = enabled ? 'Auto-Sync: On' : 'Auto-Sync: Off';
+  }
+
   _finishSave(settings) {
     this._updateConnectionSubtitle(settings.sync_folder);
+    this._updateMarkdownSubtitle(settings.markdown_export);
     if (this.onSaveCallback) this.onSaveCallback(settings);
     this.hide();
   }
@@ -431,12 +447,19 @@ export class SettingsDialog {
         default_open_mode: this.defaultOpenModeSelect.value,
         font_size: this._currentFontSize,
         offline_mode: offline,
+        markdown_export: this.markdownExportCheckbox.checked,
       };
 
       await tauri.saveSettings(settings);
       // Update tray runtime state immediately (no restart needed)
       await tauri.updateTraySetting(settings.minimize_to_tray);
       this.applyTheme(settings.theme);
+
+      // false → true transition: backfill the mirror for all existing notes (only matters
+      // online — offline mode never syncs).
+      if (!offline && settings.markdown_export && !this._previousMarkdownExport) {
+        await tauri.backfillMarkdown();
+      }
 
       const url = this.serverUrlInput.value.trim();
       const username = this.serverUsernameInput.value.trim();

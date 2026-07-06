@@ -27,6 +27,7 @@ function setupDOM() {
         <div id="settings-home">
           <button class="settings-nav-card" data-section="appearance" type="button">Appearance</button>
           <button class="settings-nav-card" data-section="connection" type="button">Connection</button>
+          <button class="settings-nav-card" data-section="markdown" type="button">Markdown Export<span id="markdown-nav-sublabel"></span></button>
           <button class="settings-nav-card" data-section="system" type="button">System</button>
           <button id="updates-card" class="settings-nav-card hidden" data-section="updates" type="button">Updates</button>
           <button class="settings-nav-card" data-section="about" type="button">About</button>
@@ -43,9 +44,15 @@ function setupDOM() {
           <input type="text" id="settings-server-url" />
           <input type="text" id="settings-username" />
           <input type="password" id="settings-password" />
+          <details id="sync-folder-advanced">
+            <summary>Advanced</summary>
+            <input type="text" id="sync-folder-input" placeholder="notes" maxlength="50" />
+          </details>
           <button id="test-connection-btn" class="btn-secondary" type="button">Test connection</button>
           <span id="connection-status"></span>
-          <input type="text" id="sync-folder-input" placeholder="notes" maxlength="50" />
+        </div>
+        <div class="settings-section hidden" data-section="markdown">
+          <input type="checkbox" id="markdown-export-checkbox" />
         </div>
         <div class="settings-section hidden" data-section="system">
           <input type="checkbox" id="tray-checkbox" />
@@ -242,7 +249,7 @@ describe('SettingsDialog', () => {
       dialog.serverUsernameInput.value = 'admin';
       dialog.serverPasswordInput.value = 'pw';
       await dialog._testConnection();
-      expect(tauri.testConnection).toHaveBeenCalledWith('http://test.local', 'admin', 'pw', 'notes');
+      expect(tauri.testConnection).toHaveBeenCalledWith('http://test.local', 'admin', 'pw', 'notes', false);
       expect(dialogService.info).toHaveBeenCalled();
       expect(dialog.connectionStatus.textContent).toBe('Status: Reachable');
       // test_connection has no side effects: never stores a client, never disconnects
