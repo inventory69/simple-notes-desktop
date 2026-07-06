@@ -4,7 +4,7 @@
 
 <h1 align="center">Simple Notes Desktop</h1>
 
-<h4 align="center">Cross-Platform Notizen-App mit WebDAV-Sync — der Desktop-Begleiter zu Simple Notes Sync.</h4>
+<h4 align="center">Local-first Notizen-App mit WebDAV-Sync — der Desktop-Begleiter zu Simple Notes Sync.</h4>
 
 <div align="center">
 
@@ -36,6 +36,8 @@ Lade das passende Paket für deine Plattform herunter:
 | **Linux (Fedora/RHEL)** | [Download](https://github.com/inventory69/simple-notes-desktop/releases/latest) | `.rpm` |
 | **Arch Linux** | [Installationsanleitung](docs/ARCH_INSTALL.md) | AUR / AppImage |
 
+Windows-Installationen aktualisieren sich über den eingebauten Updater. Unter Linux aktualisierst du über deinen Paketmanager oder das neueste Release.
+
 ---
 
 ## 📱 Screenshots
@@ -51,7 +53,7 @@ Lade das passende Paket für deine Plattform herunter:
 
 <div align="center">
 
-📝 Markdown-Editor &nbsp;•&nbsp; ✅ Checklisten &nbsp;•&nbsp; 🔄 WebDAV-Sync &nbsp;•&nbsp; 🔽 System Tray &nbsp;•&nbsp; ⚙️ Einstellungen
+📝 Markdown-Editor &nbsp;•&nbsp; ✅ Checklisten &nbsp;•&nbsp; 📁 Ordner &nbsp;•&nbsp; 🎨 15 Themes &nbsp;•&nbsp; 🔄 WebDAV-Sync
 
 </div>
 
@@ -59,14 +61,19 @@ Lade das passende Paket für deine Plattform herunter:
 
 ## ✨ Highlights
 
-- 📝 **Markdown-Editor** — Vollständiges Syntax-Highlighting mit Live-Vorschau (CodeMirror 6)
-- ✅ **Checklisten** — Erstelle und verwalte Aufgabenlisten mit Tap-to-Check
-- 🔄 **WebDAV-Sync** — Funktioniert mit Nextcloud, lokalen Servern und jedem WebDAV-Anbieter
-- 🌓 **Dark/Light Mode** — Automatisches Theme basierend auf Systemeinstellungen
-- 💾 **Auto-Speichern** — Verliere nie deine Arbeit durch automatisches Speichern
-- 🔒 **Lokale Server** — Verbinde dich mit localhost (im Gegensatz zu PWA/Browser-Einschränkungen)
-- 🔍 **Suche** — Finde Notizen schnell nach Titel oder Inhalt
-- 🖥️ **Cross-Platform** — Windows und Linux mit nativer Performance
+- 🗄️ **Local-first & offline** — Notizen liegen lokal und sind mit oder ohne Server sofort bearbeitbar; die WebDAV-Sync läuft im Hintergrund, sobald verbunden
+- 📝 **Markdown-Editor** — Syntax-Highlighting, Formatierungs-Toolbar und Live-Vorschau (CodeMirror 6)
+- ✅ **Checklisten** — Tap-to-Check, Drag-to-Reorder, 5 Sortiermodi, Trennlinie zwischen offen/erledigt
+- 📁 **Ordner** — Notizen in Ordner sortieren; einen Ordner **nur-lokal** markieren, um ihn vom Server fernzuhalten
+- 🗑️ **Papierkorb** — Soft-Delete mit Wiederherstellen, endgültigem Löschen und geräteübergreifender Lösch-Sync
+- 📌 **Anpinnen, Farbe & Sortierung** — Notizen oben anheften, Keep-kompatible Farben vergeben, Liste auf fünf Arten sortieren
+- 🔀 **Mehrfachauswahl** — Notizen gebündelt anpinnen, färben, verschieben oder löschen (F6)
+- 🎨 **15 Themes** — Breeze, Catppuccin, Nord, Gruvbox, Tokyo Night, Rosé Pine u. v. m. — plus System/Hell/Dunkel
+- 🔄 **WebDAV-Sync** — Funktioniert mit Nextcloud, dem Simple-Notes-Server und jedem WebDAV-Anbieter
+- 🔒 **Lokale Server** — Verbinde dich mit `localhost` und privaten IPs, die Browser-PWAs nicht erreichen
+- 📄 **Markdown-Export** — Lesbare `.md`-Kopien werden neben dem JSON auf dem Server abgelegt
+- 🔍 **Suche** — Notizen nach Titel oder Inhalt filtern, während du tippst
+- 🖥️ **Nativer Desktop** — System-Tray, Autostart, verstellbare Seitenleiste und (unter Windows) ein In-App-Updater
 
 ---
 
@@ -79,7 +86,9 @@ Diese App ist Teil der **Simple Notes** Familie — alle Apps nutzen das gleiche
 | [**Simple Notes Sync**](https://github.com/inventory69/simple-notes-sync) | Android | Mobile App mit Offline-first Sync |
 | **Simple Notes Desktop** | Windows/Linux | Du bist hier! Native Desktop-Erfahrung |
 
-Die Desktop-App löst ein kritisches Problem: **Lokale WebDAV-Server** (localhost, private IPs wie `192.168.x.x`) können von browser-basierten PWAs nicht erreicht werden aufgrund von:
+### Warum Desktop?
+
+Die Desktop-App löst ein kritisches Problem: **Lokale WebDAV-Server** (localhost, private IPs wie `192.168.x.x`, einfaches `http://`) können von browser-basierten PWAs nicht erreicht werden aufgrund von:
 - Mixed Content (HTTPS → HTTP) Blocking
 - CORS-Einschränkungen
 
@@ -91,11 +100,13 @@ Simple Notes Desktop nutzt native HTTP-Requests und umgeht diese Browser-Einschr
 
 ### 1. Download & Installation
 
-Lade das passende Paket für deine Plattform von der [Releases](https://github.com/inventory69/simple-notes-desktop/releases/latest) Seite herunter und installiere es.
+Lade das passende Paket für deine Plattform von der [Releases](https://github.com/inventory69/simple-notes-desktop/releases/latest) Seite herunter und installiere es. Die App startet direkt in ein funktionierendes, **offline** nutzbares Notizbuch — kein Konto, kein Server nötig.
 
-### 2. WebDAV-Server einrichten
+### 2. (Optional) WebDAV-Server einrichten
 
-**Option A: Simple Notes Server (Docker)**
+Sync brauchst du nur, wenn deine Notizen auf mehreren Geräten liegen sollen.
+
+**Option A — Simple Notes Server (Docker)**
 
 ```bash
 git clone https://github.com/inventory69/simple-notes-sync.git
@@ -105,21 +116,35 @@ cp .env.example .env
 docker compose up -d
 ```
 
-**Option B: Deine bestehende Nextcloud**
+**Option B — Deine bestehende Nextcloud**
 
-Deine WebDAV-URL wird sein:
 ```
 https://deine-nextcloud.de/remote.php/dav/files/BENUTZERNAME/Notes/
 ```
 
 ### 3. Verbinden
 
-1. Öffne Simple Notes Desktop
-2. Gib deine WebDAV-URL, Benutzername und Passwort ein
-3. Klicke **Verbinden**
-4. Deine Notizen werden automatisch synchronisiert 🎉
+1. Öffne die **Einstellungen** (⚙️)
+2. Schalte den **Offline-Modus** aus und gib WebDAV-URL, Benutzername und Passwort ein
+3. Klicke **Verbindung testen**, dann **Speichern**
+4. Deine Notizen synchronisieren sich automatisch im Hintergrund 🎉
 
 ➡️ **Detaillierte Anleitung:** [docs/SETUP.md](docs/SETUP.md)
+
+---
+
+## ⌨️ Tastenkürzel
+
+| Kürzel | Aktion |
+|--------|--------|
+| `Ctrl+N` | Neue Notiz |
+| `Ctrl+Shift+N` | Neue Checkliste |
+| `Ctrl+S` | Sofort speichern |
+| `Ctrl+F` | Notizen suchen |
+| `Ctrl+B` / `Ctrl+I` | Fett / kursiv (Editor) |
+| `Ctrl+Z` | Rückgängig |
+| `F6` | Mehrfachauswahl umschalten |
+| `Esc` | Dialog schließen / Suche leeren |
 
 ---
 
@@ -130,7 +155,7 @@ https://deine-nextcloud.de/remote.php/dav/files/BENUTZERNAME/Notes/
 | [SETUP.md](docs/SETUP.md) | Detaillierte Installation & Konfiguration |
 | [BUILDING.md](BUILDING.md) | Aus Quellcode bauen (Entwickler) |
 | [CHANGELOG.md](CHANGELOG.md) | Versionsgeschichte |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Technische Architektur |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Entwicklungs-Setup & Konventionen |
 
 ---
 
@@ -147,13 +172,6 @@ sudo pacman -S fuse2
 sudo apt install libfuse2
 ```
 
-### macOS: "App ist beschädigt" (Gatekeeper)
-
-Das passiert, weil die App nicht von Apple notarisiert ist:
-```bash
-xattr -cr "Simple Notes Desktop.app"
-```
-
 ---
 
 ## 🤝 Mitmachen
@@ -165,10 +183,10 @@ Beiträge sind willkommen! Lies [CONTRIBUTING.md](CONTRIBUTING.md) für Richtlin
 git clone https://github.com/inventory69/simple-notes-desktop.git
 cd simple-notes-desktop
 
-# Abhängigkeiten installieren
+# Abhängigkeiten installieren (pnpm erforderlich)
 pnpm install
 
-# Development Server starten
+# Development-Server starten
 pnpm dev
 
 # Für Produktion bauen
@@ -185,6 +203,6 @@ MIT-Lizenz — siehe [LICENSE](LICENSE)
 
 <div align="center">
 
-**v0.2.0** · Mit ❤️ gebaut mit [Tauri](https://tauri.app/) + [CodeMirror](https://codemirror.net/)
+**v0.10.0** · Mit ❤️ gebaut mit [Tauri](https://tauri.app/) + [CodeMirror](https://codemirror.net/)
 
 </div>

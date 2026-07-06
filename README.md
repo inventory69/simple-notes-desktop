@@ -4,7 +4,7 @@
 
 <h1 align="center">Simple Notes Desktop</h1>
 
-<h4 align="center">Cross-platform note-taking with WebDAV sync — the desktop companion to Simple Notes Sync.</h4>
+<h4 align="center">Local-first, cross-platform note-taking with WebDAV sync — the desktop companion to Simple Notes Sync.</h4>
 
 <div align="center">
 
@@ -36,6 +36,8 @@ Download the latest release for your platform:
 | **Linux (Fedora/RHEL)** | [Download](https://github.com/inventory69/simple-notes-desktop/releases/latest) | `.rpm` |
 | **Arch Linux** | [See installation guide](docs/ARCH_INSTALL.md) | AUR / AppImage |
 
+Windows installs update themselves via the built-in updater. On Linux, update through your package manager or by downloading the newest release.
+
 ---
 
 ## 📱 Screenshots
@@ -46,12 +48,12 @@ Download the latest release for your platform:
 
 <p align="center">
   <img src="screenshots/checklist.png" width="400" alt="Checklist View">
-  <img src="screenshots/settings.png" width="400" alt="Settings Dialog">
+  <img src="screenshots/settings.png" width="400" alt="Settings">
 </p>
 
 <div align="center">
 
-📝 Markdown Editor &nbsp;•&nbsp; ✅ Checklists &nbsp;•&nbsp; 🔄 WebDAV Sync &nbsp;•&nbsp; 🔽 System Tray &nbsp;•&nbsp; ⚙️ Settings
+📝 Markdown Editor &nbsp;•&nbsp; ✅ Checklists &nbsp;•&nbsp; 📁 Folders &nbsp;•&nbsp; 🎨 15 Themes &nbsp;•&nbsp; 🔄 WebDAV Sync
 
 </div>
 
@@ -59,14 +61,19 @@ Download the latest release for your platform:
 
 ## ✨ Highlights
 
-- 📝 **Markdown Editor** — Full syntax highlighting with live preview (CodeMirror 6)
-- ✅ **Checklists** — Create and manage task lists with tap-to-check
-- 🔄 **WebDAV Sync** — Works with Nextcloud, local servers, and any WebDAV provider
-- 🌓 **Dark/Light Mode** — Automatic theme based on system settings
-- 💾 **Auto-save** — Never lose your work with automatic saving
-- 🔒 **Local Server Support** — Connect to localhost (unlike PWA/browser limitations)
-- 🔍 **Search** — Quickly find notes by title or content
-- 🖥️ **Cross-platform** — Windows and Linux with native performance
+- 🗄️ **Local-first & offline** — Notes are stored locally and are instantly editable with or without a server; WebDAV sync runs quietly in the background when connected
+- 📝 **Markdown editor** — Syntax highlighting, formatting toolbar, and live preview (CodeMirror 6)
+- ✅ **Checklists** — Tap-to-check items, drag-to-reorder, 5 sort modes, done/open separator
+- 📁 **Folders** — Organise notes into folders; mark a folder **local-only** to keep it off the server
+- 🗑️ **Trash** — Soft-delete with restore, permanent delete, and cross-device deletion sync
+- 📌 **Pin, color & sort** — Pin notes to the top, apply Keep-compatible colors, and sort the list five ways
+- 🔀 **Multi-select** — Batch pin, color, move, or delete notes (F6)
+- 🎨 **15 themes** — Breeze, Catppuccin, Nord, Gruvbox, Tokyo Night, Rosé Pine, and more — plus System/Light/Dark
+- 🔄 **WebDAV sync** — Works with Nextcloud, the Simple Notes server, and any WebDAV provider
+- 🔒 **Local server support** — Connect to `localhost` and private IPs that browser PWAs can't reach
+- 📄 **Markdown export** — Human-readable `.md` copies written alongside the JSON on the server
+- 🔍 **Search** — Filter notes by title or content as you type
+- 🖥️ **Native desktop** — System tray, autostart, resizable sidebar, and (on Windows) an in-app updater
 
 ---
 
@@ -78,11 +85,10 @@ This app is part of the **Simple Notes** family — all apps share the same data
 |-----|----------|-------------|
 | [**Simple Notes Sync**](https://github.com/inventory69/simple-notes-sync) | Android | Mobile app with offline-first sync |
 | **Simple Notes Desktop** | Windows/Linux | You're here! Native desktop experience |
-| [**Simple Notes Web**](https://github.com/inventory69/simple-notes-web) | Browser (PWA) | Web app for remote servers |
 
 ### Why Desktop?
 
-The desktop app solves a critical limitation: **local WebDAV servers** (localhost, private IPs like `192.168.x.x`) cannot be accessed from browser-based PWAs due to:
+The desktop app solves a critical limitation: **local WebDAV servers** (localhost, private IPs like `192.168.x.x`, plain `http://`) cannot be accessed from browser-based PWAs due to:
 - Mixed Content (HTTPS → HTTP) blocking
 - CORS restrictions
 
@@ -92,13 +98,15 @@ Simple Notes Desktop uses native HTTP requests, bypassing these browser limitati
 
 ## 🚀 Quick Start
 
-### 1. Download & Install
+### 1. Download & install
 
-Download the appropriate package for your platform from the [Releases](https://github.com/inventory69/simple-notes-desktop/releases/latest) page and install it.
+Grab the package for your platform from the [Releases](https://github.com/inventory69/simple-notes-desktop/releases/latest) page and install it. The app opens straight into a working, **offline** notebook — no account or server required.
 
-### 2. Set Up WebDAV Server
+### 2. (Optional) Set up a WebDAV server
 
-**Option A: Use the Simple Notes Server (Docker)**
+Sync is only needed if you want your notes on other devices.
+
+**Option A — Simple Notes Server (Docker)**
 
 ```bash
 git clone https://github.com/inventory69/simple-notes-sync.git
@@ -108,21 +116,35 @@ cp .env.example .env
 docker compose up -d
 ```
 
-**Option B: Use your existing Nextcloud**
+**Option B — your existing Nextcloud**
 
-Your WebDAV URL will be:
 ```
 https://your-nextcloud.com/remote.php/dav/files/USERNAME/Notes/
 ```
 
 ### 3. Connect
 
-1. Open Simple Notes Desktop
-2. Enter your WebDAV URL, username, and password
-3. Click **Connect**
-4. Your notes will sync automatically 🎉
+1. Open **Settings** (⚙️)
+2. Turn **Offline mode** off and enter your WebDAV URL, username, and password
+3. Hit **Test connection**, then **Save**
+4. Your notes sync automatically in the background 🎉
 
 ➡️ **Detailed setup:** [docs/SETUP.md](docs/SETUP.md)
+
+---
+
+## ⌨️ Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+N` | New note |
+| `Ctrl+Shift+N` | New checklist |
+| `Ctrl+S` | Save now |
+| `Ctrl+F` | Search notes |
+| `Ctrl+B` / `Ctrl+I` | Bold / italic (editor) |
+| `Ctrl+Z` | Undo |
+| `F6` | Toggle multi-select |
+| `Esc` | Close dialog / clear search |
 
 ---
 
@@ -150,36 +172,6 @@ sudo pacman -S fuse2
 sudo apt install libfuse2
 ```
 
-### Linux: Blank window / `EGL_BAD_PARAMETER` on Fedora Silverblue (Wayland)
-
-On immutable distros like Fedora Silverblue 41+, the AppImage's bundled Wayland libraries can
-conflict with the host's EGL stack, producing:
-
-```
-Could not create default EGL display: EGL_BAD_PARAMETER. Aborting...
-```
-
-Starting with v0.5.0 the app sets the required environment variables automatically. If you are
-on an older version, use this workaround:
-
-```bash
-LD_PRELOAD=/usr/lib64/libwayland-client.so.0 ./simple_notes_desktop.appimage --no-sandbox
-```
-
-### Linux: App freezes when loading notes with certain emoji
-
-On Fedora Silverblue 41+ the AppImage may freeze when a note contains color emoji (e.g. 🦛)
-due to a COLRv1 rendering bug in the bundled WebKitGTK. Starting with v0.5.0 the app requests
-text-style emoji rendering to avoid this code path. If you are on an older version, open the
-note in the Android app and remove or replace the affected emoji, then re-sync.
-
-### macOS: "App is damaged" (Gatekeeper)
-
-This happens because the app isn't notarized by Apple. Run:
-```bash
-xattr -cr "Simple Notes Desktop.app"
-```
-
 ---
 
 ## 🤝 Contributing
@@ -191,7 +183,7 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for gu
 git clone https://github.com/inventory69/simple-notes-desktop.git
 cd simple-notes-desktop
 
-# Install dependencies
+# Install dependencies (pnpm required)
 pnpm install
 
 # Start development server
