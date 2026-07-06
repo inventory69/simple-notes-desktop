@@ -1723,6 +1723,34 @@ body {
   opacity: 1;
 }
 
+.checklist-item-calendar {
+  background-color: transparent;
+  border: none;
+  color: var(--color-fg);
+  cursor: pointer;
+  padding: 0.35rem 0.5rem;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  opacity: 0.5;
+  transition: opacity 0.2s;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.checklist-item-calendar:disabled {
+  cursor: default;
+}
+
+.checklist-item:hover .checklist-item-calendar:not(:disabled) {
+  opacity: 1;
+}
+
+.checklist-item-calendar:disabled,
+.checklist-item:hover .checklist-item-calendar:disabled {
+  opacity: 0.25;
+}
+
 .checklist-add-btn {
   margin-top: 1rem;
   padding: 0.5rem;

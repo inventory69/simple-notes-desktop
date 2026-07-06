@@ -35,6 +35,10 @@ pub enum AppError {
     #[allow(dead_code)]
     #[error("Invalid timestamp: {0}")]
     InvalidTimestamp(String),
+
+    /// Dateisystem-/Öffnen-Fehler (z.B. .ics-Export)
+    #[error("File error: {0}")]
+    Io(String),
 }
 
 /// Serialisierung für Tauri (Fehler als String)

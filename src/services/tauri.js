@@ -343,3 +343,12 @@ export async function backfillMarkdown() {
 export async function showMainWindow() {
   return await invoke('show_main_window');
 }
+
+/**
+ * Generate an .ics calendar event and open it with the OS default handler.
+ * @param {string} title - Event title
+ * @param {string} description - Event description
+ */
+export async function exportToCalendar(title, description) {
+  return await invoke('export_to_calendar', { title, description });
+}

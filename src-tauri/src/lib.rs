@@ -1,3 +1,4 @@
+mod calendar;
 mod error;
 mod folders;
 mod local_store;
@@ -176,6 +177,17 @@ async fn save_note(mut note: Note, app: AppHandle) -> Result<Note> {
     local_store::put_note(&app, &note);
     scheduler::trigger_sync(&app);
     Ok(note)
+}
+
+/// Erzeugt ein .ics-Event aus Titel/Beschreibung und öffnet es mit der Standard-App
+/// des Betriebssystems (Android-Parität: reines Intent-Hand-off, keine Kalender-Berechtigungen).
+#[tauri::command]
+async fn export_to_calendar(title: String, description: String) -> Result<()> {
+    let ics = calendar::generate_ics(&title, &description);
+    let path = std::env::temp_dir().join(format!("{}.ics", Uuid::new_v4()));
+    std::fs::write(&path, ics).map_err(|e| AppError::Io(e.to_string()))?;
+    tauri_plugin_opener::open_path(path.to_string_lossy().to_string(), None::<&str>)
+        .map_err(|e| AppError::Io(e.to_string()))
 }
 
 #[tauri::command]
@@ -1262,6 +1274,7 @@ pub fn run() {
             backfill_markdown,
             md_mirror_exists,
             show_main_window,
+            export_to_calendar,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

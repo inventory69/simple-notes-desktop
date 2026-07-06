@@ -7,7 +7,9 @@ import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { dialogService } from '../services/DialogService.js';
 import noteService from '../services/noteService.js';
+import { exportToCalendar } from '../services/tauri.js';
 import { colorPicker } from '../utils/ColorPicker.js';
+import { buildCalendarPayload, buildCalendarPayloadForItem } from '../utils/calendarExport.js';
 import { markdownHighlightExtensions } from '../utils/markdownHighlight.js';
 import {
   applyBold,
@@ -45,6 +47,7 @@ export class NoteEditor {
     this.undoBtn = document.getElementById('undo-btn');
     this.addItemHeaderBtn = document.getElementById('add-checklist-item-btn');
     this.colorBtn = document.getElementById('note-color-btn');
+    this.calendarBtn = document.getElementById('calendar-btn');
 
     this.mdToolbar = document.getElementById('markdown-toolbar');
     this.mdBtnBold = document.getElementById('md-btn-bold');
@@ -126,6 +129,22 @@ export class NoteEditor {
         this.updateSyncStatus('Saving...');
         await this.save();
       });
+    });
+
+    // Add to calendar
+    this.calendarBtn?.addEventListener('click', async () => {
+      if (!this.currentNote) return;
+      const payload = buildCalendarPayload(this.currentNote);
+      if (!payload) {
+        await dialogService.error({ message: 'Note is empty' });
+        return;
+      }
+      try {
+        await exportToCalendar(payload.title, payload.description);
+      } catch (error) {
+        console.error('Failed to export to calendar:', error);
+        await dialogService.error({ title: 'Calendar', message: error.message || String(error) });
+      }
     });
 
     // Markdown toolbar button listeners
@@ -453,6 +472,7 @@ export class NoteEditor {
       const checkbox = el.querySelector('input[type="checkbox"]');
       const textInput = el.querySelector('.checklist-item-text');
       const deleteBtn = el.querySelector('.checklist-item-delete');
+      const calendarBtn = el.querySelector('.checklist-item-calendar');
       const dragHandle = el.querySelector('.checklist-drag-handle');
 
       // Checkbox toggle
@@ -539,6 +559,17 @@ export class NoteEditor {
         this._pushSnapshot();
         this.renderChecklist();
         this.scheduleSave();
+      });
+
+      // Add to calendar
+      calendarBtn?.addEventListener('click', async () => {
+        const payload = buildCalendarPayloadForItem(item, this.currentNote.title);
+        try {
+          await exportToCalendar(payload.title, payload.description);
+        } catch (error) {
+          console.error('Failed to export item to calendar:', error);
+          await dialogService.error({ title: 'Calendar', message: error.message || String(error) });
+        }
       });
 
       // F2: Drag-and-Drop via drag handle
@@ -758,6 +789,14 @@ export class NoteEditor {
           <div class="checklist-gradient-top"></div>
           <div class="checklist-gradient-bottom"></div>
         </div>
+        <button class="checklist-item-calendar" type="button" title="Add to calendar" ${isEmpty ? 'disabled' : ''}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+            <line x1="16" y1="2" x2="16" y2="6"></line>
+            <line x1="8" y1="2" x2="8" y2="6"></line>
+            <line x1="3" y1="10" x2="21" y2="10"></line>
+          </svg>
+        </button>
         <button class="checklist-item-delete" type="button">✕</button>
         ${isEmpty ? '<span class="checklist-item-unsaved-hint">not saved</span>' : ''}
       </div>
