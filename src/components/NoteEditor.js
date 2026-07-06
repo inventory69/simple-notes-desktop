@@ -283,12 +283,16 @@ export class NoteEditor {
     this.showPreview = !this.showPreview;
 
     if (this.showPreview) {
+      this.editorDiv.classList.add('hidden');
       this.previewDiv.classList.remove('hidden');
       this.previewToggleBtn.classList.add('active');
+      this.mdToolbar?.classList.add('hidden');
       this.updatePreview();
     } else {
       this.previewDiv.classList.add('hidden');
+      this.editorDiv.classList.remove('hidden');
       this.previewToggleBtn.classList.remove('active');
+      this.mdToolbar?.classList.remove('hidden');
     }
   }
 
