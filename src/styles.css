@@ -2163,6 +2163,13 @@ select.dialog-input option {
   background-color: var(--nc-d, var(--nc-l, transparent));
 }
 
+/* Preview/meta text needs more contrast than --color-muted against the tinted background */
+.note-item.has-color .note-item-preview,
+.note-item.has-color .note-item-preview .preview-line:last-child:nth-child(n + 4),
+.note-item.has-color .note-item-meta {
+  color: color-mix(in srgb, var(--color-fg) 72%, transparent);
+}
+
 /* Selektierter Zustand: Notizfarbe abdunkeln statt blauem Overlay */
 .note-item.has-color.selected,
 .note-item.has-color.multi-selected {
