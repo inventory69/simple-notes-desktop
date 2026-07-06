@@ -1,5 +1,5 @@
-- New "what's new" popup after updates, with a full changelog view in Settings
-- Collapse/expand toggle for Pinned, Folders, and Notes section headers
-- Fixed a white screen flash on startup, replaced with a proper splash loader
-- Note list now appears instantly at startup instead of waiting on the server
-- Folder "..." menu now closes properly when clicked a second time
+- Archive notes instead of deleting them, with a dedicated Archive view
+- "Add to calendar" button for notes and checklist items
+- Markdown export is now optional and off by default, with its own Settings screen
+- Changing server/sync folder now offers to migrate or replace instead of switching silently
+- Fixed preview toggle to fully swap the editor instead of splitting the view

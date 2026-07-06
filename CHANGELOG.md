@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-07-06
+
+### Added
+
+- Note archiving (Android parity): notes can be archived instead of deleted, hiding them from the main list and folder counts while staying fully synced; adds archive/unarchive from the editor and bulk selection, plus a dedicated Archive view mirroring Trash ([1a3dd6b](https://github.com/inventory69/simple-notes-desktop/commit/1a3dd6b73ddcc76cd3f9f576a89fb5cda7f6b624))
+- "Add to calendar" for notes and checklist items: generates a standard .ics event and opens it with the OS default handler, mirroring the Android app's calendar hand-off ([f98ac17](https://github.com/inventory69/simple-notes-desktop/commit/f98ac17c8770c872d7016b853d43f2ae8f7823dd))
+- Markdown export is now optional, off by default, with its own Settings screen showing an "Auto-Sync: On/Off" status ([904796a](https://github.com/inventory69/simple-notes-desktop/commit/904796ace6c14ba3b3a6917b5af180195df8e179))
+  - Toggling it on backfills the `.md` mirror for existing notes ([232e01b](https://github.com/inventory69/simple-notes-desktop/commit/232e01b5499a4516f00d8c21f47da3c43a1aabc7))
+- Changing the WebDAV server URL or sync folder now prompts to migrate (upload local notes and merge) or replace (discard local data and pull the new target), matching the Android app instead of reconnecting silently ([597ec60](https://github.com/inventory69/simple-notes-desktop/commit/597ec60e8b288528fb97b09f0934a74378cc804d))
+
+### Fixed
+
+- Preview toggle now fully swaps the editor for the preview pane instead of splitting them top/bottom ([a48994e](https://github.com/inventory69/simple-notes-desktop/commit/a48994ed1f0b6d5399b9fa4c545834df970d377b))
+- Sidebar preview and meta text now stay readable against colored note backgrounds in both light and dark mode ([5418467](https://github.com/inventory69/simple-notes-desktop/commit/5418467f8ad058ef6a4fae14eb6fec63ed394aac))
+
+### Documentation
+
+- Refreshed README with local-first architecture, folders, themes, and shortcuts, plus updated screenshots (EN+DE) ([dba0a92](https://github.com/inventory69/simple-notes-desktop/commit/dba0a925eefe514d96c9c3078e732976229d1f53), [a0ea27c](https://github.com/inventory69/simple-notes-desktop/commit/a0ea27c9082c5c93d57e49e5bc6bfcf9a7b245de))
+
 ## [0.10.0] - 2026-07-01
 
 ### Added
