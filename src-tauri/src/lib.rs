@@ -1,6 +1,8 @@
+mod assets;
 mod calendar;
 mod error;
 mod folders;
+mod images;
 mod local_store;
 mod markdown;
 mod models;
@@ -191,6 +193,35 @@ async fn export_to_calendar(title: String, description: String) -> Result<()> {
     std::fs::write(&path, ics).map_err(|e| AppError::Io(e.to_string()))?;
     tauri_plugin_opener::open_path(path.to_string_lossy().to_string(), None::<&str>)
         .map_err(|e| AppError::Io(e.to_string()))
+}
+
+/// Verarbeitet ein per Datei-Picker gewähltes Bild (Kompression gemäß `mode`) und legt es
+/// content-adressiert im lokalen Asset-Store ab. Gibt den Dateinamen zurück — die JS-Seite
+/// baut daraus die Content-Referenz `.assets/<name>`.
+#[tauri::command]
+async fn attach_image(path: String, mode: String, app: AppHandle) -> Result<String> {
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|e| AppError::Io(e.to_string()))?;
+    let src_ext = std::path::Path::new(&path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("bin");
+    let (out, ext) = images::process(&bytes, src_ext, images::CompressionMode::parse(&mode))?;
+    let name = images::content_name(&out, &ext);
+    if !assets::is_cached(&app, &name) {
+        assets::save_asset(&app, &name, &out)?;
+    }
+    Ok(name)
+}
+
+/// Liest EXIF-Metadaten + Dimensionen eines lokal gecachten Assets für den Info-Dialog.
+/// `None` wenn die Datei fehlt oder nicht dekodierbar ist — der Dialog blendet den „i"-Button
+/// dann gar nicht erst ein (siehe Original-Mode-Gate im Frontend, `ImageActionsMenu.js`).
+#[tauri::command]
+async fn get_image_metadata(name: String, app: AppHandle) -> Result<Option<images::ImageMetadata>> {
+    let path = assets::asset_path(&app, &name)?;
+    Ok(images::read_metadata(&path))
 }
 
 #[tauri::command]
@@ -421,6 +452,7 @@ async fn get_settings(app: AppHandle) -> Result<Settings> {
         "font_size",
         "offline_mode",
         "markdown_export",
+        "image_compression_mode",
     ] {
         if let Some(val) = store.get(key) {
             map.insert(key.to_string(), val.clone());
@@ -1084,6 +1116,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
@@ -1109,6 +1142,41 @@ pub fn run() {
         .manage(TraySettings(Mutex::new(false)))
         .manage(SyncLockState(tokio::sync::Mutex::new(())))
         .manage(scheduler::SyncTrigger(notify_for_manage))
+        .register_asynchronous_uri_scheme_protocol("snasset", |ctx, req, responder| {
+            let app = ctx.app_handle().clone();
+            let raw_path = req.uri().path().trim_start_matches('/').to_string();
+            tauri::async_runtime::spawn(async move {
+                let name = urlencoding::decode(&raw_path)
+                    .map(|c| c.into_owned())
+                    .unwrap_or(raw_path);
+                let not_found = || {
+                    tauri::http::Response::builder()
+                        .status(404)
+                        .body(Vec::new())
+                        .unwrap()
+                };
+                let Ok(path) = assets::asset_path(&app, &name) else {
+                    responder.respond(not_found());
+                    return;
+                };
+                match tokio::fs::read(&path).await {
+                    Ok(bytes) => {
+                        let ext = std::path::Path::new(&name)
+                            .extension()
+                            .and_then(|e| e.to_str())
+                            .unwrap_or("");
+                        let response = tauri::http::Response::builder()
+                            .status(200)
+                            .header("Content-Type", assets::mime_for_ext(ext))
+                            .header("Cache-Control", "max-age=31536000, immutable")
+                            .body(bytes)
+                            .unwrap();
+                        responder.respond(response);
+                    }
+                    Err(_) => responder.respond(not_found()),
+                }
+            });
+        })
         .setup(move |app| {
             // Einmalige Migration: note_cache → local_store
             local_store::migrate_from_note_cache(app.handle());
@@ -1315,6 +1383,8 @@ pub fn run() {
             md_mirror_exists,
             show_main_window,
             export_to_calendar,
+            attach_image,
+            get_image_metadata,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

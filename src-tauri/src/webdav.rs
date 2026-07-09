@@ -21,6 +21,19 @@ static HREF_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
         .expect("HREF pattern is valid")
 });
 
+/// Ein einzelner `<d:response>`-Block einer PROPFIND-Antwort (für die Href+mtime-Paarung
+/// beim Asset-Listing — das reine HREF_PATTERN liefert Namen ohne mtime).
+static RESPONSE_BLOCK_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?is)<[Dd]:response>(.*?)</[Dd]:response>")
+        .expect("response block pattern is valid")
+});
+
+/// Regex zum Extrahieren von `<d:getlastmodified>` innerhalb eines Response-Blocks (RFC1123).
+static LAST_MODIFIED_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?is)<[Dd]:getlastmodified>([^<]+)</[Dd]:getlastmodified>")
+        .expect("getlastmodified pattern is valid")
+});
+
 /// PROPFIND and MKCOL are not in reqwest's built-in Method constants — define them once here
 /// rather than calling from_bytes().unwrap() at every call site.
 static PROPFIND: LazyLock<Method> =
@@ -138,6 +151,23 @@ impl WebDavClient {
         format!("{}/{}/deletions.json", self.base_url, self.sync_folder)
     }
 
+    /// URL zum Bild-Anhang-Verzeichnis: `{base}/{sync_folder}-assets/` — bewusst NICHT
+    /// unter `{sync_folder}/`, da `extract_subdirs_from_propfind` jedes Unterverzeichnis
+    /// des Notiz-Baums als Notiz-Ordner interpretiert (Alt-Client-Kompatibilität).
+    fn assets_dir_url(&self) -> String {
+        format!("{}/{}-assets/", self.base_url, self.sync_folder)
+    }
+
+    /// URL eines einzelnen Assets: `{base}/{sync_folder}-assets/{enc(name)}`
+    fn asset_url(&self, name: &str) -> String {
+        format!(
+            "{}/{}-assets/{}",
+            self.base_url,
+            self.sync_folder,
+            urlencoding::encode(name)
+        )
+    }
+
     // ── MKCOL-Helfer ────────────────────────────────────────────────────────────
 
     /// Erstellt das JSON-Unterverzeichnis und, falls `write_markdown`, das MD-Unterverzeichnis
@@ -227,6 +257,15 @@ impl WebDavClient {
                 .send()
                 .await;
         }
+
+        // Asset-Verzeichnis ist kein Opt-in (anders als der Markdown-Spiegel) — Bilder
+        // sollen ohne zusätzliches Setting funktionieren.
+        let _ = self
+            .client
+            .request(MKCOL.clone(), self.assets_dir_url())
+            .header("Authorization", &self.auth_header)
+            .send()
+            .await;
 
         Ok(())
     }
@@ -470,7 +509,19 @@ impl WebDavClient {
             return Ok(());
         }
 
-        let markdown_content = markdown::generate_markdown(note);
+        // Bild-Referenzen sind eine App-interne Konvention (`.assets/<name>`, von jeder App
+        // selbst aufgelöst) — für externe Markdown-Viewer auf einen echten relativen Pfad
+        // zum Geschwister-Ordner `{sync_folder}-assets/` umschreiben. Tiefe hängt davon ab,
+        // ob die Notiz in einem Unterordner liegt (ein Verzeichnis-Level mehr).
+        let asset_prefix = if note.folder_name.is_some() {
+            "../../"
+        } else {
+            "../"
+        };
+        let markdown_content = markdown::generate_markdown(note).replace(
+            "](.assets/",
+            &format!("]({}{}-assets/", asset_prefix, self.sync_folder),
+        );
         let safe_title = sanitize_filename(&note.title, &note.id);
         let url = self.note_md_url(note.folder_name.as_deref(), &safe_title);
 
@@ -773,6 +824,94 @@ impl WebDavClient {
         }
     }
 
+    // ── Bild-Anhänge ────────────────────────────────────────────────────────────
+
+    /// Lädt ein Asset vom Server (`{sync_folder}-assets/{name}`).
+    pub async fn get_asset(&self, name: &str) -> Result<Vec<u8>> {
+        let url = self.asset_url(name);
+        let response = self
+            .client
+            .get(&url)
+            .header("Authorization", &self.auth_header)
+            .send()
+            .await
+            .map_err(|e| AppError::NetworkError(e.to_string()))?;
+
+        match response.status() {
+            StatusCode::OK => response
+                .bytes()
+                .await
+                .map(|b| b.to_vec())
+                .map_err(|e| AppError::NetworkError(e.to_string())),
+            StatusCode::NOT_FOUND => Err(AppError::WebDav(format!("Asset not found: {}", name))),
+            status => Err(AppError::WebDav(format!(
+                "GET asset failed: {} for {}",
+                status, name
+            ))),
+        }
+    }
+
+    /// Lädt ein Asset hoch. Assets sind immutable (content-addressed) — ein PUT auf einen
+    /// bereits vorhandenen Namen überschreibt lediglich mit identischen Bytes.
+    pub async fn put_asset(&self, name: &str, bytes: &[u8], mime: &str) -> Result<()> {
+        let url = self.asset_url(name);
+        let response = self
+            .client
+            .put(&url)
+            .header("Authorization", &self.auth_header)
+            .header("Content-Type", mime)
+            .body(bytes.to_vec())
+            .send()
+            .await
+            .map_err(|e| AppError::NetworkError(e.to_string()))?;
+
+        if !response.status().is_success() {
+            return Err(AppError::WebDav(format!(
+                "PUT asset failed: {} for {}",
+                response.status(),
+                name
+            )));
+        }
+        Ok(())
+    }
+
+    /// Löscht ein Asset. 404 gilt als Erfolg (bereits nicht mehr vorhanden).
+    pub async fn delete_asset(&self, name: &str) -> Result<()> {
+        let url = self.asset_url(name);
+        let response = self
+            .client
+            .delete(&url)
+            .header("Authorization", &self.auth_header)
+            .send()
+            .await
+            .map_err(|e| AppError::NetworkError(e.to_string()))?;
+
+        match response.status() {
+            s if s.is_success() || s == StatusCode::NOT_FOUND => Ok(()),
+            s => Err(AppError::WebDav(format!(
+                "DELETE asset failed: {} for {}",
+                s, name
+            ))),
+        }
+    }
+
+    /// Listet alle Assets auf dem Server mit ihrer Änderungszeit (Unix ms, `None` falls
+    /// `getlastmodified` fehlt oder nicht parsbar ist — solche Assets sweept die GC nie).
+    /// Best-effort: Server-/Verzeichnis-Fehler liefern eine leere Liste statt eines Err
+    /// (Asset-Sync ist ein optionaler Zusatzschritt, kein sync-kritischer Pfad).
+    pub async fn list_server_assets(&self) -> Result<Vec<(String, Option<i64>)>> {
+        let url = self.assets_dir_url();
+        let text = match self.propfind_text(&url, "1").await {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("[assets] PROPFIND {} fehlgeschlagen: {}", url, e);
+                return Ok(Vec::new());
+            }
+        };
+
+        Ok(parse_server_assets(&text))
+    }
+
     // ── Interner PROPFIND-Helfer ─────────────────────────────────────────────────
 
     async fn propfind_text(&self, url: &str, depth: &str) -> Result<String> {
@@ -782,6 +921,7 @@ impl WebDavClient {
     <d:displayname/>
     <d:getcontenttype/>
     <d:resourcetype/>
+    <d:getlastmodified/>
   </d:prop>
 </d:propfind>"#;
 
@@ -839,6 +979,34 @@ fn merge_deletion(
         .deleted_notes
         .retain(|r| now - r.deleted_at <= retention_ms);
     ledger
+}
+
+/// Parst die Response-Blöcke einer PROPFIND-Antwort auf `{sync_folder}-assets/` in
+/// (Dateiname, mtime-in-ms) Paare. Reine Funktion, unabhängig von `WebDavClient` testbar.
+fn parse_server_assets(text: &str) -> Vec<(String, Option<i64>)> {
+    let mut result = Vec::new();
+    for block_cap in RESPONSE_BLOCK_PATTERN.captures_iter(text) {
+        let block = &block_cap[1];
+        let Some(href_cap) = HREF_PATTERN.captures(block) else {
+            continue;
+        };
+        let href = href_cap[1].trim();
+        if href.ends_with('/') {
+            continue; // das Verzeichnis selbst
+        }
+        let decoded = urlencoding::decode(href)
+            .unwrap_or_else(|_| href.into())
+            .into_owned();
+        let Some(name) = decoded.rsplit('/').next().filter(|s| !s.is_empty()) else {
+            continue;
+        };
+        let mtime = LAST_MODIFIED_PATTERN
+            .captures(block)
+            .and_then(|c| chrono::DateTime::parse_from_rfc2822(c[1].trim()).ok())
+            .map(|dt| dt.timestamp_millis());
+        result.push((name.to_string(), mtime));
+    }
+    result
 }
 
 fn sanitize_filename(title: &str, id: &str) -> String {
@@ -984,6 +1152,56 @@ mod tests {
     fn test_folders_file_url() {
         let c = make_client();
         assert_eq!(c.folders_file_url(), "http://server/notes/folders.json");
+    }
+
+    #[test]
+    fn test_assets_dir_url() {
+        let c = make_client();
+        assert_eq!(c.assets_dir_url(), "http://server/notes-assets/");
+    }
+
+    #[test]
+    fn test_asset_url_encodes_name() {
+        let c = make_client();
+        assert_eq!(
+            c.asset_url("abc1234567890def.webp"),
+            "http://server/notes-assets/abc1234567890def.webp"
+        );
+    }
+
+    // ── parse_server_assets ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_server_assets_extracts_name_and_mtime() {
+        let body = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/notes-assets/</d:href>
+  </d:response>
+  <d:response>
+    <d:href>/dav/notes-assets/abc123.webp</d:href>
+    <d:propstat><d:prop>
+      <d:getlastmodified>Wed, 04 Feb 2026 10:25:29 GMT</d:getlastmodified>
+    </d:prop></d:propstat>
+  </d:response>
+</d:multistatus>"#;
+        let assets = parse_server_assets(body);
+        assert_eq!(assets.len(), 1, "directory entry itself must be skipped");
+        assert_eq!(assets[0].0, "abc123.webp");
+        assert!(assets[0].1.is_some());
+    }
+
+    #[test]
+    fn test_parse_server_assets_missing_mtime_is_none() {
+        let body = r#"<d:response><d:href>/dav/notes-assets/no-mtime.png</d:href></d:response>"#;
+        let assets = parse_server_assets(body);
+        assert_eq!(assets.len(), 1);
+        assert_eq!(assets[0].1, None);
+    }
+
+    #[test]
+    fn test_parse_server_assets_empty_body() {
+        assert!(parse_server_assets("").is_empty());
     }
 
     #[test]

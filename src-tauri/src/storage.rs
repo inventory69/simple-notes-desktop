@@ -22,6 +22,7 @@ pub struct Settings {
     pub font_size: String,      // "system"|"small"|"normal"|"large"|"xlarge"
     pub offline_mode: bool,     // Offline-Modus: kein Server nötig (Android-Parität, default true)
     pub markdown_export: bool, // Optionaler {sync_folder}-md/ Markdown-Spiegel (Android-Parität, default false)
+    pub image_compression_mode: String, // "compressed"|"lossless"|"original" — Bild-Anhänge (Android-Parität)
 }
 
 impl Default for Settings {
@@ -37,6 +38,7 @@ impl Default for Settings {
             font_size: "system".to_string(),
             offline_mode: true,
             markdown_export: false,
+            image_compression_mode: "compressed".to_string(),
         }
     }
 }
@@ -57,6 +59,7 @@ mod tests {
         assert_eq!(settings.font_size, "system");
         assert!(settings.offline_mode);
         assert!(!settings.markdown_export);
+        assert_eq!(settings.image_compression_mode, "compressed");
     }
 
     #[test]
@@ -72,6 +75,7 @@ mod tests {
             font_size: "large".to_string(),
             offline_mode: false,
             markdown_export: true,
+            image_compression_mode: "lossless".to_string(),
         };
 
         let json = serde_json::to_string(&settings).unwrap();
@@ -117,6 +121,7 @@ mod tests {
                 font_size: "system".to_string(),
                 offline_mode: true,
                 markdown_export: false,
+                image_compression_mode: "compressed".to_string(),
             };
 
             let json = serde_json::to_string(&settings).unwrap();
@@ -148,6 +153,7 @@ mod tests {
             font_size: "xlarge".to_string(),
             offline_mode: true,
             markdown_export: false,
+            image_compression_mode: "compressed".to_string(),
         };
 
         let json = serde_json::to_string(&settings).unwrap();
@@ -189,6 +195,7 @@ mod tests {
             font_size: "normal".to_string(),
             offline_mode: false,
             markdown_export: false,
+            image_compression_mode: "compressed".to_string(),
         };
 
         let cloned = settings.clone();
@@ -226,6 +233,7 @@ mod tests {
             "font_size",
             "offline_mode",
             "markdown_export",
+            "image_compression_mode",
         ]
         .iter()
         .map(|s| s.to_string())

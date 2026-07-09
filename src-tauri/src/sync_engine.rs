@@ -61,6 +61,39 @@ pub fn clear_note_cache(app: &AppHandle) {
     }
 }
 
+/// Anzahl zusätzlicher Versuche für Asset-Up-/Downloads (Android-Parität: `putWithRetry`/
+/// `getWithRetry`). Sequenziell statt parallel — Desktop-Sync läuft selten, Bilder sind klein.
+// ponytail: kein Semaphore/paralleler Up-/Download wie Android; Parallelisierung erst wenn
+// messbar zu langsam.
+const ASSET_RETRIES: u32 = 2;
+
+async fn put_asset_with_retry(
+    client: &WebDavClient,
+    name: &str,
+    bytes: &[u8],
+    mime: &str,
+) -> crate::error::Result<()> {
+    let mut last_err = None;
+    for _ in 0..=ASSET_RETRIES {
+        match client.put_asset(name, bytes, mime).await {
+            Ok(()) => return Ok(()),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(last_err.expect("loop runs at least once"))
+}
+
+async fn get_asset_with_retry(client: &WebDavClient, name: &str) -> crate::error::Result<Vec<u8>> {
+    let mut last_err = None;
+    for _ in 0..=ASSET_RETRIES {
+        match client.get_asset(name).await {
+            Ok(bytes) => return Ok(bytes),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(last_err.expect("loop runs at least once"))
+}
+
 fn save_last_sync_at(app: &AppHandle, ts: i64) {
     if let Ok(store) = app.store(SYNC_STORE) {
         store.set(KEY_LAST_SYNC, serde_json::json!(ts));
@@ -317,6 +350,39 @@ pub async fn run_sync(
         }
     }
 
+    // 5.5 Asset-Upload (assets-first, Android-Parität E1): referenzierte, lokal vorhandene,
+    // serverseitig fehlende Assets hochladen — bevor Notizen mit neuen `.assets/`-Links
+    // gesynct werden, sonst zeigt ein zweites Gerät kurzzeitig ein kaputtes Bild.
+    let _ = client.ensure_directories(write_markdown).await; // legt auch das Asset-Verzeichnis an
+    let server_assets = client.list_server_assets().await.unwrap_or_default();
+    let server_asset_names: HashSet<String> =
+        server_assets.iter().map(|(n, _)| n.clone()).collect();
+    // Referenzmenge über ALLE Notizen (inkl. Trash/Archiv) — eine getrashte Notiz behält ihr Bild.
+    let all_notes_for_assets = local_store::list_notes(app);
+    let referenced = crate::assets::extract_all_referenced(&all_notes_for_assets);
+    let local_asset_names: HashSet<String> = crate::assets::list_local(app)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(n, _)| n)
+        .collect();
+
+    for name in referenced
+        .iter()
+        .filter(|n| local_asset_names.contains(*n) && !server_asset_names.contains(*n))
+    {
+        let Ok(path) = crate::assets::asset_path(app, name) else {
+            continue;
+        };
+        let Ok(bytes) = std::fs::read(&path) else {
+            continue;
+        };
+        let ext = name.rsplit('.').next().unwrap_or("");
+        let mime = crate::assets::mime_for_ext(ext);
+        if let Err(e) = put_asset_with_retry(client, name, &bytes, mime).await {
+            eprintln!("[assets] Upload {} fehlgeschlagen: {}", name, e);
+        }
+    }
+
     // 6. Upload: PENDING (nicht local-only-Ordner) → Server, dann SYNCED
     let mut uploaded_ids: Vec<String> = Vec::new();
     for n in local_store::list_notes(app) {
@@ -341,6 +407,56 @@ pub async fn run_sync(
     // damit ein alter Tombstone sie nicht beim nächsten Sync wieder „löscht".
     if !uploaded_ids.is_empty() {
         client.remove_deletions(&uploaded_ids).await;
+    }
+
+    // 7. Asset-Download + GC: fehlende referenzierte Assets nachladen (Referenzmenge aus dem
+    // frisch gemergten Korpus), dann unreferenzierte Assets lokal + (guarded) remote aufräumen.
+    let final_notes = local_store::list_notes(app);
+    let referenced_final = crate::assets::extract_all_referenced(&final_notes);
+    let local_names_after: HashSet<String> = crate::assets::list_local(app)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(n, _)| n)
+        .collect();
+
+    let mut asset_download_had_errors = false;
+    for name in referenced_final
+        .iter()
+        .filter(|n| !local_names_after.contains(*n) && server_asset_names.contains(*n))
+    {
+        match get_asset_with_retry(client, name).await {
+            Ok(bytes) => {
+                if let Err(e) = crate::assets::save_asset(app, name, &bytes) {
+                    eprintln!("[assets] Speichern von {} fehlgeschlagen: {}", name, e);
+                    asset_download_had_errors = true;
+                }
+            }
+            Err(e) => {
+                eprintln!("[assets] Download {} fehlgeschlagen: {}", name, e);
+                asset_download_had_errors = true;
+            }
+        }
+    }
+
+    // Guard (Android-Parität allowRemoteSweep): kein Remote-Sweep bei leerem Notizbestand oder
+    // wenn die Download-Phase Fehler hatte — sonst löscht ein kaputter Zyklus fremde Assets.
+    let allow_remote_sweep = !final_notes.is_empty() && !asset_download_had_errors;
+    let local_mtimes_final = crate::assets::list_local(app).unwrap_or_default();
+    let (local_to_delete, remote_to_delete) = crate::assets::compute_gc_targets(
+        &referenced_final,
+        &local_mtimes_final,
+        &server_assets,
+        now,
+        allow_remote_sweep,
+        crate::assets::GRACE_MS,
+    );
+    for name in &local_to_delete {
+        crate::assets::delete_local(app, name);
+    }
+    for name in &remote_to_delete {
+        if let Err(e) = client.delete_asset(name).await {
+            eprintln!("[assets] Remote-Löschung {} fehlgeschlagen: {}", name, e);
+        }
     }
 
     save_last_sync_at(app, now);

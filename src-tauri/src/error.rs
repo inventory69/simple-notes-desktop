@@ -39,6 +39,10 @@ pub enum AppError {
     /// Dateisystem-/Öffnen-Fehler (z.B. .ics-Export)
     #[error("File error: {0}")]
     Io(String),
+
+    /// Bild-Decode-/Encode-Fehler (Foto einfügen)
+    #[error("Image error: {0}")]
+    Image(String),
 }
 
 /// Serialisierung für Tauri (Fehler als String)
