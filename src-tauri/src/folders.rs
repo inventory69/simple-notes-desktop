@@ -70,7 +70,7 @@ pub fn sanitize_folder_name(raw: &str) -> Option<String> {
         })
         .take(64)
         .collect();
-    if cleaned.is_empty() {
+    if cleaned.is_empty() || cleaned.starts_with('.') {
         None
     } else {
         Some(cleaned)
@@ -228,6 +228,14 @@ mod tests {
         assert_eq!(sanitize_folder_name(""), None);
         assert_eq!(sanitize_folder_name("/"), None);
         assert_eq!(sanitize_folder_name(":*?"), None);
+    }
+
+    #[test]
+    fn test_sanitize_rejects_leading_dot() {
+        // Foreign WebDAV clients (e.g. sync tools) sometimes create dot-directories
+        // (.stfolder, .assets-lookalikes) in-tree — these must not become note folders.
+        assert_eq!(sanitize_folder_name(".stfolder"), None);
+        assert_eq!(sanitize_folder_name(".hidden"), None);
     }
 
     #[test]
