@@ -483,7 +483,7 @@ class App {
         note.folderName = noteService.getCurrentFolder();
       }
       await noteService.saveNote(note);
-      this.noteEditor.loadNote(note);
+      await this.notesList.selectNote(note.id);
       this.noteEditor.focusContent();
     } catch (error) {
       console.error('Failed to create note:', error);
@@ -508,7 +508,7 @@ class App {
         note.folderName = noteService.getCurrentFolder();
       }
       await noteService.saveNote(note);
-      this.noteEditor.loadNote(note);
+      await this.notesList.selectNote(note.id);
       this.noteEditor.focusContent();
     } catch (error) {
       console.error('Failed to create checklist:', error);
