@@ -1587,6 +1587,54 @@ body {
   font-weight: 600;
 }
 
+.md-img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-bottom: 1rem;
+}
+
+.md-img--left {
+  margin-right: auto;
+}
+
+.md-img--center {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.md-img--right {
+  margin-left: auto;
+}
+
+.md-img--inline {
+  display: inline-block;
+  width: auto;
+  vertical-align: middle;
+  margin-bottom: 0;
+  border-radius: 2px;
+}
+
+.md-img-missing {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+  background: var(--color-hover);
+  border-radius: 6px;
+  color: var(--color-fg);
+  opacity: 0.75;
+  cursor: default;
+}
+
+.md-img-missing svg {
+  flex-shrink: 0;
+}
+
 .cm-editor {
   height: 100%;
   width: 100%;
@@ -2244,6 +2292,122 @@ select.dialog-input option {
   bottom: 2px;
   right: 2px;
   border: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+/* Image Actions Menu */
+.image-actions-menu.hidden {
+  display: none;
+}
+
+.image-actions-menu {
+  position: fixed;
+  z-index: 1000;
+  background: var(--color-bg);
+  border: 1px solid var(--color-hover);
+  border-radius: 8px;
+  padding: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 220px;
+}
+
+.image-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.image-menu-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-fg);
+  cursor: pointer;
+}
+
+.image-menu-icon-btn:hover {
+  background: var(--color-hover);
+}
+
+.image-menu-icon-btn.active {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.image-menu-icon-btn.hidden {
+  display: none;
+}
+
+.image-menu-info-btn {
+  margin-left: auto;
+}
+
+.image-menu-sizes {
+  display: flex;
+  border: 1px solid var(--color-hover);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.image-menu-size-btn {
+  flex: 1;
+  border: none;
+  border-right: 1px solid var(--color-hover);
+  background: transparent;
+  color: var(--color-fg);
+  padding: 6px 0;
+  cursor: pointer;
+  font-size: 0.85em;
+}
+
+.image-menu-size-btn:last-child {
+  border-right: none;
+}
+
+.image-menu-size-btn:hover {
+  background: var(--color-hover);
+}
+
+.image-menu-size-btn.active {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.image-menu-alt-input {
+  width: 100%;
+}
+
+/* Image Viewer Overlay */
+.image-viewer-overlay.hidden {
+  display: none;
+}
+
+.image-viewer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(0, 0, 0, 0.95);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  cursor: zoom-out;
+}
+
+.image-viewer-overlay img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  cursor: grab;
+  user-select: none;
 }
 
 /* Update Toast */

@@ -54,6 +54,26 @@ export function applyLink(view) {
   view.focus();
 }
 
+/** Inserts `![](url)` at the cursor (or `![text](url)` around a selection), mirroring applyLink. */
+export function applyImage(view, url) {
+  const { state } = view;
+  const sel = state.selection.main;
+
+  let changes, newSel;
+  if (sel.empty) {
+    changes = { from: sel.from, insert: `![](${url})` };
+    newSel = EditorSelection.cursor(sel.from + 2);
+  } else {
+    const text = state.sliceDoc(sel.from, sel.to);
+    const insert = `![${text}](${url})`;
+    changes = { from: sel.from, to: sel.to, insert };
+    newSel = EditorSelection.cursor(sel.from + insert.length);
+  }
+
+  view.dispatch({ changes, selection: newSel });
+  view.focus();
+}
+
 export function applyHeading(view) {
   const { state } = view;
   const sel = state.selection.main;

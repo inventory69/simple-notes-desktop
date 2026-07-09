@@ -37,6 +37,11 @@ function setupDOM() {
             <option value="edit">Edit mode</option>
             <option value="preview">Preview</option>
           </select>
+          <select id="image-compression-select">
+            <option value="compressed">Compressed</option>
+            <option value="lossless">Lossless</option>
+            <option value="original">Original</option>
+          </select>
           <input type="checkbox" id="autosave-checkbox" />
         </div>
         <div class="settings-section hidden" data-section="connection">

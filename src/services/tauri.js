@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 
 /**
  * WebDAV Connection Service
@@ -364,4 +364,34 @@ export async function showMainWindow() {
  */
 export async function exportToCalendar(title, description) {
   return await invoke('export_to_calendar', { title, description });
+}
+
+/**
+ * Process a picked image file (compression per `mode`) and cache it content-addressed
+ * in the local asset store.
+ * @param {string} path - Absolute path of the picked image file
+ * @param {'compressed'|'lossless'|'original'} mode - Compression mode
+ * @returns {Promise<string>} Asset file name (build the content reference as `.assets/<name>`)
+ */
+export async function attachImage(path, mode) {
+  return await invoke('attach_image', { path, mode });
+}
+
+/**
+ * Build a webview-loadable URL for a cached asset (served by the `snasset` custom protocol).
+ * The webview loads it natively — parallel, streamed, and cached by `Cache-Control`.
+ * @param {string} name - Asset file name (from a `.assets/<name>` reference)
+ * @returns {string} URL to use as an `<img src>`
+ */
+export function assetUrl(name) {
+  return convertFileSrc(name, 'snasset');
+}
+
+/**
+ * Read EXIF metadata + dimensions of a cached image asset, for the image info dialog.
+ * @param {string} name - Asset file name
+ * @returns {Promise<Object|null>} ImageMetadata, or null if unreadable
+ */
+export async function getImageMetadata(name) {
+  return await invoke('get_image_metadata', { name });
 }

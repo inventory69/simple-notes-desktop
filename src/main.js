@@ -63,6 +63,7 @@ class App {
     if (settings) {
       this.noteEditor.setAutosave(settings.autosave);
       this.noteEditor.setDefaultOpenMode(settings.default_open_mode);
+      this.noteEditor.setImageCompressionMode(settings.image_compression_mode);
     }
 
     // 'notes-synced' zuerst registrieren (lokale IPC, quasi sofort) — läuft damit
@@ -239,6 +240,7 @@ class App {
     this.settingsDialog.onSave((settings) => {
       this.noteEditor.setAutosave(settings.autosave);
       this.noteEditor.setDefaultOpenMode(settings.default_open_mode);
+      this.noteEditor.setImageCompressionMode(settings.image_compression_mode);
     });
 
     // Settings "View changelog" callback

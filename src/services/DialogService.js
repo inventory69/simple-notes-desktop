@@ -773,6 +773,79 @@ class DialogService {
     });
   }
 
+  /**
+   * Image EXIF info dialog, opened from the image actions menu. `meta` is an `ImageMetadata`
+   * from `get_image_metadata` — only present fields render (re-encoded WebPs strip EXIF).
+   * @param {Object} meta
+   * @returns {Promise<void>}
+   */
+  imageInfo(meta) {
+    return new Promise((resolve) => {
+      this.resolvePromise = resolve;
+      this.titleEl.textContent = 'Image information';
+
+      const rows = [
+        ['Dimensions', `${meta.widthPx} × ${meta.heightPx} px`],
+        ['File size', this._formatFileSize(meta.fileSizeBytes)],
+      ];
+      if (meta.dateTaken) rows.push(['Date taken', meta.dateTaken]);
+      const camera = [meta.cameraMake, meta.cameraModel].filter(Boolean).join(' ');
+      if (camera) rows.push(['Camera', camera]);
+      if (meta.iso) rows.push(['ISO', `ISO ${meta.iso}`]);
+      if (meta.exposureTime) rows.push(['Exposure time', meta.exposureTime]);
+      if (meta.focalLengthMm) rows.push(['Focal length', `${Math.round(meta.focalLengthMm)} mm`]);
+      if (meta.gps && Number.isFinite(meta.gps[0]) && Number.isFinite(meta.gps[1])) {
+        rows.push(['Location', `${meta.gps[0].toFixed(5)}, ${meta.gps[1].toFixed(5)}`]);
+      }
+
+      this.messageEl.innerHTML = rows
+        .map(
+          ([label, value]) =>
+            `<div style="display:flex;justify-content:space-between;gap:1rem;padding:0.3rem 0;border-bottom:1px solid var(--color-hover)">
+               <span style="opacity:0.7">${this._escapeHtml(label)}</span><span>${this._escapeHtml(value)}</span>
+             </div>`,
+        )
+        .join('');
+
+      this.confirmBtn.textContent = 'Close';
+      this.confirmBtn.className = this._getButtonClass('info');
+      this.cancelBtn.style.display = 'none';
+      this.iconContainer.innerHTML = this._getIcon('info');
+      this.iconContainer.className = 'dialog-icon dialog-icon-info';
+      this.dialog.classList.remove('hidden');
+
+      setTimeout(() => this.confirmBtn.focus(), 100);
+
+      const handleClose = () => {
+        this._cleanup();
+        resolve();
+      };
+      const handleKeydown = (e) => {
+        if (e.key === 'Escape' || e.key === 'Enter') {
+          e.preventDefault();
+          handleClose();
+        }
+      };
+
+      this.confirmBtn.onclick = handleClose;
+      this._attachBackdropHandler(handleClose);
+      document.addEventListener('keydown', handleKeydown);
+      this.keydownHandler = handleKeydown;
+    });
+  }
+
+  _formatFileSize(bytes) {
+    if (bytes < 1024) return `${bytes} B`;
+    const units = ['KB', 'MB', 'GB'];
+    let value = bytes / 1024;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit++;
+    }
+    return `${value.toFixed(1)} ${units[unit]}`;
+  }
+
   _escapeAttr(str) {
     return String(str).replace(/"/g, '&quot;');
   }

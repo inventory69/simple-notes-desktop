@@ -40,6 +40,7 @@ export class SettingsDialog {
     this.updateStatus = document.getElementById('update-status');
     this.installUpdateBtn = document.getElementById('install-update-btn');
     this.defaultOpenModeSelect = document.getElementById('default-open-mode-select');
+    this.imageCompressionSelect = document.getElementById('image-compression-select');
     this.fontSizeChips = document.getElementById('font-size-chips');
     this.onSaveCallback = null;
     this.onReconnectCallback = null;
@@ -87,6 +88,11 @@ export class SettingsDialog {
 
     // Offline toggle: update status label live
     this.offlineCheckbox.addEventListener('change', () => this._applyOfflineState());
+
+    // Image compression mode: update the subtitle live (Android parity text)
+    this.imageCompressionSelect.addEventListener('change', () =>
+      this._updateImageCompressionHint(this.imageCompressionSelect.value),
+    );
 
     // Sync folder input sanitization (Android parity: only alphanumeric, dash, underscore)
     this.syncFolderInput.addEventListener('input', () => {
@@ -309,6 +315,8 @@ export class SettingsDialog {
       this.syncFolderInput.value = settings.sync_folder || '';
       this.updateNotificationsCheckbox.checked = settings.update_notifications !== false;
       this.defaultOpenModeSelect.value = settings.default_open_mode || 'edit';
+      this.imageCompressionSelect.value = settings.image_compression_mode || 'compressed';
+      this._updateImageCompressionHint(this.imageCompressionSelect.value);
       this.deviceIdInput.value = deviceId;
       this._setActiveChip(this._originalFontSize);
       this.offlineCheckbox.checked = this._previousOffline;
@@ -426,6 +434,17 @@ export class SettingsDialog {
     if (el) el.textContent = enabled ? 'Auto-Sync: On' : 'Auto-Sync: Off';
   }
 
+  _updateImageCompressionHint(mode) {
+    const el = document.getElementById('image-compression-hint');
+    if (!el) return;
+    const hints = {
+      compressed: 'WebP, resized to max. 1920px. Smaller files; strips EXIF/GPS location data.',
+      lossless: 'WebP without quality loss, resized to max. 1920px. Larger files; strips EXIF/GPS data.',
+      original: 'Keeps the file as-is, unresized. Largest files; keeps EXIF/GPS location data.',
+    };
+    el.textContent = hints[mode] || hints.compressed;
+  }
+
   _finishSave(settings) {
     this._updateConnectionSubtitle(settings.sync_folder);
     this._updateMarkdownSubtitle(settings.markdown_export);
@@ -448,6 +467,7 @@ export class SettingsDialog {
         font_size: this._currentFontSize,
         offline_mode: offline,
         markdown_export: this.markdownExportCheckbox.checked,
+        image_compression_mode: this.imageCompressionSelect.value,
       };
 
       await tauri.saveSettings(settings);

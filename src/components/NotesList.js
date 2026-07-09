@@ -4,6 +4,7 @@ import { marked } from 'marked';
 import { dialogService } from '../services/DialogService.js';
 import noteService from '../services/noteService.js';
 import { colorPicker } from '../utils/ColorPicker.js';
+import { imagePreviewText } from '../utils/imageAltTokens.js';
 import { getColorPair, NOTE_COLORS } from '../utils/noteColors.js';
 
 /**
@@ -1080,7 +1081,7 @@ export class NotesList {
       return ['Empty note'];
     }
 
-    const lines = note.content
+    const lines = imagePreviewText(note.content)
       .split('\n')
       .map((line) => line.trim())
       .filter((line) => line.length > 0);
@@ -1159,7 +1160,8 @@ export class NotesList {
   }
 
   renderPreviewLine(line) {
-    return DOMPurify.sanitize(marked.parseInline(line), {
+    const withImagePlaceholders = line.replace(/!\[([^\]]*)\]\([^)]*\)/g, (_, alt) => `🖼 ${alt}`.trim());
+    return DOMPurify.sanitize(marked.parseInline(withImagePlaceholders), {
       ALLOWED_TAGS: ['b', 'strong', 'i', 'em', 'del', 's', 'code', 'a', 'span', 'mark'],
       ALLOWED_ATTR: ['href'],
     });

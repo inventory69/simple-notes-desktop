@@ -22,7 +22,17 @@ vi.mock('@codemirror/language', () => ({
 }));
 vi.mock('@lezer/highlight', () => ({ tags: new Proxy({}, { get: () => Symbol() }) }));
 vi.mock('dompurify', () => ({ default: { sanitize: (h) => h } }));
-vi.mock('marked', () => ({ marked: { parse: (c) => c, parseInline: (c) => c } }));
+vi.mock('marked', () => ({
+  marked: { parse: (c) => c, parseInline: (c) => c },
+  Marked: class {
+    use() {
+      return this;
+    }
+    parse(c) {
+      return c;
+    }
+  },
+}));
 vi.mock('../services/tauri.js');
 vi.mock('../services/noteService.js', () => ({
   default: { subscribe: vi.fn(() => vi.fn()), notify: vi.fn() },

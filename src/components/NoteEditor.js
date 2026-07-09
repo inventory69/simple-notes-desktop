@@ -2,14 +2,16 @@ import { undo as cmUndo } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
+import { open } from '@tauri-apps/plugin-dialog';
 import { basicSetup } from 'codemirror';
 import DOMPurify from 'dompurify';
-import { marked } from 'marked';
+import { Marked } from 'marked';
 import { dialogService } from '../services/DialogService.js';
 import noteService from '../services/noteService.js';
-import { exportToCalendar } from '../services/tauri.js';
+import { assetUrl, attachImage, exportToCalendar } from '../services/tauri.js';
 import { colorPicker } from '../utils/ColorPicker.js';
 import { buildCalendarPayload, buildCalendarPayloadForItem } from '../utils/calendarExport.js';
+import { computeImageRewrite, parseImageAlt } from '../utils/imageAltTokens.js';
 import { markdownHighlightExtensions } from '../utils/markdownHighlight.js';
 import {
   applyBold,
@@ -17,6 +19,7 @@ import {
   applyCode,
   applyHeading,
   applyHR,
+  applyImage,
   applyItalic,
   applyLink,
   applyList,
@@ -24,9 +27,52 @@ import {
 } from '../utils/markdownToolbar.js';
 import { getColorPair } from '../utils/noteColors.js';
 import { UndoStack } from '../utils/UndoStack.js';
+import { imageActionsMenu } from './ImageActionsMenu.js';
+import { imageViewerDialog } from './ImageViewerDialog.js';
 
 /** Autosave debounce delay in milliseconds (matches Android app: 3 seconds) */
 const AUTOSAVE_DEBOUNCE_MS = 3000;
+
+/** Matches a `.assets/<name>` image href (the second capture group of IMAGE_REGEX, standalone). */
+const ASSET_HREF_REGEX = /^\.assets\/([A-Za-z0-9][A-Za-z0-9._-]*)$/;
+
+function assetNameFrom(href) {
+  return ASSET_HREF_REGEX.exec(href || '')?.[1] ?? null;
+}
+
+function escapeAttr(str) {
+  return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** Ordinal counter for `.md-img` renders, reset per `updatePreview()` call — see the `ponytail:`
+ *  note in imageAltTokens.js: it drifts from IMAGE_REGEX's raw-match count inside code fences,
+ *  matching a latent bug Android has too. */
+let previewImgOrdinal = 0;
+
+/** Own Marked instance (not the global `marked.use()`) so NotesList.renderPreviewLine, which
+ *  imports the default export, stays untouched. Renders `.assets/<name>` images without a
+ *  `src` — DOMPurify's default ALLOWED_URI_REGEXP doesn't know the `snasset:` scheme and would
+ *  strip it; `src` is set after sanitizing instead (see updatePreview()). External image URLs
+ *  fall through to the default renderer (`return false`). */
+const previewMarked = new Marked().use({
+  renderer: {
+    image({ href, text }) {
+      const name = assetNameFrom(href);
+      if (!name) return false;
+      const { cleanAlt, sizePercent, align } = parseImageAlt(text || '');
+      const ordinal = previewImgOrdinal++;
+      const sizeFactor = sizePercent / 100;
+      const style =
+        align === 'inline'
+          ? ` style="height:${sizeFactor * 2}em;max-width:${sizeFactor * 8}em"`
+          : ` style="width:${sizePercent}%"`;
+      return (
+        `<img data-asset="${escapeAttr(name)}" data-ordinal="${ordinal}" data-size="${sizePercent}" ` +
+        `data-align="${align}" alt="${escapeAttr(cleanAlt)}" class="md-img md-img--${align}"${style}>`
+      );
+    },
+  },
+});
 
 /**
  * Note Editor Component
@@ -57,6 +103,7 @@ export class NoteEditor {
     this.mdBtnHeading = document.getElementById('md-btn-heading');
     this.mdBtnCode = document.getElementById('md-btn-code');
     this.mdBtnLink = document.getElementById('md-btn-link');
+    this.mdBtnImage = document.getElementById('md-btn-image');
     this.mdBtnList = document.getElementById('md-btn-list');
     this.mdBtnChecklist = document.getElementById('md-btn-checklist');
     this.mdBtnHr = document.getElementById('md-btn-hr');
@@ -78,6 +125,7 @@ export class NoteEditor {
     this._isDirty = false;
 
     this.defaultOpenMode = 'edit';
+    this.imageCompressionMode = 'compressed';
 
     this.init();
   }
@@ -114,6 +162,33 @@ export class NoteEditor {
 
     // Preview toggle
     this.previewToggleBtn.addEventListener('click', () => this.togglePreview());
+
+    // Preview images: left-click opens the fullscreen viewer, right-click opens the
+    // alignment/size/alt/info menu. Both delegate off `.md-img` (missing-asset placeholders
+    // are plain divs, not images, so they're naturally excluded).
+    this.previewDiv.addEventListener('click', (e) => {
+      const img = e.target.closest('.md-img');
+      if (!img) return;
+      imageViewerDialog.show(img.dataset.asset);
+    });
+
+    this.previewDiv.addEventListener('contextmenu', (e) => {
+      const img = e.target.closest('.md-img');
+      if (!img) return;
+      e.preventDefault();
+      imageActionsMenu.show(
+        e.clientX,
+        e.clientY,
+        {
+          assetName: img.dataset.asset,
+          sizePercent: Number(img.dataset.size),
+          align: img.dataset.align,
+          cleanAlt: img.alt,
+          ordinal: Number(img.dataset.ordinal),
+        },
+        (newState) => this._applyImageRewrite(newState),
+      );
+    });
 
     // F2: Sort button with dropdown
     this.sortBtn.addEventListener('click', () => this.showSortMenu());
@@ -158,6 +233,7 @@ export class NoteEditor {
     this.mdBtnHeading?.addEventListener('click', () => this._mdFormat('heading'));
     this.mdBtnCode?.addEventListener('click', () => this._mdFormat('code'));
     this.mdBtnLink?.addEventListener('click', () => this._mdFormat('link'));
+    this.mdBtnImage?.addEventListener('click', () => this._insertImage());
     this.mdBtnList?.addEventListener('click', () => this._mdFormat('list'));
     this.mdBtnChecklist?.addEventListener('click', () => this._mdFormat('checklist'));
     this.mdBtnHr?.addEventListener('click', () => this._mdFormat('hr'));
@@ -230,6 +306,23 @@ export class NoteEditor {
     }
   }
 
+  /** Opens a native file picker, processes the chosen image, and inserts it at the cursor. */
+  async _insertImage() {
+    if (!this.editorView) return;
+    try {
+      const path = await open({
+        multiple: false,
+        filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif'] }],
+      });
+      if (!path) return;
+      const name = await attachImage(path, this.imageCompressionMode);
+      applyImage(this.editorView, `.assets/${name}`);
+    } catch (error) {
+      console.error('Failed to insert image:', error);
+      await dialogService.error({ title: 'Insert Image', message: error.message || String(error) });
+    }
+  }
+
   initEditor() {
     if (this.editorView) {
       this.editorView.destroy();
@@ -296,14 +389,52 @@ export class NoteEditor {
     }
   }
 
+  /** Renders the preview synchronously — text and images appear together, no IPC round-trip.
+   *  Images load natively through the `snasset:` custom protocol (parallel, cached by the
+   *  webview) after the sanitized HTML is in the DOM; see previewMarked's image renderer. */
   updatePreview() {
-    if (!this.currentNote?.content) {
+    const note = this.currentNote;
+    if (!note?.content) {
       this.previewDiv.innerHTML = '<div class="empty-placeholder">No content to preview</div>';
       return;
     }
 
-    const html = marked.parse(this.currentNote.content);
+    previewImgOrdinal = 0;
+    const html = previewMarked.parse(note.content);
     this.previewDiv.innerHTML = DOMPurify.sanitize(html);
+
+    this.previewDiv.querySelectorAll('img[data-asset]').forEach((img) => {
+      img.addEventListener('error', () => this._showMissingAssetPlaceholder(img), { once: true });
+      img.src = assetUrl(img.dataset.asset);
+    });
+  }
+
+  /** Missing asset (not yet synced, deleted locally, or a manually typed link): swap the `<img>`
+   *  for a placeholder with the broken-image icon + alt text, mirroring Android's ImagePlaceholder.
+   *  `error` doesn't bubble, so this is wired per-image in updatePreview() rather than delegated. */
+  _showMissingAssetPlaceholder(img) {
+    const placeholder = document.createElement('div');
+    placeholder.className = 'md-img-missing';
+    placeholder.innerHTML = `
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M3 3l18 18M10.5 10.5a2 2 0 0 0 2.83 2.83M21 15V5a2 2 0 0 0-2-2H8m-5 4v10a2 2 0 0 0 2 2h13"/>
+      </svg>
+      <span></span>
+    `;
+    placeholder.querySelector('span').textContent = img.alt || 'Image not available';
+    img.replaceWith(placeholder);
+  }
+
+  /** Right-click menu callback: rewrites the note's `ordinal`-th image link in place and lets
+   *  the existing updateListener (docChanged) pick up content-update/autosave/preview-refresh —
+   *  no separate save path needed. Silent no-op if the text shifted since the menu opened
+   *  (computeImageRewrite returns null on ordinal/asset-name mismatch). */
+  _applyImageRewrite({ assetName, ordinal, sizePercent, align, cleanAlt }) {
+    if (!this.editorView) return;
+    const content = this.editorView.state.doc.toString();
+    const rewrite = computeImageRewrite(content, ordinal, assetName, sizePercent, align, cleanAlt);
+    if (!rewrite) return;
+    this.editorView.dispatch({ changes: rewrite });
   }
 
   // F2: Render checklist with sorting and separator
@@ -1314,6 +1445,10 @@ export class NoteEditor {
 
   setDefaultOpenMode(mode) {
     this.defaultOpenMode = mode || 'edit';
+  }
+
+  setImageCompressionMode(mode) {
+    this.imageCompressionMode = mode || 'compressed';
   }
 
   onDelete(callback) {
