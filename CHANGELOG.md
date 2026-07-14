@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-07-14
+
+### Added
+
+- Insert, view, and manage image attachments in notes: a toolbar button/file picker inserts images (with a configurable compression mode), previews render inline via a new `snasset:` protocol, left-click opens a fullscreen viewer, and right-click gives alignment/size/alt-text controls plus EXIF info for original-mode images ([71e7017](https://github.com/inventory69/simple-notes-desktop/commit/71e7017ea6f90787e92c0837f0479bf99a31a3e3))
+  - Backed by content-addressed WebDAV asset storage: images are compressed, hashed, and synced through a dedicated `{sync_folder}-assets/` directory, with automatic upload-before-note-sync, download of missing assets, and garbage collection of unreferenced ones ([b588475](https://github.com/inventory69/simple-notes-desktop/commit/b58847573a0ced5490de7b17e563b86d6c973eeb))
+
+### Fixed
+
+- Foreign WebDAV clients (e.g. sync tools) creating dot-prefixed directories like `.stfolder` no longer get picked up and shown as note folders ([79dd7d8](https://github.com/inventory69/simple-notes-desktop/commit/79dd7d8598eb80ae077261fefcae5f76b00ec627))
+- New notes and checklists are now properly highlighted in the sidebar when created, instead of loading into the editor without a selected row ([f323e34](https://github.com/inventory69/simple-notes-desktop/commit/f323e3482a22c85bb619c836a4a6218111b51d98))
+
 ## [0.11.0] - 2026-07-06
 
 ### Added

@@ -1,5 +1,5 @@
-- Archive notes instead of deleting them, with a dedicated Archive view
-- "Add to calendar" button for notes and checklist items
-- Markdown export is now optional and off by default, with its own Settings screen
-- Changing server/sync folder now offers to migrate or replace instead of switching silently
-- Fixed preview toggle to fully swap the editor instead of splitting the view
+- Insert images directly into notes via a new toolbar button, with a configurable compression mode
+- Images sync across devices through content-addressed WebDAV asset storage
+- Click an image to view it fullscreen; right-click for alignment, size, alt text, and EXIF info
+- Fixed foreign WebDAV dot-folders (e.g. .stfolder) showing up as note folders
+- New notes now get properly highlighted in the sidebar when created
