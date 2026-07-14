@@ -225,10 +225,12 @@ pub fn read_metadata(path: &Path) -> Option<ImageMetadata> {
                     .filter(|&v| v > 0.0)
                     .map(format_exposure_time),
                 field_rational(exif, Tag::FocalLength).filter(|&v| v > 0.0),
-                gps_coord(exif, Tag::GPSLatitude, Tag::GPSLatitudeRef, "S").and_then(|lat| {
-                    gps_coord(exif, Tag::GPSLongitude, Tag::GPSLongitudeRef, "W")
-                        .map(|lon| (lat, lon))
-                }),
+                gps_coord(exif, Tag::GPSLatitude, Tag::GPSLatitudeRef, "S").zip(gps_coord(
+                    exif,
+                    Tag::GPSLongitude,
+                    Tag::GPSLongitudeRef,
+                    "W",
+                )),
             ),
             None => (None, None, None, None, None, None, None),
         };
