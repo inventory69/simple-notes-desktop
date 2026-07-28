@@ -56,6 +56,9 @@ impl WebDavClient {
     pub fn new(url: &str, username: &str, password: &str, sync_folder: &str) -> Result<Self> {
         let client = Client::builder()
             .danger_accept_invalid_certs(true)
+            // Ohne User-Agent blockieren viele WAFs (z.B. Cloudflare-Regel
+            // `http.user_agent eq ""`) den Request am Edge mit 403.
+            .user_agent(concat!("SimpleNotesDesktop/", env!("CARGO_PKG_VERSION")))
             // connect_timeout: schnelles Fehlschlagen wenn der Server nicht erreichbar ist
             // (sonst hängt "Test connection" bis zum 30s-Request-Timeout).
             .connect_timeout(std::time::Duration::from_secs(5))
@@ -225,7 +228,13 @@ impl WebDavClient {
 
         match response.status() {
             StatusCode::OK | StatusCode::MULTI_STATUS => Ok(true),
-            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(AppError::InvalidCredentials),
+            StatusCode::UNAUTHORIZED => Err(AppError::InvalidCredentials),
+            // 403 kommt meist nicht vom WebDAV-Server selbst, sondern von einem Proxy/WAF
+            // davor — nicht als "Invalid credentials" ausgeben.
+            StatusCode::FORBIDDEN => Err(AppError::WebDav(
+                "403 Forbidden — server or a proxy/firewall in front of it rejected the request"
+                    .to_string(),
+            )),
             StatusCode::NOT_FOUND => {
                 self.ensure_directories(write_markdown).await?;
                 Ok(true)
