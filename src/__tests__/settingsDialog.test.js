@@ -29,6 +29,7 @@ function setupDOM() {
           <button class="settings-nav-card" data-section="connection" type="button">Connection</button>
           <button class="settings-nav-card" data-section="markdown" type="button">Markdown Export<span id="markdown-nav-sublabel"></span></button>
           <button class="settings-nav-card" data-section="system" type="button">System</button>
+          <button class="settings-nav-card" data-section="activity" type="button">Activity Log</button>
           <button id="updates-card" class="settings-nav-card hidden" data-section="updates" type="button">Updates</button>
           <button class="settings-nav-card" data-section="about" type="button">About</button>
         </div>
@@ -63,6 +64,12 @@ function setupDOM() {
           <input type="checkbox" id="tray-checkbox" />
           <input type="checkbox" id="autostart-checkbox" />
           <input type="text" id="device-id" readonly />
+        </div>
+        <div class="settings-section hidden" data-section="activity">
+          <div id="activity-log-list"></div>
+          <div id="activity-log-empty" class="hidden"></div>
+          <button id="activity-log-clear-btn" type="button">Clear log</button>
+          <div id="activity-log-status" class="hidden"></div>
         </div>
         <div id="updates-section" class="settings-section hidden" data-section="updates">
           <input type="checkbox" id="update-notifications-checkbox" />
@@ -123,6 +130,8 @@ describe('SettingsDialog', () => {
     tauri.migrateToNewTarget.mockResolvedValue();
     tauri.replaceWithNewTarget.mockResolvedValue();
     tauri.mdMirrorExists.mockResolvedValue(false);
+    tauri.listActivityLog.mockResolvedValue([]);
+    tauri.clearActivityLog.mockResolvedValue();
 
     // Dynamic import to get fresh module with fresh DOM
     const mod = await import('../components/SettingsDialog.js');

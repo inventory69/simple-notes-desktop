@@ -362,6 +362,13 @@
                 <span class="settings-nav-label">System</span>
                 <svg class="settings-nav-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
               </button>
+              <button class="settings-nav-card" data-section="activity" type="button">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                </svg>
+                <span class="settings-nav-label">Activity Log</span>
+                <svg class="settings-nav-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+              </button>
               <button id="updates-card" class="settings-nav-card hidden" data-section="updates" type="button">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <polyline points="8 17 12 21 16 17"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/>
@@ -511,6 +518,20 @@
                 <label>Device ID</label>
                 <input type="text" id="device-id" readonly />
               </div>
+            </div>
+
+            <!-- Activity Log -->
+            <div class="settings-section hidden" data-section="activity">
+              <h3>Activity Log</h3>
+              <div class="form-group">
+                <small class="form-hint">Human-readable history of sync events, trashes, restores and conflicts — per device.</small>
+                <div id="activity-log-list" class="activity-log-list"></div>
+                <div id="activity-log-empty" class="form-hint hidden">No activity yet.</div>
+              </div>
+              <div class="form-group activity-log-actions">
+                <button id="activity-log-clear-btn" class="btn-secondary" type="button">Clear log</button>
+              </div>
+              <div id="activity-log-status" class="form-hint hidden"></div>
             </div>
 
             <!-- Updates Section (nur auf Windows sichtbar, gesteuert per JS) -->

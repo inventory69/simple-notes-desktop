@@ -8,6 +8,21 @@ import { MODE_BY_ID, THEME_IDS, THEMES } from '../utils/themes.js';
  */
 const FONT_SCALE = { system: 1, small: 0.85, normal: 1, large: 1.15, xlarge: 1.3 };
 
+const ACTIVITY_OP_LABELS = {
+  CREATE: 'Created',
+  EDIT: 'Edited',
+  TRASH: 'Trashed',
+  RESTORE: 'Restored',
+  PURGE: 'Purged',
+  UPLOAD: 'Uploaded',
+  DOWNLOAD: 'Downloaded',
+  CONFLICT: 'Conflict detected',
+  FOLDER_DELETE: 'Folder deleted',
+  SYNC_OK: 'Sync completed',
+  SYNC_FAIL: 'Sync failed',
+  DELETION_SKIPPED: 'Deletion detection skipped',
+};
+
 export class SettingsDialog {
   constructor() {
     this.dialog = document.getElementById('settings-dialog');
@@ -42,6 +57,10 @@ export class SettingsDialog {
     this.defaultOpenModeSelect = document.getElementById('default-open-mode-select');
     this.imageCompressionSelect = document.getElementById('image-compression-select');
     this.fontSizeChips = document.getElementById('font-size-chips');
+    this.activityLogList = document.getElementById('activity-log-list');
+    this.activityLogEmpty = document.getElementById('activity-log-empty');
+    this.activityLogClearBtn = document.getElementById('activity-log-clear-btn');
+    this.activityLogStatus = document.getElementById('activity-log-status');
     this.onSaveCallback = null;
     this.onReconnectCallback = null;
     this.onViewChangelogCallback = null;
@@ -85,6 +104,8 @@ export class SettingsDialog {
     });
 
     this.testConnBtn.addEventListener('click', () => this._testConnection());
+
+    this.activityLogClearBtn.addEventListener('click', () => this._handleClearActivityLog());
 
     // Offline toggle: update status label live
     this.offlineCheckbox.addEventListener('change', () => this._applyOfflineState());
@@ -379,6 +400,72 @@ export class SettingsDialog {
     const section = this.dialog.querySelector(`.settings-section[data-section="${id}"]`);
     const title = section?.querySelector('h3')?.textContent;
     if (this.headerTitle && title) this.headerTitle.textContent = title;
+    if (id === 'activity') this._loadActivityLog();
+  }
+
+  async _loadActivityLog() {
+    try {
+      const entries = await tauri.listActivityLog();
+      this._renderActivityLog(entries);
+    } catch (error) {
+      console.error('Failed to load activity log:', error);
+    }
+  }
+
+  _renderActivityLog(entries) {
+    this.activityLogList.innerHTML = '';
+    this.activityLogEmpty.classList.toggle('hidden', entries.length > 0);
+    for (const entry of entries) {
+      this.activityLogList.appendChild(this._buildActivityRow(entry));
+    }
+  }
+
+  _buildActivityRow(entry) {
+    const row = document.createElement('div');
+    row.className = 'activity-log-row';
+
+    const time = document.createElement('span');
+    time.className = 'activity-log-row-time';
+    time.textContent = new Date(entry.ts).toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    const text = document.createElement('span');
+    text.className = 'activity-log-row-text';
+    text.textContent = this._describeActivityEntry(entry);
+
+    row.append(time, text);
+    return row;
+  }
+
+  /** Notiz existiert evtl. nicht mehr → Titel kommt aus dem Eintrag, kein Storage-Lookup. */
+  _describeActivityEntry(entry) {
+    const label = ACTIVITY_OP_LABELS[entry.op] || entry.op;
+    if (entry.err) return `${label}: ${entry.err}`;
+    if (entry.title) return `${label}: ${entry.title}`;
+    if (entry.folder) return `${label}: ${entry.folder}`;
+    if (entry.why) return `${label} (${entry.why})`;
+    return label;
+  }
+
+  async _handleClearActivityLog() {
+    const confirmed = await dialogService.confirm({
+      title: 'Clear Activity Log',
+      message: 'Delete the local activity log? This only affects this device.',
+      confirmText: 'Clear',
+      cancelText: 'Cancel',
+      type: 'danger',
+    });
+    if (!confirmed) return;
+    try {
+      await tauri.clearActivityLog();
+      this._renderActivityLog([]);
+    } catch (error) {
+      await dialogService.error({ title: 'Clear Failed', message: error.message || String(error) });
+    }
   }
 
   hide() {

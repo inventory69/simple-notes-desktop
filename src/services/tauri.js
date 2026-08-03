@@ -395,3 +395,19 @@ export function assetUrl(name) {
 export async function getImageMetadata(name) {
   return await invoke('get_image_metadata', { name });
 }
+
+/**
+ * Last local activity log entries, newest first (tail-read, no full file load).
+ * @returns {Promise<Array>} Array of activity log entry objects
+ */
+export async function listActivityLog() {
+  return await invoke('list_activity_log');
+}
+
+/**
+ * Clear the local activity log. The log never leaves the device unless shared explicitly.
+ * @returns {Promise<void>}
+ */
+export async function clearActivityLog() {
+  return await invoke('clear_activity_log');
+}
