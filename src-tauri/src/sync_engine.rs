@@ -30,6 +30,7 @@ pub struct SyncSummary {
     pub notes_uploaded: usize,
     pub conflicts_detected: usize,
     pub notes_deleted_on_server: usize,
+    pub notes_healed: usize,
 }
 
 // ── Cache-Zugriff (für Migration) ───────────────────────────────────────────
@@ -104,16 +105,31 @@ fn save_last_sync_at(app: &AppHandle, ts: i64) {
 // ── Sync-Logik ───────────────────────────────────────────────────────────────
 
 /// Alle Server-Notizen abrufen (PROPFIND + GET je UUID).
-async fn fetch_server_notes(client: &WebDavClient) -> crate::error::Result<Vec<Note>> {
-    let note_locations = client.list_notes_with_folders().await?;
+///
+/// Gibt neben den erfolgreich geladenen Notizen auch `server_ids` zurück — die Menge **aller**
+/// IDs aus dem Listing, unabhängig davon, ob der einzelne GET geklappt hat. Löscherkennung MUSS
+/// gegen `server_ids` prüfen, nicht gegen `notes`: ein einzelner GET-Timeout darf eine Notiz
+/// nicht als serverseitig gelöscht erscheinen lassen (das war die wahrscheinlichste Ursache für
+/// den Datenverlust in #128 — der Desktop GETtet bei jedem Sync jede Notiz einzeln).
+/// `complete` ist `false`, wenn das Ordner-Listing lückenhaft war oder mindestens ein GET
+/// fehlschlug — in dem Fall bricht `run_sync` die Löscherkennung für diesen Zyklus komplett ab.
+async fn fetch_server_notes(
+    client: &WebDavClient,
+) -> crate::error::Result<(Vec<Note>, HashSet<String>, bool)> {
+    let (note_locations, listing_complete) = client.list_notes_with_folders().await?;
+    let server_ids: HashSet<String> = note_locations.iter().map(|(id, _)| id.clone()).collect();
+    let mut complete = listing_complete;
     let mut notes = Vec::new();
     for (id, folder) in note_locations {
         match client.get_note(&id, folder.as_deref()).await {
             Ok(note) => notes.push(note),
-            Err(e) => eprintln!("[sync] get_note {} fehlgeschlagen: {}", id, e),
+            Err(e) => {
+                eprintln!("[sync] get_note {} fehlgeschlagen: {}", id, e);
+                complete = false;
+            }
         }
     }
-    Ok(notes)
+    Ok((notes, server_ids, complete))
 }
 
 /// Menge aller Ordnernamen, die auf dem Server existieren (lowercased).
@@ -122,7 +138,8 @@ async fn collect_server_folder_names(
     client: &WebDavClient,
 ) -> crate::error::Result<HashSet<String>> {
     let mut names = HashSet::new();
-    for (_id, folder) in client.list_notes_with_folders().await? {
+    let (locations, _complete) = client.list_notes_with_folders().await?;
+    for (_id, folder) in locations {
         if let Some(f) = folder {
             names.insert(f.to_lowercase());
         }
@@ -193,6 +210,18 @@ async fn sync_folders(client: &WebDavClient, app: &AppHandle, write_markdown: bo
     }
 }
 
+/// Sicherheitswächter: Löscherkennung darf nur auf einem vollständigen Server-Listing laufen.
+/// `listing_complete=false` (Ordner-PROPFIND oder GET fehlgeschlagen) muss dieselbe Abbruch-
+/// Reaktion auslösen wie der alte "0 Notizen bei gefülltem Store"-Fall — sonst wird ein einzelner
+/// Timeout wieder zur Fehl-Löschung (#128).
+fn should_abort_deletion(
+    listing_complete: bool,
+    server_notes_empty: bool,
+    local_synced_nonempty: bool,
+) -> bool {
+    !listing_complete || (server_notes_empty && local_synced_nonempty)
+}
+
 /// Server-Sync: local_store ↔ Server reconcilen.
 ///
 /// Port von Android's `WebDavSyncService.syncNotes()`.
@@ -224,14 +253,13 @@ pub async fn run_sync(
     sync_folders(client, app, write_markdown).await;
 
     // 3. Server-Notizen abrufen
-    let server_notes = match fetch_server_notes(client).await {
+    let (server_notes, server_ids, listing_complete) = match fetch_server_notes(client).await {
         Ok(v) => v,
         Err(e) => {
             eprintln!("[sync] fetch fehlgeschlagen: {}", e);
             return summary;
         }
     };
-    let server_ids: HashSet<String> = server_notes.iter().map(|n| n.id.clone()).collect();
 
     // Local-only-Ordner einmal vorberechnen
     let local_only_set: HashSet<String> = local_store::active_folders(app)
@@ -260,12 +288,22 @@ pub async fn run_sync(
                     .unwrap_or(false)
         })
         .collect();
-    let abort_deletion = server_notes.is_empty() && !local_synced.is_empty();
+    let abort_deletion = should_abort_deletion(
+        listing_complete,
+        server_notes.is_empty(),
+        !local_synced.is_empty(),
+    );
     if abort_deletion {
-        eprintln!(
-            "[sync] Sicherheitswächter: Server lieferte 0 Notizen, {} lokale SYNCED — Löscherkennung übersprungen",
-            local_synced.len()
-        );
+        if !listing_complete {
+            eprintln!(
+                "[sync] Sicherheitswächter: Server-Listing unvollständig (Ordner-PROPFIND oder GET fehlgeschlagen) — Löscherkennung übersprungen"
+            );
+        } else {
+            eprintln!(
+                "[sync] Sicherheitswächter: Server lieferte 0 Notizen, {} lokale SYNCED — Löscherkennung übersprungen",
+                local_synced.len()
+            );
+        }
     }
 
     // 4. Download / LWW-Merge → in local_store schreiben
@@ -304,6 +342,18 @@ pub async fn run_sync(
                         local_store::put_note(app, &n);
                         summary.notes_downloaded += 1;
                     }
+                } else if local.sync_status == SyncStatus::DeletedOnServer {
+                    // Self-Heal: die Notiz ist (noch/wieder) auf dem Server vorhanden, also war
+                    // die frühere Löscherkennung ein Fehlalarm (unvollständiges Listing/GET).
+                    // Getrashte Notizen haben nie DELETED_ON_SERVER, das setzt ausschließlich
+                    // Abschnitt 5 unten — ein echter Papierkorb-Eintrag kann so nicht zurückgeholt
+                    // werden.
+                    let mut healed = local.clone();
+                    healed.sync_status = SyncStatus::Synced;
+                    healed.folder_name = sn.folder_name.clone();
+                    healed.trashed_at = None;
+                    local_store::put_note(app, &healed);
+                    summary.notes_healed += 1;
                 }
                 // sonst: lokal neuer/gleich → wird ggf. in Upload-Phase behandelt
             }
@@ -461,11 +511,12 @@ pub async fn run_sync(
 
     save_last_sync_at(app, now);
     eprintln!(
-        "[sync] Abgeschlossen: {} heruntergeladen, {} hochgeladen, {} Konflikte, {} auf Server gelöscht",
+        "[sync] Abgeschlossen: {} heruntergeladen, {} hochgeladen, {} Konflikte, {} auf Server gelöscht, {} wiederhergestellt",
         summary.notes_downloaded,
         summary.notes_uploaded,
         summary.conflicts_detected,
-        summary.notes_deleted_on_server
+        summary.notes_deleted_on_server,
+        summary.notes_healed
     );
     summary
 }
@@ -504,5 +555,27 @@ mod tests {
             !json.contains("\"etag\""),
             "etag-Feld darf bei None nicht serialisiert werden"
         );
+    }
+
+    // ── #128 Regression: unvollständiges Listing darf nie zur Löscherkennung führen ──────────
+
+    #[test]
+    fn test_abort_deletion_on_incomplete_listing_even_with_notes() {
+        // Ordner-PROPFIND oder ein einzelner GET ist fehlgeschlagen, aber der Rest der Notizen
+        // kam durch — genau der Fall, der #128 auslöste. Muss trotzdem abbrechen.
+        assert!(should_abort_deletion(false, false, true));
+        assert!(should_abort_deletion(false, false, false));
+    }
+
+    #[test]
+    fn test_abort_deletion_on_empty_server_with_local_notes() {
+        // Alter Wächter: 0 Notizen bei gefülltem lokalem Store bleibt abgedeckt.
+        assert!(should_abort_deletion(true, true, true));
+    }
+
+    #[test]
+    fn test_no_abort_on_complete_listing() {
+        assert!(!should_abort_deletion(true, false, true));
+        assert!(!should_abort_deletion(true, true, false));
     }
 }
