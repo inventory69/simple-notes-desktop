@@ -15,7 +15,6 @@ const SYNC_STORE: &str = "sync_state.json";
 const KEY_NOTE_CACHE: &str = "note_cache";
 const KEY_LAST_SYNC: &str = "last_sync_at";
 
-
 /// Ein Eintrag im lokalen Notiz-Cache (für Migration aus alter Architektur).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NoteCacheEntry {
@@ -259,7 +258,16 @@ pub async fn run_sync(
         Ok(v) => v,
         Err(e) => {
             eprintln!("[sync] fetch fehlgeschlagen: {}", e);
-            activity_log::log(app, Op::SyncFail, Src::Local, None, None, None, None, Some(&e.to_string()));
+            activity_log::log(
+                app,
+                Op::SyncFail,
+                Src::Local,
+                None,
+                None,
+                None,
+                None,
+                Some(&e.to_string()),
+            );
             return summary;
         }
     };
