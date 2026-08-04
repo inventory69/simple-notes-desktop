@@ -1,3 +1,4 @@
+mod activity_log;
 mod assets;
 mod calendar;
 mod error;
@@ -135,6 +136,16 @@ fn purge_expired_trashed(app: &AppHandle, note: &Note) {
         scheduler::trigger_sync(app);
     }
     local_store::remove_note(app, &note.id);
+    activity_log::log(
+        app,
+        activity_log::Op::Purge,
+        activity_log::Src::Local,
+        Some(&note.id),
+        Some(&note.title),
+        note.folder_name.as_deref(),
+        Some("auto_purge_expired"),
+        None,
+    );
 }
 
 #[tauri::command]
@@ -278,6 +289,16 @@ async fn delete_note(id: String, app: AppHandle) -> Result<()> {
         local_store::mark_dirty(&app, &mut note);
         local_store::put_note(&app, &note);
         scheduler::trigger_sync(&app);
+        activity_log::log(
+            &app,
+            activity_log::Op::Trash,
+            activity_log::Src::Local,
+            Some(&note.id),
+            Some(&note.title),
+            note.folder_name.as_deref(),
+            None,
+            None,
+        );
     }
     Ok(())
 }
@@ -305,6 +326,16 @@ async fn restore_note(id: String, app: AppHandle) -> Result<()> {
         local_store::mark_dirty(&app, &mut note);
         local_store::put_note(&app, &note);
         scheduler::trigger_sync(&app);
+        activity_log::log(
+            &app,
+            activity_log::Op::Restore,
+            activity_log::Src::Local,
+            Some(&note.id),
+            Some(&note.title),
+            note.folder_name.as_deref(),
+            None,
+            None,
+        );
     }
     Ok(())
 }
@@ -320,8 +351,18 @@ async fn delete_note_permanent(id: String, app: AppHandle) -> Result<()> {
             n.sync_status,
             SyncStatus::Synced | SyncStatus::Pending | SyncStatus::Conflict
         ) {
-            sync_queue::enqueue_deletions(&app, &[(id, n.folder_name)]);
+            sync_queue::enqueue_deletions(&app, &[(id.clone(), n.folder_name.clone())]);
         }
+        activity_log::log(
+            &app,
+            activity_log::Op::Purge,
+            activity_log::Src::Local,
+            Some(&id),
+            Some(&n.title),
+            n.folder_name.as_deref(),
+            None,
+            None,
+        );
     }
     scheduler::trigger_sync(&app);
     Ok(())
@@ -363,6 +404,16 @@ async fn empty_trash(app: AppHandle) -> Result<()> {
         .collect();
     for n in &trashed {
         local_store::remove_note(&app, &n.id);
+        activity_log::log(
+            &app,
+            activity_log::Op::Purge,
+            activity_log::Src::Local,
+            Some(&n.id),
+            Some(&n.title),
+            n.folder_name.as_deref(),
+            None,
+            None,
+        );
     }
     sync_queue::enqueue_deletions(&app, &server_deletions);
     scheduler::trigger_sync(&app);
@@ -493,8 +544,10 @@ fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
-#[tauri::command]
-fn get_desktop_environment() -> Option<String> {
+/// Extrahiert, damit `activity_log::device_display_name()` dieselbe Logik ohne den
+/// `#[tauri::command]`-Wrapper wiederverwenden kann (die Makro-generierten Items vertragen sich
+/// nicht mit einer geänderten Sichtbarkeit auf der Kommando-Funktion selbst).
+pub(crate) fn desktop_environment_impl() -> Option<String> {
     if let Ok(session) = std::env::var("XDG_CURRENT_DESKTOP") {
         return Some(session.to_lowercase());
     }
@@ -511,7 +564,11 @@ fn get_desktop_environment() -> Option<String> {
 }
 
 #[tauri::command]
-fn get_platform() -> &'static str {
+fn get_desktop_environment() -> Option<String> {
+    desktop_environment_impl()
+}
+
+pub(crate) fn platform_impl() -> &'static str {
     if cfg!(target_os = "windows") {
         "windows"
     } else if cfg!(target_os = "linux") {
@@ -521,6 +578,11 @@ fn get_platform() -> &'static str {
     } else {
         "unknown"
     }
+}
+
+#[tauri::command]
+fn get_platform() -> &'static str {
+    platform_impl()
 }
 
 #[cfg(target_os = "windows")]
@@ -800,6 +862,16 @@ async fn delete_folder(name: String, keep_notes: bool, app: AppHandle) -> Result
         sync_queue::enqueue_folder_tombstone(&app, &name);
     }
     scheduler::trigger_sync(&app);
+    activity_log::log(
+        &app,
+        activity_log::Op::FolderDelete,
+        activity_log::Src::Local,
+        None,
+        None,
+        Some(&name),
+        None,
+        None,
+    );
     list_folders(app).await
 }
 
@@ -1060,6 +1132,22 @@ async fn md_mirror_exists(
     let folder = sync_folder.unwrap_or_else(|| "notes".to_string());
     let client = WebDavClient::new(&url, &username, &password, &folder)?;
     client.md_mirror_exists().await
+}
+
+/// Letzte lokale Aktivitätsprotokoll-Einträge, neueste zuerst (Tail-Read, kein Voll-Laden).
+#[tauri::command]
+async fn list_activity_log(app: AppHandle) -> Result<Vec<activity_log::Entry>> {
+    let mut entries = activity_log::read_tail(&app, activity_log::UI_PAGE_SIZE);
+    entries.reverse();
+    Ok(entries)
+}
+
+/// Lokales Aktivitätsprotokoll löschen. Das Protokoll ist rein lokal — es gibt keine Serverkopie,
+/// die mitgelöscht werden müsste.
+#[tauri::command]
+async fn clear_activity_log(app: AppHandle) -> Result<()> {
+    activity_log::clear_local(&app);
+    Ok(())
 }
 
 /// State to track minimize-to-tray setting at runtime
@@ -1381,6 +1469,8 @@ pub fn run() {
             replace_with_new_target,
             backfill_markdown,
             md_mirror_exists,
+            list_activity_log,
+            clear_activity_log,
             show_main_window,
             export_to_calendar,
             attach_image,

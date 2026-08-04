@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 
+use crate::activity_log::{self, Op, Src};
 use crate::folders::FolderMeta;
 use crate::local_store;
 use crate::models::{Note, SyncStatus};
@@ -13,6 +14,7 @@ use crate::webdav::WebDavClient;
 const SYNC_STORE: &str = "sync_state.json";
 const KEY_NOTE_CACHE: &str = "note_cache";
 const KEY_LAST_SYNC: &str = "last_sync_at";
+
 
 /// Ein Eintrag im lokalen Notiz-Cache (für Migration aus alter Architektur).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -257,6 +259,7 @@ pub async fn run_sync(
         Ok(v) => v,
         Err(e) => {
             eprintln!("[sync] fetch fehlgeschlagen: {}", e);
+            activity_log::log(app, Op::SyncFail, Src::Local, None, None, None, None, Some(&e.to_string()));
             return summary;
         }
     };
@@ -298,6 +301,16 @@ pub async fn run_sync(
             eprintln!(
                 "[sync] Sicherheitswächter: Server-Listing unvollständig (Ordner-PROPFIND oder GET fehlgeschlagen) — Löscherkennung übersprungen"
             );
+            activity_log::log(
+                app,
+                Op::DeletionSkipped,
+                Src::Local,
+                None,
+                None,
+                None,
+                Some("listing_incomplete"),
+                None,
+            );
         } else {
             eprintln!(
                 "[sync] Sicherheitswächter: Server lieferte 0 Notizen, {} lokale SYNCED — Löscherkennung übersprungen",
@@ -322,6 +335,16 @@ pub async fn run_sync(
                 n.sync_status = SyncStatus::Synced;
                 local_store::put_note(app, &n);
                 summary.notes_downloaded += 1;
+                activity_log::log(
+                    app,
+                    Op::Download,
+                    Src::Remote,
+                    Some(&sn.id),
+                    Some(&sn.title),
+                    sn.folder_name.as_deref(),
+                    None,
+                    None,
+                );
             }
             Some(local) => {
                 if sn.updated_at > local.updated_at {
@@ -335,12 +358,32 @@ pub async fn run_sync(
                         local_store::put_note(app, &c);
                         summary.conflicts_detected += 1;
                         eprintln!("[sync] Konflikt erkannt für {}", sn.id);
+                        activity_log::log(
+                            app,
+                            Op::Conflict,
+                            Src::Remote,
+                            Some(&sn.id),
+                            Some(&sn.title),
+                            sn.folder_name.as_deref(),
+                            None,
+                            None,
+                        );
                     } else {
                         // Server neuer → überschreiben
                         let mut n = sn.clone();
                         n.sync_status = SyncStatus::Synced;
                         local_store::put_note(app, &n);
                         summary.notes_downloaded += 1;
+                        activity_log::log(
+                            app,
+                            Op::Download,
+                            Src::Remote,
+                            Some(&sn.id),
+                            Some(&sn.title),
+                            sn.folder_name.as_deref(),
+                            None,
+                            None,
+                        );
                     }
                 } else if local.sync_status == SyncStatus::DeletedOnServer {
                     // Self-Heal: die Notiz ist (noch/wieder) auf dem Server vorhanden, also war
@@ -354,6 +397,16 @@ pub async fn run_sync(
                     healed.trashed_at = None;
                     local_store::put_note(app, &healed);
                     summary.notes_healed += 1;
+                    activity_log::log(
+                        app,
+                        Op::Restore,
+                        Src::Remote,
+                        Some(&sn.id),
+                        Some(&sn.title),
+                        sn.folder_name.as_deref(),
+                        Some("self_heal_present_on_server"),
+                        None,
+                    );
                 }
                 // sonst: lokal neuer/gleich → wird ggf. in Upload-Phase behandelt
             }
@@ -393,6 +446,16 @@ pub async fn run_sync(
                     eprintln!(
                         "[sync] {} auf Server verschwunden → DELETED_ON_SERVER",
                         n.id
+                    );
+                    activity_log::log(
+                        app,
+                        Op::Trash,
+                        Src::Remote,
+                        Some(&n.id),
+                        Some(&n.title),
+                        n.folder_name.as_deref(),
+                        Some("server_deletion_detected"),
+                        None,
                     );
                 }
                 summary.notes_deleted_on_server += 1;
@@ -449,6 +512,20 @@ pub async fn run_sync(
                 local_store::mark_synced_if_unchanged(app, &n.id, n.updated_at);
                 uploaded_ids.push(n.id.clone());
                 summary.notes_uploaded += 1;
+                // Trash-Zustand wird schon lokal geloggt (Op::Trash bei trash_note) — hier nur
+                // echte Content-Uploads, sonst doppelt geloggt (Android-Parität NoteUploader).
+                if n.trashed_at.is_none() {
+                    activity_log::log(
+                        app,
+                        Op::Upload,
+                        Src::Local,
+                        Some(&n.id),
+                        Some(&n.title),
+                        n.folder_name.as_deref(),
+                        None,
+                        None,
+                    );
+                }
             }
             Err(e) => eprintln!("[sync] upload {} fehlgeschlagen: {}", n.id, e),
         }
@@ -518,6 +595,27 @@ pub async fn run_sync(
         summary.notes_deleted_on_server,
         summary.notes_healed
     );
+    // Nur protokollieren, wenn der Sync tatsächlich etwas bewegt hat (Android-Parität):
+    // ein Leerlauf-Sync soll das Protokoll nicht mit "Sync abgeschlossen" zutapezieren.
+    if summary.notes_downloaded + summary.notes_uploaded > 0 {
+        activity_log::log(
+            app,
+            Op::SyncOk,
+            Src::Local,
+            None,
+            None,
+            None,
+            Some(&format!(
+                "downloaded={} uploaded={} conflicts={} deleted={} healed={}",
+                summary.notes_downloaded,
+                summary.notes_uploaded,
+                summary.conflicts_detected,
+                summary.notes_deleted_on_server,
+                summary.notes_healed
+            )),
+            None,
+        );
+    }
     summary
 }
 
