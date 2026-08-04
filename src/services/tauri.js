@@ -395,3 +395,20 @@ export function assetUrl(name) {
 export async function getImageMetadata(name) {
   return await invoke('get_image_metadata', { name });
 }
+
+/**
+ * Read a cached asset as a `data:` URL, for share/copy-as-text.
+ * @param {string} name - Asset file name
+ * @returns {Promise<string|null>} data URL, or null if not (yet) synced locally
+ */
+export async function getAssetDataUrl(name) {
+  return await invoke('get_asset_data_url', { name });
+}
+
+/**
+ * Copy a cached asset to the system clipboard as an image.
+ * @param {string} name - Asset file name
+ */
+export async function copyImageToClipboard(name) {
+  return await invoke('copy_image_to_clipboard', { name });
+}

@@ -1,5 +1,5 @@
 import { dialogService } from '../services/DialogService.js';
-import { getImageMetadata } from '../services/tauri.js';
+import { copyImageToClipboard, getImageMetadata } from '../services/tauri.js';
 import { SIZE_PRESETS } from '../utils/imageAltTokens.js';
 
 /**
@@ -33,6 +33,7 @@ class ImageActionsMenu {
 
     this.altInput = this.popup.querySelector('.image-menu-alt-input');
     this.infoBtn = this.popup.querySelector('.image-menu-info-btn');
+    this.copyBtn = this.popup.querySelector('.image-menu-copy-btn');
 
     this.popup.addEventListener('click', (e) => {
       const alignBtn = e.target.closest('[data-align]');
@@ -50,6 +51,15 @@ class ImageActionsMenu {
         this.hide();
         getImageMetadata(assetName).then((meta) => {
           if (meta) dialogService.imageInfo(meta);
+        });
+        return;
+      }
+      if (e.target.closest('.image-menu-copy-btn')) {
+        const { assetName } = this._state;
+        this.hide();
+        copyImageToClipboard(assetName).catch((error) => {
+          console.error('Failed to copy image:', error);
+          dialogService.error({ title: 'Copy Image', message: error.message || String(error) });
         });
       }
     });
@@ -69,12 +79,15 @@ class ImageActionsMenu {
     this.altInput.value = imageState.cleanAlt;
     this._syncActiveButtons();
     this.infoBtn.classList.add('hidden');
+    this.copyBtn.classList.add('hidden');
     getImageMetadata(imageState.assetName).then((meta) => {
       if (this._state?.assetName === imageState.assetName) {
         // ponytail: re-encoded Compressed/Lossless assets are always `.webp` (see images.rs
         // process()); anything else came through untouched, so metadata is always meaningful.
         const isReencoded = imageState.assetName.endsWith('.webp');
         this.infoBtn.classList.toggle('hidden', !meta || isReencoded);
+        // Android parity: hide Copy when the asset isn't locally cached yet (not synced down).
+        this.copyBtn.classList.toggle('hidden', !meta);
       }
     });
 

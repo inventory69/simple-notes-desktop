@@ -224,6 +224,33 @@ async fn get_image_metadata(name: String, app: AppHandle) -> Result<Option<image
     Ok(images::read_metadata(&path))
 }
 
+/// Liefert ein lokal gecachtes Asset als `data:`-URL für Share/Copy-Text. `None` wenn die
+/// Datei (noch) nicht gesynct ist — der Aufrufer degradiert dann zu einem Text-Platzhalter.
+#[tauri::command]
+async fn get_asset_data_url(name: String, app: AppHandle) -> Result<Option<String>> {
+    let path = assets::asset_path(&app, &name)?;
+    match tokio::fs::read(&path).await {
+        Ok(bytes) => Ok(Some(assets::data_url(&name, &bytes))),
+        Err(_) => Ok(None),
+    }
+}
+
+/// Kopiert ein Asset als Bild in die System-Zwischenablage (Bild-Menü „Kopieren").
+#[tauri::command]
+async fn copy_image_to_clipboard(name: String, app: AppHandle) -> Result<()> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+
+    let path = assets::asset_path(&app, &name)?;
+    let rgba = image::open(&path)
+        .map_err(|e| AppError::Image(e.to_string()))?
+        .to_rgba8();
+    let (width, height) = rgba.dimensions();
+    let img = tauri::image::Image::new(&rgba, width, height);
+    app.clipboard()
+        .write_image(&img)
+        .map_err(|e| AppError::Image(e.to_string()))
+}
+
 #[tauri::command]
 async fn disconnect(state: State<'_, WebDavState>) -> Result<()> {
     let mut lock = lock_recover(&state.0);
@@ -1117,6 +1144,7 @@ pub fn run() {
         )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
@@ -1385,6 +1413,8 @@ pub fn run() {
             export_to_calendar,
             attach_image,
             get_image_metadata,
+            get_asset_data_url,
+            copy_image_to_clipboard,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
