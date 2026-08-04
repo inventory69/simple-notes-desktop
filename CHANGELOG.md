@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-04
+
+### Added
+
+- Default image size setting (Android parity): choose Small/Medium/Large/Full in Settings → Editor, applied automatically to newly inserted images instead of resizing each one by hand afterward ([470387f](https://github.com/inventory69/simple-notes-desktop/commit/470387f0415fa8233eb1636bfab013e6377c9e22))
+- Note share via system clipboard: the editor header's calendar/archive buttons are now a single ⋮ menu with Copy with images (renders the note to HTML with images inlined), Copy as text, Add to calendar, and Archive ([0e71644](https://github.com/inventory69/simple-notes-desktop/commit/0e71644399b37ce9a61c0ce84c28d2b59fa1e322))
+  - Copy image to clipboard from the image popup menu ([513d973](https://github.com/inventory69/simple-notes-desktop/commit/513d97322b8354f713ee2e0477138e13808d5823))
+- Local-only activity log (Android parity): records trash/restore/purge, folder deletion, downloads, uploads, conflicts and sync failures on this device only — never synced to the server ([0277c49](https://github.com/inventory69/simple-notes-desktop/commit/0277c49f49ad79a9ca1cb45aef64d15c441bd3d7))
+  - Shown as a new section in the Settings dialog, newest first, with a clear button ([3adb276](https://github.com/inventory69/simple-notes-desktop/commit/3adb276cf783d2eb62b6b48385b5f9c730344b10))
+  - Requested by [@daalja](https://github.com/daalja) — closes [inventory69/simple-notes-sync#128](https://github.com/inventory69/simple-notes-sync/issues/128)
+
+### Fixed
+
+- A single failed folder listing or note fetch no longer trashes notes still present on the server; deletion detection now aborts on any incomplete server listing and self-heals notes previously mis-trashed this way ([998a5e8](https://github.com/inventory69/simple-notes-desktop/commit/998a5e81b5ddd833f92e48fd1879bd8318e19fdf))
+  - Closes [inventory69/simple-notes-sync#128](https://github.com/inventory69/simple-notes-sync/issues/128)
+- Requests to the WebDAV server now send a `User-Agent` header, fixing servers behind WAF rules that reject empty-UA requests and previously surfaced as a misleading "Invalid credentials" error ([9d80244](https://github.com/inventory69/simple-notes-desktop/commit/9d80244fb6bccfe5c6bccf69b2e036ad2772cbc4))
+  - Reported by Nakamouradu972 — closes [#7](https://github.com/inventory69/simple-notes-desktop/issues/7)
+
 ## [0.12.0] - 2026-07-14
 
 ### Added

@@ -1,5 +1,5 @@
-- Insert images directly into notes via a new toolbar button, with a configurable compression mode
-- Images sync across devices through content-addressed WebDAV asset storage
-- Click an image to view it fullscreen; right-click for alignment, size, alt text, and EXIF info
-- Fixed foreign WebDAV dot-folders (e.g. .stfolder) showing up as note folders
-- New notes now get properly highlighted in the sidebar when created
+- Set a default image size (Small/Medium/Large/Full) in Settings, applied to every newly inserted image
+- Share notes via the system clipboard: copy with images inlined, or as plain text, from a new ⋮ menu
+- Copy a single image straight to the clipboard from its popup menu
+- New local-only activity log tracks trash, restore, sync and conflict events on this device, viewable in Settings
+- Fixed a sync bug that could wrongly trash notes when a server listing partially failed
