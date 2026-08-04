@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { buildImageAlt, computeImageRewrite, imagePreviewText, parseImageAlt } from '../utils/imageAltTokens.js';
+import {
+  buildImageAlt,
+  computeImageRewrite,
+  imagePlaceholderText,
+  imagePreviewText,
+  parseImageAlt,
+} from '../utils/imageAltTokens.js';
 
 describe('parseImageAlt', () => {
   it('returns defaults for empty alt', () => {
@@ -97,5 +103,28 @@ describe('imagePreviewText', () => {
 
   it('leaves plain text untouched', () => {
     expect(imagePreviewText('no images here')).toBe('no images here');
+  });
+});
+
+describe('imagePlaceholderText', () => {
+  it('replaces an image with alt text', () => {
+    expect(imagePlaceholderText('before ![Sunset](.assets/abc123.webp) after')).toBe('before [🖼 Sunset] after');
+  });
+
+  it('replaces an image without alt text', () => {
+    expect(imagePlaceholderText('![](.assets/abc123.webp)')).toBe('[🖼]');
+  });
+
+  it('strips size/align tokens from the alt text', () => {
+    expect(imagePlaceholderText('![Sunset|25%|right](.assets/abc123.webp)')).toBe('[🖼 Sunset]');
+  });
+
+  it('collapses runs of 3+ newlines left behind by a removed image line', () => {
+    const content = 'line one\n\n\n![alt](.assets/abc123.webp)\n\n\n\nline two';
+    expect(imagePlaceholderText(content)).toBe('line one\n\n[🖼 alt]\n\nline two');
+  });
+
+  it('leaves plain text untouched', () => {
+    expect(imagePlaceholderText('no images here')).toBe('no images here');
   });
 });

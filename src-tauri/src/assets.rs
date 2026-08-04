@@ -1,5 +1,6 @@
 use crate::error::{AppError, Result};
 use crate::models::Note;
+use base64::{engine::general_purpose::STANDARD, Engine};
 use regex::Regex;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -114,6 +115,19 @@ pub fn mime_for_ext(ext: &str) -> &'static str {
     }
 }
 
+/// `data:<mime>;base64,<...>` für ein Asset — Transportformat für Clipboard/Share.
+pub fn data_url(name: &str, bytes: &[u8]) -> String {
+    let ext = std::path::Path::new(name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    format!(
+        "data:{};base64,{}",
+        mime_for_ext(ext),
+        STANDARD.encode(bytes)
+    )
+}
+
 /// Ermittelt, welche Assets lokal und remote per GC gelöscht werden dürfen.
 /// Port von Android `AssetGc.kt`: unreferenziert UND älter als die Grace-Period.
 /// Remote-Sweep nur, wenn `allow_remote_sweep` (Guard gegen kaputte Zyklen) und die
@@ -205,6 +219,16 @@ mod tests {
         assert_eq!(mime_for_ext("png"), "image/png");
         assert_eq!(mime_for_ext("gif"), "image/gif");
         assert_eq!(mime_for_ext("bin"), "application/octet-stream");
+    }
+
+    #[test]
+    fn test_data_url() {
+        assert_eq!(data_url("a.webp", b"xy"), "data:image/webp;base64,eHk=");
+        assert_eq!(data_url("a.png", b"xy"), "data:image/png;base64,eHk=");
+        assert_eq!(
+            data_url("a.bin", b"xy"),
+            "data:application/octet-stream;base64,eHk="
+        );
     }
 
     // ── compute_gc_targets ───────────────────────────────────────────────────────

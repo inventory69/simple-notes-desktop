@@ -2386,8 +2386,11 @@ select.dialog-input option {
   display: none;
 }
 
-.image-menu-info-btn {
-  margin-left: auto;
+/* Pushes the trailing buttons (info, copy) to the right regardless of which ones are hidden —
+   margin-left: auto on the (possibly hidden) info button broke as soon as a second independently
+   shown/hidden button joined it. */
+.image-menu-icon-btn[data-align="inline"] {
+  margin-right: auto;
 }
 
 .image-menu-sizes {

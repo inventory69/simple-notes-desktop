@@ -76,3 +76,15 @@ export function computeImageRewrite(content, ordinal, assetName, sizePercent, al
 export function imagePreviewText(content) {
   return content.replace(IMAGE_REGEX, (_match, alt) => `🖼 ${parseImageAlt(alt).cleanAlt}`.trim());
 }
+
+/**
+ * Replaces every image tag with `[🖼]` / `[🖼 <alt>]` (Android parity for plain-text share/copy),
+ * then collapses runs of 3+ newlines left behind by the removed image line down to a blank line.
+ */
+export function imagePlaceholderText(content) {
+  const replaced = content.replace(IMAGE_REGEX, (_match, alt) => {
+    const cleanAlt = parseImageAlt(alt).cleanAlt;
+    return cleanAlt ? `[🖼 ${cleanAlt}]` : '[🖼]';
+  });
+  return replaced.replace(/\n{3,}/g, '\n\n');
+}
