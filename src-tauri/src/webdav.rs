@@ -305,8 +305,10 @@ impl WebDavClient {
     // ── Notiz-Listing ────────────────────────────────────────────────────────────
 
     /// Listet alle Notizen mit ihrer Ordner-Zuordnung.
-    /// Gibt `(id, folder_name)` zurück — folder_name ist None für Root-Notizen.
-    pub async fn list_notes_with_folders(&self) -> Result<Vec<(String, Option<String>)>> {
+    /// Gibt `(id, folder_name)` sowie ein `complete`-Flag zurück — `false`, wenn mindestens ein
+    /// Unterordner-PROPFIND fehlschlug (das Listing also lückenhaft ist). Aufrufer dürfen in dem
+    /// Fall keine Löscherkennung auf Basis der zurückgegebenen IDs durchführen.
+    pub async fn list_notes_with_folders(&self) -> Result<(Vec<(String, Option<String>)>, bool)> {
         let root_url = format!("{}/{}/", self.base_url, self.sync_folder);
         let text = self.propfind_text(&root_url, "1").await?;
 
@@ -330,6 +332,7 @@ impl WebDavClient {
         // Schritt 2: Unterordner aus href-Werten extrahieren
         let subdirs = self.extract_subdirs_from_propfind(&text);
 
+        let mut complete = true;
         for folder_name in subdirs {
             let subdir_url = self.folder_json_dir_url(&folder_name);
             match self.propfind_text(&subdir_url, "1").await {
@@ -351,11 +354,12 @@ impl WebDavClient {
                 }
                 Err(e) => {
                     eprintln!("[WebDAV] PROPFIND subdir {} failed: {}", folder_name, e);
+                    complete = false;
                 }
             }
         }
 
-        Ok(result)
+        Ok((result, complete))
     }
 
     /// Extrahiert direkte Unterordner-Namen aus einer PROPFIND-Antwort auf das Root-Verzeichnis.
