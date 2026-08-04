@@ -531,6 +531,7 @@ async fn get_settings(app: AppHandle) -> Result<Settings> {
         "offline_mode",
         "markdown_export",
         "image_compression_mode",
+        "default_image_size_percent",
     ] {
         if let Some(val) = store.get(key) {
             map.insert(key.to_string(), val.clone());

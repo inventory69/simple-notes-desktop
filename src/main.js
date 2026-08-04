@@ -64,6 +64,7 @@ class App {
       this.noteEditor.setAutosave(settings.autosave);
       this.noteEditor.setDefaultOpenMode(settings.default_open_mode);
       this.noteEditor.setImageCompressionMode(settings.image_compression_mode);
+      this.noteEditor.setDefaultImageSizePercent(settings.default_image_size_percent);
     }
 
     // 'notes-synced' zuerst registrieren (lokale IPC, quasi sofort) — läuft damit
@@ -241,6 +242,7 @@ class App {
       this.noteEditor.setAutosave(settings.autosave);
       this.noteEditor.setDefaultOpenMode(settings.default_open_mode);
       this.noteEditor.setImageCompressionMode(settings.image_compression_mode);
+      this.noteEditor.setDefaultImageSizePercent(settings.default_image_size_percent);
     });
 
     // Settings "View changelog" callback

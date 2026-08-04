@@ -139,6 +139,7 @@ export class NoteEditor {
 
     this.defaultOpenMode = 'edit';
     this.imageCompressionMode = 'compressed';
+    this.defaultImageSizePercent = 50;
 
     this.init();
   }
@@ -348,7 +349,7 @@ export class NoteEditor {
       });
       if (!path) return;
       const name = await attachImage(path, this.imageCompressionMode);
-      applyImage(this.editorView, `.assets/${name}`);
+      applyImage(this.editorView, `.assets/${name}`, this.defaultImageSizePercent);
     } catch (error) {
       console.error('Failed to insert image:', error);
       await dialogService.error({ title: 'Insert Image', message: error.message || String(error) });
@@ -1640,6 +1641,10 @@ export class NoteEditor {
 
   setImageCompressionMode(mode) {
     this.imageCompressionMode = mode || 'compressed';
+  }
+
+  setDefaultImageSizePercent(percent) {
+    this.defaultImageSizePercent = percent || 50;
   }
 
   onDelete(callback) {

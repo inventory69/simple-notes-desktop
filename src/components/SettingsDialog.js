@@ -56,6 +56,7 @@ export class SettingsDialog {
     this.installUpdateBtn = document.getElementById('install-update-btn');
     this.defaultOpenModeSelect = document.getElementById('default-open-mode-select');
     this.imageCompressionSelect = document.getElementById('image-compression-select');
+    this.defaultImageSizeSelect = document.getElementById('default-image-size-select');
     this.fontSizeChips = document.getElementById('font-size-chips');
     this.activityLogList = document.getElementById('activity-log-list');
     this.activityLogEmpty = document.getElementById('activity-log-empty');
@@ -338,6 +339,7 @@ export class SettingsDialog {
       this.defaultOpenModeSelect.value = settings.default_open_mode || 'edit';
       this.imageCompressionSelect.value = settings.image_compression_mode || 'compressed';
       this._updateImageCompressionHint(this.imageCompressionSelect.value);
+      this.defaultImageSizeSelect.value = settings.default_image_size_percent || 50;
       this.deviceIdInput.value = deviceId;
       this._setActiveChip(this._originalFontSize);
       this.offlineCheckbox.checked = this._previousOffline;
@@ -555,6 +557,7 @@ export class SettingsDialog {
         offline_mode: offline,
         markdown_export: this.markdownExportCheckbox.checked,
         image_compression_mode: this.imageCompressionSelect.value,
+        default_image_size_percent: Number(this.defaultImageSizeSelect.value),
       };
 
       await tauri.saveSettings(settings);

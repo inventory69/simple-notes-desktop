@@ -1,4 +1,5 @@
 import { EditorSelection } from '@codemirror/state';
+import { buildImageAlt, DEFAULT_ALIGN, DEFAULT_SIZE_PERCENT } from './imageAltTokens.js';
 
 function wrapSelection(view, prefix, suffix) {
   const { state } = view;
@@ -54,21 +55,21 @@ export function applyLink(view) {
   view.focus();
 }
 
-/** Inserts `![](url)` at the cursor (or `![text](url)` around a selection), mirroring applyLink. */
-export function applyImage(view, url) {
+/**
+ * Inserts `![](url)` at the cursor (or `![text](url)` around a selection), mirroring applyLink.
+ * `sizePercent` (Settings > default_image_size_percent) is baked into the alt as a size token —
+ * see imageAltTokens.js — and omitted when it's the 50% default (identical to pre-setting behavior).
+ */
+export function applyImage(view, url, sizePercent = DEFAULT_SIZE_PERCENT) {
   const { state } = view;
   const sel = state.selection.main;
+  const text = sel.empty ? '' : state.sliceDoc(sel.from, sel.to);
+  const alt = buildImageAlt(text, sizePercent, DEFAULT_ALIGN);
+  const insert = `![${alt}](${url})`;
 
-  let changes, newSel;
-  if (sel.empty) {
-    changes = { from: sel.from, insert: `![](${url})` };
-    newSel = EditorSelection.cursor(sel.from + 2);
-  } else {
-    const text = state.sliceDoc(sel.from, sel.to);
-    const insert = `![${text}](${url})`;
-    changes = { from: sel.from, to: sel.to, insert };
-    newSel = EditorSelection.cursor(sel.from + insert.length);
-  }
+  const changes = sel.empty ? { from: sel.from, insert } : { from: sel.from, to: sel.to, insert };
+  // No size token and no selection: cursor lands inside the brackets so the user can type a caption.
+  const newSel = EditorSelection.cursor(alt ? sel.from + insert.length : sel.from + 2);
 
   view.dispatch({ changes, selection: newSel });
   view.focus();

@@ -43,6 +43,12 @@ function setupDOM() {
             <option value="lossless">Lossless</option>
             <option value="original">Original</option>
           </select>
+          <select id="default-image-size-select">
+            <option value="25">Small</option>
+            <option value="50">Medium</option>
+            <option value="75">Large</option>
+            <option value="100">Full</option>
+          </select>
           <input type="checkbox" id="autosave-checkbox" />
         </div>
         <div class="settings-section hidden" data-section="connection">
