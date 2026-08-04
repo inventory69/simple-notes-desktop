@@ -23,6 +23,7 @@ pub struct Settings {
     pub offline_mode: bool,     // Offline-Modus: kein Server nötig (Android-Parität, default true)
     pub markdown_export: bool, // Optionaler {sync_folder}-md/ Markdown-Spiegel (Android-Parität, default false)
     pub image_compression_mode: String, // "compressed"|"lossless"|"original" — Bild-Anhänge (Android-Parität)
+    pub default_image_size_percent: u8, // 25|50|75|100 — Standardgröße neu eingefügter Bilder (Android-Parität)
 }
 
 impl Default for Settings {
@@ -39,6 +40,7 @@ impl Default for Settings {
             offline_mode: true,
             markdown_export: false,
             image_compression_mode: "compressed".to_string(),
+            default_image_size_percent: 50,
         }
     }
 }
@@ -76,6 +78,7 @@ mod tests {
             offline_mode: false,
             markdown_export: true,
             image_compression_mode: "lossless".to_string(),
+            default_image_size_percent: 50,
         };
 
         let json = serde_json::to_string(&settings).unwrap();
@@ -122,6 +125,7 @@ mod tests {
                 offline_mode: true,
                 markdown_export: false,
                 image_compression_mode: "compressed".to_string(),
+                default_image_size_percent: 50,
             };
 
             let json = serde_json::to_string(&settings).unwrap();
@@ -154,6 +158,7 @@ mod tests {
             offline_mode: true,
             markdown_export: false,
             image_compression_mode: "compressed".to_string(),
+            default_image_size_percent: 50,
         };
 
         let json = serde_json::to_string(&settings).unwrap();
@@ -196,6 +201,7 @@ mod tests {
             offline_mode: false,
             markdown_export: false,
             image_compression_mode: "compressed".to_string(),
+            default_image_size_percent: 50,
         };
 
         let cloned = settings.clone();
@@ -234,6 +240,7 @@ mod tests {
             "offline_mode",
             "markdown_export",
             "image_compression_mode",
+            "default_image_size_percent",
         ]
         .iter()
         .map(|s| s.to_string())
