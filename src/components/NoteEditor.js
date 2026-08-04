@@ -2,13 +2,14 @@ import { undo as cmUndo } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
+import { writeHtml, writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { open } from '@tauri-apps/plugin-dialog';
 import { basicSetup } from 'codemirror';
 import DOMPurify from 'dompurify';
 import { Marked } from 'marked';
 import { dialogService } from '../services/DialogService.js';
 import noteService from '../services/noteService.js';
-import { assetUrl, attachImage, exportToCalendar } from '../services/tauri.js';
+import { assetUrl, attachImage, exportToCalendar, getAssetDataUrl } from '../services/tauri.js';
 import { colorPicker } from '../utils/ColorPicker.js';
 import { buildCalendarPayload, buildCalendarPayloadForItem } from '../utils/calendarExport.js';
 import { computeImageRewrite, parseImageAlt } from '../utils/imageAltTokens.js';
@@ -26,12 +27,18 @@ import {
   applyStrikethrough,
 } from '../utils/markdownToolbar.js';
 import { getColorPair } from '../utils/noteColors.js';
+import { collectAssetNames, markdownToShareHtml, noteToMarkdown, noteToPlainText } from '../utils/noteShare.js';
 import { UndoStack } from '../utils/UndoStack.js';
 import { imageActionsMenu } from './ImageActionsMenu.js';
 import { imageViewerDialog } from './ImageViewerDialog.js';
 
 /** Autosave debounce delay in milliseconds (matches Android app: 3 seconds) */
 const AUTOSAVE_DEBOUNCE_MS = 3000;
+
+/** Base64 data-URL budget for share/copy (~8MB — base64 is ≈1.33x the underlying file size).
+ *  Assets past the budget degrade to a `[🖼 alt]` text placeholder instead of bloating the
+ *  clipboard payload. */
+const SHARE_DATA_URL_BUDGET = 8 * 1024 * 1024;
 
 /** Matches a `.assets/<name>` image href (the second capture group of IMAGE_REGEX, standalone). */
 const ASSET_HREF_REGEX = /^\.assets\/([A-Za-z0-9][A-Za-z0-9._-]*)$/;
@@ -85,7 +92,7 @@ export class NoteEditor {
     this.titleInput = document.getElementById('note-title');
     this.syncStatus = document.getElementById('sync-status');
     this.deleteBtn = document.getElementById('delete-note-btn');
-    this.archiveBtn = document.getElementById('note-archive-btn');
+    this.menuBtn = document.getElementById('note-menu-btn');
     this.previewToggleBtn = document.getElementById('preview-toggle-btn');
     this.sortBtn = document.getElementById('checklist-sort-btn');
     this.checklistContainer = document.getElementById('checklist-container');
@@ -94,7 +101,6 @@ export class NoteEditor {
     this.undoBtn = document.getElementById('undo-btn');
     this.addItemHeaderBtn = document.getElementById('add-checklist-item-btn');
     this.colorBtn = document.getElementById('note-color-btn');
-    this.calendarBtn = document.getElementById('calendar-btn');
 
     this.mdToolbar = document.getElementById('markdown-toolbar');
     this.mdBtnBold = document.getElementById('md-btn-bold');
@@ -123,6 +129,13 @@ export class NoteEditor {
     this._localUpdateTimer = null;
     // True when the user has made changes that haven't been persisted to the server yet
     this._isDirty = false;
+    // Warm cache of asset name → data URL for the current note, so selection-copy (synchronous
+    // clipboard event) doesn't need to await IPC. Cleared per loadNote() — content-addressed
+    // names never go stale, this is purely to bound memory across note switches.
+    this._assetDataUrls = new Map();
+    // Names currently being fetched by _warmAssetDataUrls(), so back-to-back calls (updatePreview
+    // runs on every keystroke) don't fire duplicate IPC requests for the same asset.
+    this._warmingAssets = new Set();
 
     this.defaultOpenMode = 'edit';
     this.imageCompressionMode = 'compressed';
@@ -157,8 +170,8 @@ export class NoteEditor {
     // Delete button
     this.deleteBtn.addEventListener('click', () => this.handleDelete());
 
-    // Archive button
-    this.archiveBtn?.addEventListener('click', () => this.handleArchiveToggle());
+    // ⋮ overflow menu (share / copy-text / calendar / archive)
+    this.menuBtn?.addEventListener('click', () => this.showNoteMenu());
 
     // Preview toggle
     this.previewToggleBtn.addEventListener('click', () => this.togglePreview());
@@ -169,6 +182,9 @@ export class NoteEditor {
     this.previewDiv.addEventListener('click', (e) => {
       const img = e.target.closest('.md-img');
       if (!img) return;
+      // A drag-select that ends on top of an image must not open the viewer — that would
+      // destroy the just-made selection before the user can Ctrl+C it.
+      if (!window.getSelection()?.isCollapsed) return;
       imageViewerDialog.show(img.dataset.asset);
     });
 
@@ -190,6 +206,38 @@ export class NoteEditor {
       );
     });
 
+    // Selection-copy: rewrite `.md-img` sources from `snasset:` (app-only) to the warm data-URL
+    // cache before letting the copy through, so pasted selections carry real images instead of
+    // a src no external app can resolve. Falls through to native serialization when the
+    // selection contains no images (no regression surface for plain-text copies).
+    this.previewDiv.addEventListener('copy', (e) => {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+      const fragment = sel.getRangeAt(0).cloneContents();
+      if (!fragment.querySelector('img[data-asset]')) return;
+
+      for (const img of fragment.querySelectorAll('img[data-asset]')) {
+        const dataUrl = this._assetDataUrls.get(img.dataset.asset);
+        if (dataUrl) {
+          const alt = img.alt;
+          for (const attr of [...img.attributes]) {
+            if (attr.name === 'class' || attr.name.startsWith('data-')) img.removeAttribute(attr.name);
+          }
+          img.setAttribute('src', dataUrl);
+          img.setAttribute('alt', alt);
+          img.setAttribute('style', 'max-width:100%');
+        } else {
+          img.replaceWith(document.createTextNode(img.alt ? `[🖼 ${img.alt}]` : '[🖼]'));
+        }
+      }
+
+      const holder = document.createElement('div');
+      holder.appendChild(fragment);
+      e.clipboardData.setData('text/html', holder.innerHTML);
+      e.clipboardData.setData('text/plain', sel.toString());
+      e.preventDefault();
+    });
+
     // F2: Sort button with dropdown
     this.sortBtn.addEventListener('click', () => this.showSortMenu());
 
@@ -208,22 +256,6 @@ export class NoteEditor {
         this.updateSyncStatus('Saving...');
         await this.save();
       });
-    });
-
-    // Add to calendar
-    this.calendarBtn?.addEventListener('click', async () => {
-      if (!this.currentNote) return;
-      const payload = buildCalendarPayload(this.currentNote);
-      if (!payload) {
-        await dialogService.error({ message: 'Note is empty' });
-        return;
-      }
-      try {
-        await exportToCalendar(payload.title, payload.description);
-      } catch (error) {
-        console.error('Failed to export to calendar:', error);
-        await dialogService.error({ title: 'Calendar', message: error.message || String(error) });
-      }
     });
 
     // Markdown toolbar button listeners
@@ -407,6 +439,23 @@ export class NoteEditor {
       img.addEventListener('error', () => this._showMissingAssetPlaceholder(img), { once: true });
       img.src = assetUrl(img.dataset.asset);
     });
+
+    this._warmAssetDataUrls();
+  }
+
+  /** Fire-and-forget: pre-fetches data URLs for every image in the current preview into
+   *  `_assetDataUrls`, so the synchronous `copy` listener above never has to await IPC. */
+  async _warmAssetDataUrls() {
+    const noteId = this.currentNote?.id;
+    for (const img of this.previewDiv.querySelectorAll('img[data-asset]')) {
+      const name = img.dataset.asset;
+      if (this._assetDataUrls.has(name) || this._warmingAssets.has(name)) continue;
+      this._warmingAssets.add(name);
+      const dataUrl = await getAssetDataUrl(name).catch(() => null);
+      this._warmingAssets.delete(name);
+      if (this.currentNote?.id !== noteId) return; // note switched mid-fetch
+      if (dataUrl) this._assetDataUrls.set(name, dataUrl);
+    }
   }
 
   /** Missing asset (not yet synced, deleted locally, or a manually typed link): swap the `<img>`
@@ -1010,6 +1059,156 @@ export class NoteEditor {
     setTimeout(() => document.addEventListener('click', closeHandler), 0);
   }
 
+  /** ⋮ overflow menu: share / copy-as-text / calendar / archive. Rebuilt on every open so the
+   *  archive label always reflects the current note's `archivedAt` — no cached button state. */
+  showNoteMenu() {
+    if (this._noteMenuCloseHandler) {
+      document.removeEventListener('click', this._noteMenuCloseHandler);
+      this._noteMenuCloseHandler = null;
+    }
+
+    const existing = document.querySelector('.note-actions-menu');
+    if (existing) {
+      existing.remove();
+      return;
+    }
+
+    const archived = !!this.currentNote?.archivedAt;
+
+    const menu = document.createElement('div');
+    menu.className = 'sort-menu note-actions-menu';
+    menu.innerHTML = `
+      <div class="sort-menu-item" data-action="share">Copy with images</div>
+      <div class="sort-menu-item" data-action="copy-text">Copy as text</div>
+      <div class="sort-menu-item" data-action="calendar">Add to calendar</div>
+      <div class="sort-menu-separator"></div>
+      <div class="sort-menu-item" data-action="archive">${archived ? 'Unarchive' : 'Archive'}</div>
+    `;
+
+    const rect = this.menuBtn.getBoundingClientRect();
+    menu.style.position = 'fixed';
+    menu.style.top = `${rect.bottom + 4}px`;
+    menu.style.right = `${window.innerWidth - rect.right}px`;
+    document.body.appendChild(menu);
+
+    menu.addEventListener('click', (e) => {
+      const item = e.target.closest('.sort-menu-item');
+      if (!item) return;
+      menu.remove();
+      if (this._noteMenuCloseHandler) {
+        document.removeEventListener('click', this._noteMenuCloseHandler);
+        this._noteMenuCloseHandler = null;
+      }
+
+      switch (item.dataset.action) {
+        case 'share':
+          this._shareNote();
+          break;
+        case 'copy-text':
+          this._copyPlainText();
+          break;
+        case 'calendar':
+          this._handleCalendar();
+          break;
+        case 'archive':
+          this.handleArchiveToggle();
+          break;
+      }
+    });
+
+    const closeHandler = (e) => {
+      if (!menu.contains(e.target) && e.target !== this.menuBtn) {
+        menu.remove();
+        document.removeEventListener('click', closeHandler);
+        this._noteMenuCloseHandler = null;
+      }
+    };
+    this._noteMenuCloseHandler = closeHandler;
+    setTimeout(() => document.addEventListener('click', closeHandler), 0);
+  }
+
+  /** "Add to calendar" — moved out of the header into the ⋮ menu, behavior unchanged. */
+  async _handleCalendar() {
+    if (!this.currentNote) return;
+    const payload = buildCalendarPayload(this.currentNote);
+    if (!payload) {
+      await dialogService.error({ message: 'Note is empty' });
+      return;
+    }
+    try {
+      await exportToCalendar(payload.title, payload.description);
+    } catch (error) {
+      console.error('Failed to export to calendar:', error);
+      await dialogService.error({ title: 'Calendar', message: error.message || String(error) });
+    }
+  }
+
+  /** Resolves asset names to data URLs for share/copy: warm cache first, then IPC. Stops
+   *  fetching once SHARE_DATA_URL_BUDGET is exceeded — the rest degrade to text placeholders
+   *  in markdownToShareHtml() rather than bloating the clipboard payload. */
+  async _resolveShareDataUrls(names) {
+    const dataUrls = new Map();
+    let budgetBytes = SHARE_DATA_URL_BUDGET;
+    for (const name of names) {
+      if (budgetBytes <= 0) {
+        dataUrls.set(name, null);
+        continue;
+      }
+      const dataUrl = this._assetDataUrls.get(name) ?? (await getAssetDataUrl(name).catch(() => null));
+      if (dataUrl) {
+        this._assetDataUrls.set(name, dataUrl);
+        budgetBytes -= dataUrl.length;
+      }
+      dataUrls.set(name, dataUrl ?? null);
+    }
+    return dataUrls;
+  }
+
+  /** Briefly shows a status message, then reverts to "Saved" — there's no reusable toast
+   *  component (UpdateToast is wired to the updater, dialogService is modal-only). */
+  _flashSyncStatus(text) {
+    this.updateSyncStatus(text);
+    setTimeout(() => this.updateSyncStatus('Saved'), 1500);
+  }
+
+  /** ⋮ → Copy with images: rich clipboard (`text/html` with images inline at their position in
+   *  the text) plus a plaintext fallback — the desktop equivalent of Android's system share sheet. */
+  async _shareNote() {
+    const note = this.currentNote;
+    if (!note) return;
+    const md = noteToMarkdown(note);
+    if (!md.trim()) {
+      await dialogService.error({ message: 'Note is empty' });
+      return;
+    }
+    try {
+      const dataUrls = await this._resolveShareDataUrls(collectAssetNames(md));
+      await writeHtml(markdownToShareHtml(md, dataUrls), noteToPlainText(note));
+      this._flashSyncStatus('Copied');
+    } catch (error) {
+      console.error('Failed to copy note with images:', error);
+      await dialogService.error({ title: 'Copy with Images', message: error.message || String(error) });
+    }
+  }
+
+  /** ⋮ → Copy as text: same content, no images — `[🖼 alt]` placeholders instead. */
+  async _copyPlainText() {
+    const note = this.currentNote;
+    if (!note) return;
+    const text = noteToPlainText(note);
+    if (!text.trim()) {
+      await dialogService.error({ message: 'Note is empty' });
+      return;
+    }
+    try {
+      await writeText(text);
+      this._flashSyncStatus('Copied');
+    } catch (error) {
+      console.error('Failed to copy note as text:', error);
+      await dialogService.error({ title: 'Share', message: error.message || String(error) });
+    }
+  }
+
   loadNote(note) {
     // Flush any pending autosave for the previous note before switching
     if (this.saveTimeout) {
@@ -1035,6 +1234,8 @@ export class NoteEditor {
 
     // Reset undo stack for the new note
     this._undoStack.clear();
+    this._assetDataUrls.clear();
+    this._warmingAssets.clear();
     if (this._undoPushTimer) {
       clearTimeout(this._undoPushTimer);
       this._undoPushTimer = null;
@@ -1089,7 +1290,6 @@ export class NoteEditor {
 
     this._updateUndoButton();
     this._updateColorBtn();
-    this._updateArchiveBtn();
     this.updateSyncStatus('Saved');
   }
 
@@ -1119,7 +1319,6 @@ export class NoteEditor {
     this.mdToolbar?.classList.add('hidden');
     if (this.undoBtn) this.undoBtn.disabled = true;
     this._updateColorBtn();
-    this._updateArchiveBtn();
 
     if (this.editorView) {
       this.editorView.destroy();
@@ -1150,14 +1349,6 @@ export class NoteEditor {
       this.container.style.removeProperty('--nc-d');
       this.container.classList.remove('has-color');
     }
-  }
-
-  /** Setzt den Archive-Button-Zustand basierend auf dem archivedAt-Feld der Notiz. */
-  _updateArchiveBtn() {
-    if (!this.archiveBtn) return;
-    const archived = !!this.currentNote?.archivedAt;
-    this.archiveBtn.classList.toggle('active', archived);
-    this.archiveBtn.title = archived ? 'Unarchive' : 'Archive';
   }
 
   // ── Undo helpers ────────────────────────────────────────────────────────────
