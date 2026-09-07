@@ -81,6 +81,33 @@ pub fn save_etags(app: &AppHandle, etags: &HashMap<String, String>) {
     }
 }
 
+/// Komplette ETag-Basis verwerfen — beim Wechsel des Sync-Ziels (Android-Parität
+/// `clearServerCaches`). ETags eines anderen Servers wären sonst falsche Vergleichswerte.
+pub fn clear_etags(app: &AppHandle) {
+    if let Ok(store) = app.store(SYNC_STORE) {
+        store.delete(KEY_NOTE_ETAGS);
+        let _ = store.save();
+    }
+}
+
+/// ETag-Basis einer einzelnen Notiz setzen — nach `use_server` die Fassung, die gerade lokal
+/// abgelegt wurde. Ohne das bliebe die alte Basis stehen und der nächste lokale Edit liefe in
+/// einen Konflikt, den niemand verursacht hat.
+pub fn remember_etag(app: &AppHandle, id: &str, etag: &str) {
+    let mut etags = load_etags(app);
+    etags.insert(id.to_string(), etag.to_string());
+    save_etags(app, &etags);
+}
+
+/// ETag-Basis einer einzelnen Notiz vergessen — nach „Meine behalten": der nächste PUT soll
+/// ohne Precondition und ohne Konflikt-Halt durchgehen.
+pub fn forget_etag(app: &AppHandle, id: &str) {
+    let mut etags = load_etags(app);
+    if etags.remove(id).is_some() {
+        save_etags(app, &etags);
+    }
+}
+
 /// note_cache-Key löschen — wird nach der einmaligen Migration aufgerufen.
 pub fn clear_note_cache(app: &AppHandle) {
     if let Ok(store) = app.store(SYNC_STORE) {

@@ -1045,6 +1045,9 @@ async fn resolve_conflict(
                 note.sync_status = SyncStatus::Pending;
                 note.updated_at = now;
                 local_store::put_note(&app, &note);
+                // ETag-Basis verwerfen: genau sie hat den Upload blockiert. Ohne das liefe der
+                // nächste Sync in denselben Konflikt (und das PUT in dieselbe Precondition).
+                sync_engine::forget_etag(&app, &id);
                 scheduler::trigger_sync(&app);
             }
         }
@@ -1055,9 +1058,16 @@ async fn resolve_conflict(
             };
             let client = client.ok_or(AppError::NotConnected)?;
             let folder = local_store::get_note(&app, &id).and_then(|n| n.folder_name);
-            let mut note = client.get_note(&id, folder.as_deref()).await?;
+            let (mut note, etag) = client.get_note_with_etag(&id, folder.as_deref()).await?;
             note.sync_status = SyncStatus::Synced;
             local_store::put_note(&app, &note);
+            // Die lokale Kopie ist jetzt exakt diese Server-Fassung — ihr ETag ist die neue Basis.
+            // Ohne ETag lieber gar keine Basis: dann läuft der nächste Upload ungeprüft durch,
+            // statt an einer veralteten Basis einen Konflikt zu erfinden.
+            match etag {
+                Some(e) => sync_engine::remember_etag(&app, &id, &e),
+                None => sync_engine::forget_etag(&app, &id),
+            }
         }
         other => {
             return Err(AppError::WebDav(format!(
@@ -1093,6 +1103,7 @@ async fn count_unsynced(app: AppHandle) -> Result<UnsyncedCounts> {
 async fn migrate_to_new_target(app: AppHandle) -> Result<()> {
     local_store::mark_all_dirty(&app);
     local_store::reset_local_only_reconciled(&app);
+    sync_engine::clear_etags(&app);
     Ok(())
 }
 
@@ -1138,6 +1149,7 @@ async fn replace_with_new_target(
     local_store::clear_all_folders(&app);
     local_store::reset_local_only_reconciled(&app);
     sync_queue::clear_all(&app);
+    sync_engine::clear_etags(&app);
 
     {
         let mut lock = lock_recover(&state.0);

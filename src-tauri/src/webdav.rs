@@ -450,6 +450,17 @@ impl WebDavClient {
     /// Lädt eine einzelne Notiz aus dem angegebenen Ordner.
     /// `folder` = None → Root-Ebene; der path ist maßgebend für `note.folder_name`.
     pub async fn get_note(&self, id: &str, folder: Option<&str>) -> Result<Note> {
+        self.get_note_with_etag(id, folder).await.map(|(n, _)| n)
+    }
+
+    /// Wie `get_note`, gibt zusätzlich den ETag der Antwort zurück — also die Fassung, auf der
+    /// die lokale Kopie danach aufsetzt. Genau dieser Wert gehört als ETag-Basis in den Store;
+    /// ein aus dem Listing nachgereichter wäre schon wieder eine andere Fassung.
+    pub async fn get_note_with_etag(
+        &self,
+        id: &str,
+        folder: Option<&str>,
+    ) -> Result<(Note, Option<String>)> {
         let url = self.note_json_url(folder, id);
 
         let response = self
@@ -462,6 +473,12 @@ impl WebDavClient {
 
         match response.status() {
             StatusCode::OK => {
+                let etag = response
+                    .headers()
+                    .get("etag")
+                    .or_else(|| response.headers().get("oc-etag"))
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::to_string);
                 let mut note: Note = response
                     .json()
                     .await
@@ -473,7 +490,7 @@ impl WebDavClient {
                 // Pfad ist maßgebend — überschreibt was im JSON-Body steht
                 note.folder_name = folder.map(str::to_owned);
 
-                Ok(note)
+                Ok((note, etag))
             }
             StatusCode::NOT_FOUND => Err(AppError::NoteNotFound(id.to_string())),
             status => Err(AppError::WebDav(format!("GET failed: {}", status))),
