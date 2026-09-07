@@ -6,7 +6,8 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use regex::Regex;
 use reqwest::{Client, Method, StatusCode};
 use std::collections::HashMap;
-use std::sync::LazyLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, LazyLock};
 
 /// UUID.json Pattern – compiled once at program start
 static UUID_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
@@ -43,6 +44,9 @@ static ETAG_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
         .expect("getetag pattern is valid")
 });
 
+/// HTTP-Codes, mit denen ein Server signalisiert, dass er `If-Match` nicht auswerten kann.
+const PRECONDITION_UNSUPPORTED_CODES: [u16; 2] = [400, 501];
+
 /// PROPFIND and MKCOL are not in reqwest's built-in Method constants — define them once here
 /// rather than calling from_bytes().unwrap() at every call site.
 static PROPFIND: LazyLock<Method> =
@@ -58,6 +62,9 @@ pub struct WebDavClient {
     auth_header: String,
     /// Sync folder name (default: "notes"). JSON stored in `/{sync_folder}/`, Markdown in `/{sync_folder}-md/`.
     sync_folder: String,
+    /// Merkt sich, dass dieser Server `If-Match` nicht auswerten kann (400/501). Geteilt über
+    /// alle Clones des Clients, deshalb `Arc` — der Client wird pro Sync-Lauf geklont.
+    preconditions_unsupported: Arc<AtomicBool>,
 }
 
 impl WebDavClient {
@@ -97,6 +104,7 @@ impl WebDavClient {
             base_url,
             auth_header,
             sync_folder,
+            preconditions_unsupported: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -381,6 +389,16 @@ impl WebDavClient {
         Ok((result, etags, complete))
     }
 
+    /// Server-ETags aller `{uuid}.json` in **einem** Ordner (`None` = Root).
+    /// Für den Pre-Upload-Snapshot: ein PROPFIND je Ordner, in den etwas hochgeladen wird.
+    pub async fn list_note_etags(&self, folder: Option<&str>) -> Result<HashMap<String, String>> {
+        let url = match folder {
+            Some(f) => self.folder_json_dir_url(f),
+            None => format!("{}/{}/", self.base_url, self.sync_folder),
+        };
+        Ok(parse_note_etags(&self.propfind_text(&url, "1").await?))
+    }
+
     /// Extrahiert direkte Unterordner-Namen aus einer PROPFIND-Antwort auf das Root-Verzeichnis.
     fn extract_subdirs_from_propfind(&self, text: &str) -> Vec<String> {
         let mut subdirs: Vec<String> = Vec::new();
@@ -465,7 +483,16 @@ impl WebDavClient {
     /// Speichert eine Notiz (JSON immer, Markdown nur wenn `write_markdown`), ordner-bewusst.
     ///
     /// Löscht die alte `.md`-Datei wenn der Titel geändert wurde (nur wenn der Spiegel aktiv ist).
-    pub async fn save_note(&self, note: &Note, write_markdown: bool) -> Result<()> {
+    ///
+    /// `if_match` = der gecachte Server-ETag, auf dem diese Änderung aufsetzt. Gibt der Server
+    /// eine fremde Fassung zurück, kommt `AppError::PreconditionFailed`. Rückgabe ist der ETag
+    /// der PUT-Antwort (`None`, wenn der Server keinen schickt).
+    pub async fn save_note(
+        &self,
+        note: &Note,
+        write_markdown: bool,
+        if_match: Option<&str>,
+    ) -> Result<Option<String>> {
         let folder = note.folder_name.as_deref();
 
         // MKCOL Unterverzeichnisse, falls Notiz in einem Ordner liegt
@@ -489,14 +516,14 @@ impl WebDavClient {
             }
         }
 
-        self.save_json(note).await?;
+        let etag = self.save_json(note, if_match).await?;
         if write_markdown {
             self.save_markdown(note).await?;
         }
-        Ok(())
+        Ok(etag)
     }
 
-    async fn save_json(&self, note: &Note) -> Result<()> {
+    async fn save_json(&self, note: &Note, if_match: Option<&str>) -> Result<Option<String>> {
         let url = self.note_json_url(note.folder_name.as_deref(), &note.id);
 
         #[cfg(debug_assertions)]
@@ -505,26 +532,64 @@ impl WebDavClient {
         let json_content =
             serde_json::to_string_pretty(note).map_err(|e| AppError::ParseError(e.to_string()))?;
 
-        let response = self
-            .client
-            .put(&url)
-            .header("Authorization", &self.auth_header)
-            .header("Content-Type", "application/json")
-            .body(json_content)
-            .send()
-            .await
-            .map_err(|e| AppError::NetworkError(e.to_string()))?;
+        // `If-Match` ist nur die zweite Reihe — der empfohlene Server (hacdias/webdav) wertet
+        // Write-Preconditions gar nicht aus und antwortet mit 201. Der eigentliche Schutz ist
+        // der ETag-Vergleich vor dem Upload (sync_engine::is_stale_against_server).
+        let mut precondition = if_match
+            .map(str::trim)
+            .filter(|e| !e.is_empty() && !self.preconditions_unsupported.load(Ordering::Relaxed))
+            .map(to_if_match_value);
 
-        let status = response.status();
-        if !status.is_success() {
+        loop {
+            let mut req = self
+                .client
+                .put(&url)
+                .header("Authorization", &self.auth_header)
+                .header("Content-Type", "application/json");
+            if let Some(p) = &precondition {
+                req = req.header("If-Match", p.as_str());
+            }
+
+            let response = req
+                .body(json_content.clone())
+                .send()
+                .await
+                .map_err(|e| AppError::NetworkError(e.to_string()))?;
+
+            let status = response.status();
+            if status.is_success() {
+                // Nextcloud schickt bei 201 keinen `ETag`, wohl aber `OC-ETag` mit demselben
+                // Wert, den ein späteres PROPFIND als `getetag` liefert.
+                return Ok(response
+                    .headers()
+                    .get("etag")
+                    .or_else(|| response.headers().get("oc-etag"))
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::to_string));
+            }
+            if status == StatusCode::PRECONDITION_FAILED {
+                return Err(AppError::PreconditionFailed);
+            }
+            if precondition.is_some() && PRECONDITION_UNSUPPORTED_CODES.contains(&status.as_u16()) {
+                // Der Server kann die Precondition nicht auswerten. Einmal ohne wiederholen und
+                // für diese Verbindung merken — ein dauerhaft blockierter Upload wäre schlimmer
+                // als der fehlende Konfliktschutz.
+                eprintln!(
+                    "[WebDAV] Server lehnt If-Match ab ({}) — Wiederholung ohne Precondition",
+                    status
+                );
+                self.preconditions_unsupported
+                    .store(true, Ordering::Relaxed);
+                precondition = None;
+                continue;
+            }
+
             let error_body = response.text().await.unwrap_or_default();
             return Err(AppError::WebDav(format!(
                 "PUT JSON failed: {} - {}",
                 status, error_body
             )));
         }
-
-        Ok(())
     }
 
     async fn save_markdown(&self, note: &Note) -> Result<()> {
@@ -626,8 +691,9 @@ impl WebDavClient {
             self.ensure_folder_dirs(f, true).await;
         }
 
-        // Am neuen Pfad speichern (JSON + MD)
-        self.save_json(&note).await?;
+        // Am neuen Pfad speichern (JSON + MD). Ohne Precondition: das Ziel ist ein neuer Pfad,
+        // die ETag-Basis der Notiz gehört zum alten.
+        self.save_json(&note, None).await?;
         self.save_markdown(&note).await?;
 
         // Alten JSON-Pfad löschen (Fehler ignorieren)
@@ -1033,6 +1099,13 @@ fn normalize_etag(etag: &str) -> &str {
         .trim_matches('"')
 }
 
+/// Formt einen gespeicherten ETag zu einem gültigen `If-Match`-Wert.
+/// Gespeichert wird der rohe Server-Wert — mit Quotes, ohne, oder als schwacher Tag (`W/"abc"`).
+/// `If-Match` verlangt einen starken, gequoteten Entity-Tag.
+fn to_if_match_value(etag: &str) -> String {
+    format!("\"{}\"", normalize_etag(etag))
+}
+
 /// Sammelt `{uuid}.json` → ETag aus den Response-Blöcken einer PROPFIND-Antwort.
 /// Reine Funktion (wie `parse_server_assets`), damit sie ohne Server testbar ist.
 fn parse_note_etags(text: &str) -> HashMap<String, String> {
@@ -1171,6 +1244,7 @@ mod tests {
             base_url: "http://server".to_string(),
             auth_header: "Basic dGVzdA==".to_string(),
             sync_folder: "notes".to_string(),
+            preconditions_unsupported: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -1272,6 +1346,13 @@ mod tests {
         assert!(!etags_match(None, Some("\"abc\"")));
         assert!(!etags_match(Some("\"abc\""), None));
         assert!(!etags_match(None, None));
+    }
+
+    #[test]
+    fn test_to_if_match_value_always_strong_and_quoted() {
+        assert_eq!(to_if_match_value("W/\"abc\""), "\"abc\"");
+        assert_eq!(to_if_match_value("abc"), "\"abc\"");
+        assert_eq!(to_if_match_value(" \"abc\" "), "\"abc\"");
     }
 
     #[test]

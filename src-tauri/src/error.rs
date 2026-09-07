@@ -31,6 +31,12 @@ pub enum AppError {
     #[error("Network error: {0}")]
     NetworkError(String),
 
+    /// `If-Match` abgelehnt (HTTP 412) — auf dem Server steht eine fremde Fassung.
+    /// Eigene Variante, damit der Sync daraus einen Konflikt machen kann, statt am
+    /// Fehlertext zu raten.
+    #[error("Precondition failed: server copy has changed")]
+    PreconditionFailed,
+
     /// Ungültiges Timestamp-Format
     #[allow(dead_code)]
     #[error("Invalid timestamp: {0}")]

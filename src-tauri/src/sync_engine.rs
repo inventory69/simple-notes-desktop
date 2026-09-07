@@ -267,6 +267,99 @@ fn should_adopt_server(
         && !crate::webdav::etags_match(server_etag, cached_etag)
 }
 
+/// Server-Stand der Ordner, in die hochgeladen werden soll (Android-Parität `ServerSnapshot`).
+#[derive(Default)]
+struct ServerSnapshot {
+    /// note_id → ETag auf dem Server
+    etags: HashMap<String, String>,
+    /// Ordner, deren PROPFIND **erfolgreich** war (`None` = Root). Nur für diese darf aus
+    /// „ID fehlt im Snapshot" auf „existiert serverseitig nicht" geschlossen werden.
+    listed_folders: HashSet<Option<String>>,
+}
+
+/// Holt die aktuellen Server-ETags der Ordner, in denen etwas hochzuladen ist
+/// (Android-Parität `NoteUploader.fetchServerSnapshot`).
+///
+/// Der eigentliche Schutz gegen „wer als Zweiter synct, gewinnt" — und zwar serverunabhängig:
+/// `If-Match` wertet der empfohlene Server (hacdias/webdav) beim PUT gar nicht aus. Der
+/// Vergleich muss deshalb hier passieren, mit Daten, die jeder WebDAV-Server liefert.
+///
+/// Kosten: ein PROPFIND je Ordner, der eine hochzuladende Notiz **mit** ETag-Basis enthält.
+/// Ein Leerlauf-Sync und ein Erst-Upload lauter neuer Notizen lösen gar keinen aus.
+async fn fetch_server_snapshot(
+    client: &WebDavClient,
+    to_upload: &[Note],
+    etags: &HashMap<String, String>,
+) -> ServerSnapshot {
+    let folders: HashSet<Option<String>> = to_upload
+        .iter()
+        .filter(|n| etags.get(&n.id).is_some_and(|e| !e.trim().is_empty()))
+        .map(|n| n.folder_name.clone())
+        .collect();
+
+    let mut snapshot = ServerSnapshot::default();
+    for folder in folders {
+        match client.list_note_etags(folder.as_deref()).await {
+            Ok(m) => {
+                snapshot.etags.extend(m);
+                snapshot.listed_folders.insert(folder);
+            }
+            // Ein fehlgeschlagenes Listing darf niemals einen Upload blockieren: der Ordner
+            // landet nicht in `listed_folders`, damit fällt jedes Urteil über ihn weg.
+            Err(e) => eprintln!(
+                "[sync] Pre-Upload-Listing für Ordner {:?} fehlgeschlagen: {}",
+                folder, e
+            ),
+        }
+    }
+    snapshot
+}
+
+/// Steht auf dem Server eine Fassung, die diese Änderung nicht kennt?
+///
+/// Nur dann `true`, wenn das sicher entscheidbar ist. Jeder Zweifelsfall lässt den Upload laufen
+/// wie bisher — ein blockierter Upload wäre schlimmer als der fehlende Schutz.
+/// **Diese Richtung nicht umdrehen.**
+fn is_stale_against_server(
+    note: &Note,
+    cached_etag: Option<&str>,
+    snapshot: &ServerSnapshot,
+) -> bool {
+    // Ohne ETag-Basis gibt es keinen Bezugspunkt: neue Notiz, oder die Basis wurde verworfen.
+    let Some(cached) = cached_etag.map(str::trim).filter(|e| !e.is_empty()) else {
+        return false;
+    };
+    // Ordner nicht (erfolgreich) gelistet → kein Urteil.
+    if !snapshot.listed_folders.contains(&note.folder_name) {
+        return false;
+    }
+    // Datei serverseitig nicht vorhanden → es gibt nichts zu überschreiben.
+    let Some(server) = snapshot.etags.get(&note.id) else {
+        return false;
+    };
+    !crate::webdav::etags_match(Some(server), Some(cached))
+}
+
+/// Lokale Fassung behalten und als Konflikt markieren — der Nutzer entscheidet
+/// (`resolve_conflict`). Es wird **nichts** hochgeladen.
+fn mark_upload_conflict(app: &AppHandle, note: &Note, summary: &mut SyncSummary, why: &str) {
+    let mut c = note.clone();
+    c.sync_status = SyncStatus::Conflict;
+    local_store::put_note(app, &c);
+    summary.conflicts_detected += 1;
+    eprintln!("[sync] Upload-Konflikt ({}) für {}", why, note.id);
+    activity_log::log(
+        app,
+        Op::Conflict,
+        Src::Remote,
+        Some(&note.id),
+        Some(&note.title),
+        note.folder_name.as_deref(),
+        Some(why),
+        None,
+    );
+}
+
 /// Server-Sync: local_store ↔ Server reconcilen.
 ///
 /// Port von Android's `WebDavSyncService.syncNotes()`.
@@ -585,19 +678,40 @@ pub async fn run_sync(
     }
 
     // 6. Upload: PENDING (nicht local-only-Ordner) → Server, dann SYNCED
+    let to_upload: Vec<Note> = local_store::list_notes(app)
+        .into_iter()
+        .filter(|n| {
+            let skip = n
+                .folder_name
+                .as_deref()
+                .map(|f| local_only_set.contains(&f.to_lowercase()))
+                .unwrap_or(false);
+            !skip && matches!(n.sync_status, SyncStatus::Pending | SyncStatus::LocalOnly)
+        })
+        .collect();
+    let snapshot = fetch_server_snapshot(client, &to_upload, &etags).await;
+
     let mut uploaded_ids: Vec<String> = Vec::new();
-    for n in local_store::list_notes(app) {
-        let skip = n
-            .folder_name
-            .as_deref()
-            .map(|f| local_only_set.contains(&f.to_lowercase()))
-            .unwrap_or(false);
-        if skip || !matches!(n.sync_status, SyncStatus::Pending | SyncStatus::LocalOnly) {
+    for n in to_upload {
+        let cached_etag = etags.get(&n.id).map(String::as_str);
+        if is_stale_against_server(&n, cached_etag, &snapshot) {
+            mark_upload_conflict(app, &n, &mut summary, "server_etag_changed");
             continue;
         }
-        match client.save_note(&n, write_markdown).await {
-            Ok(()) => {
+        match client.save_note(&n, write_markdown, cached_etag).await {
+            Ok(put_etag) => {
                 local_store::mark_synced_if_unchanged(app, &n.id, n.updated_at);
+                // Kein ETag in der PUT-Antwort → keine belastbare Basis. Lieber vergessen als
+                // veraltet: das nächste Listing frischt sie auf, bis dahin gilt „im Zweifel
+                // hochladen".
+                match put_etag {
+                    Some(e) => {
+                        etags.insert(n.id.clone(), e);
+                    }
+                    None => {
+                        etags.remove(&n.id);
+                    }
+                }
                 uploaded_ids.push(n.id.clone());
                 summary.notes_uploaded += 1;
                 // Trash-Zustand wird schon lokal geloggt (Op::Trash bei trash_note) — hier nur
@@ -614,6 +728,12 @@ pub async fn run_sync(
                         None,
                     );
                 }
+            }
+            // Der Server hat `If-Match` ausgewertet und abgelehnt: dort steht eine Fassung,
+            // die diese Änderung nicht kennt. Kein Retry — der nächste Versuch bekäme dieselbe
+            // Antwort.
+            Err(crate::error::AppError::PreconditionFailed) => {
+                mark_upload_conflict(app, &n, &mut summary, "if_match_412");
             }
             Err(e) => eprintln!("[sync] upload {} fehlgeschlagen: {}", n.id, e),
         }
@@ -755,6 +875,55 @@ mod tests {
         n.sync_status = status;
         n.folder_name = folder.map(str::to_owned);
         n
+    }
+
+    fn snapshot_with(note: &Note, server_etag: Option<&str>) -> ServerSnapshot {
+        let mut snap = ServerSnapshot::default();
+        snap.listed_folders.insert(note.folder_name.clone());
+        if let Some(e) = server_etag {
+            snap.etags.insert(note.id.clone(), e.to_string());
+        }
+        snap
+    }
+
+    #[test]
+    fn test_stale_without_cached_etag_is_no_conflict() {
+        // Neue Notiz oder verworfene Basis → kein Bezugspunkt, Upload läuft.
+        let n = note_with(SyncStatus::Pending, None);
+        let snap = snapshot_with(&n, Some("\"server\""));
+        assert!(!is_stale_against_server(&n, None, &snap));
+        assert!(!is_stale_against_server(&n, Some("  "), &snap));
+    }
+
+    #[test]
+    fn test_stale_unlisted_folder_is_no_conflict() {
+        // Listing des Ordners fehlgeschlagen → kein Urteil, Upload läuft.
+        let n = note_with(SyncStatus::Pending, Some("Work"));
+        let snap = ServerSnapshot::default();
+        assert!(!is_stale_against_server(&n, Some("\"old\""), &snap));
+    }
+
+    #[test]
+    fn test_stale_missing_on_server_is_no_conflict() {
+        // Ordner gelistet, Datei nicht vorhanden → es gibt nichts zu überschreiben.
+        let n = note_with(SyncStatus::Pending, Some("Work"));
+        let snap = snapshot_with(&n, None);
+        assert!(!is_stale_against_server(&n, Some("\"old\""), &snap));
+    }
+
+    #[test]
+    fn test_stale_same_etag_is_no_conflict() {
+        // Formattoleranz: PUT-Header vs. PROPFIND-getetag darf keinen Phantom-Konflikt geben.
+        let n = note_with(SyncStatus::Pending, None);
+        let snap = snapshot_with(&n, Some("W/\"abc\""));
+        assert!(!is_stale_against_server(&n, Some("\"abc\""), &snap));
+    }
+
+    #[test]
+    fn test_stale_changed_etag_is_conflict() {
+        let n = note_with(SyncStatus::Pending, Some("Work"));
+        let snap = snapshot_with(&n, Some("\"new\""));
+        assert!(is_stale_against_server(&n, Some("\"old\""), &snap));
     }
 
     #[test]
