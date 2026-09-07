@@ -5,6 +5,7 @@ use crate::models::{DeletionLedger, DeletionRecord, Note};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use regex::Regex;
 use reqwest::{Client, Method, StatusCode};
+use std::collections::HashMap;
 use std::sync::LazyLock;
 
 /// UUID.json Pattern – compiled once at program start
@@ -32,6 +33,14 @@ static RESPONSE_BLOCK_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 static LAST_MODIFIED_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?is)<[Dd]:getlastmodified>([^<]+)</[Dd]:getlastmodified>")
         .expect("getlastmodified pattern is valid")
+});
+
+/// Regex zum Extrahieren von `<d:getetag>` innerhalb eines Response-Blocks.
+/// Toleranter im Namespace-Prefix als die anderen Muster: `getetag` ist eine Live-Property,
+/// Apache/mod_dav gibt sie als `<lp1:getetag>` aus, Nextcloud als `<d:getetag>`.
+static ETAG_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?is)<[A-Za-z0-9]*:?getetag>([^<]+)</[A-Za-z0-9]*:?getetag>")
+        .expect("getetag pattern is valid")
 });
 
 /// PROPFIND and MKCOL are not in reqwest's built-in Method constants — define them once here
@@ -305,14 +314,23 @@ impl WebDavClient {
     // ── Notiz-Listing ────────────────────────────────────────────────────────────
 
     /// Listet alle Notizen mit ihrer Ordner-Zuordnung.
-    /// Gibt `(id, folder_name)` sowie ein `complete`-Flag zurück — `false`, wenn mindestens ein
-    /// Unterordner-PROPFIND fehlschlug (das Listing also lückenhaft ist). Aufrufer dürfen in dem
-    /// Fall keine Löscherkennung auf Basis der zurückgegebenen IDs durchführen.
-    pub async fn list_notes_with_folders(&self) -> Result<(Vec<(String, Option<String>)>, bool)> {
+    /// Gibt `(id, folder_name)`, die Server-ETags je Notiz-ID sowie ein `complete`-Flag zurück —
+    /// `false`, wenn mindestens ein Unterordner-PROPFIND fehlschlug (das Listing also lückenhaft
+    /// ist). Aufrufer dürfen in dem Fall keine Löscherkennung auf Basis der zurückgegebenen IDs
+    /// durchführen.
+    ///
+    /// Die ETags werden aus denselben Antworten geerntet (kein zusätzlicher Request) und
+    /// getrennt von der ID-Liste geführt: ein Server ohne `getetag` liefert weiter ein
+    /// vollständiges Listing, nur eben ohne Konfliktschutz.
+    #[allow(clippy::type_complexity)]
+    pub async fn list_notes_with_folders(
+        &self,
+    ) -> Result<(Vec<(String, Option<String>)>, HashMap<String, String>, bool)> {
         let root_url = format!("{}/{}/", self.base_url, self.sync_folder);
         let text = self.propfind_text(&root_url, "1").await?;
 
         let mut result: Vec<(String, Option<String>)> = Vec::new();
+        let mut etags = parse_note_etags(&text);
 
         // Schritt 1: Root-Notizen aus dem Depth-1 PROPFIND (nur direkte Kinder)
         let decoded_text = urlencoding::decode(&text).unwrap_or_else(|_| text.clone().into());
@@ -337,6 +355,7 @@ impl WebDavClient {
             let subdir_url = self.folder_json_dir_url(&folder_name);
             match self.propfind_text(&subdir_url, "1").await {
                 Ok(sub_text) => {
+                    etags.extend(parse_note_etags(&sub_text));
                     let sub_decoded =
                         urlencoding::decode(&sub_text).unwrap_or_else(|_| sub_text.clone().into());
                     for cap in UUID_PATTERN.captures_iter(&sub_decoded) {
@@ -359,7 +378,7 @@ impl WebDavClient {
             }
         }
 
-        Ok((result, complete))
+        Ok((result, etags, complete))
     }
 
     /// Extrahiert direkte Unterordner-Namen aus einer PROPFIND-Antwort auf das Root-Verzeichnis.
@@ -935,6 +954,7 @@ impl WebDavClient {
     <d:getcontenttype/>
     <d:resourcetype/>
     <d:getlastmodified/>
+    <d:getetag/>
   </d:prop>
 </d:propfind>"#;
 
@@ -992,6 +1012,53 @@ fn merge_deletion(
         .deleted_notes
         .retain(|r| now - r.deleted_at <= retention_ms);
     ledger
+}
+
+/// Vergleicht zwei ETags formattolerant: `W/"abc"`, `"abc"` und `abc` gelten als gleich.
+///
+/// Derselbe Server liefert denselben Wert im PUT-`ETag`-Header anders als im PROPFIND-`getetag`.
+/// Ohne die Normalisierung gäbe das Phantom-Konflikte. `None` matcht nie — „kein ETag" ist keine
+/// Aussage über Gleichheit. Android-Parität: `etagsMatch`.
+pub fn etags_match(a: Option<&str>, b: Option<&str>) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => normalize_etag(a) == normalize_etag(b),
+        _ => false,
+    }
+}
+
+fn normalize_etag(etag: &str) -> &str {
+    etag.trim()
+        .trim_start_matches("W/")
+        .trim_start_matches("w/")
+        .trim_matches('"')
+}
+
+/// Sammelt `{uuid}.json` → ETag aus den Response-Blöcken einer PROPFIND-Antwort.
+/// Reine Funktion (wie `parse_server_assets`), damit sie ohne Server testbar ist.
+fn parse_note_etags(text: &str) -> HashMap<String, String> {
+    let mut result = HashMap::new();
+    for block_cap in RESPONSE_BLOCK_PATTERN.captures_iter(text) {
+        let block = &block_cap[1];
+        let Some(href_cap) = HREF_PATTERN.captures(block) else {
+            continue;
+        };
+        let href = href_cap[1].trim();
+        let decoded = urlencoding::decode(href)
+            .unwrap_or_else(|_| href.into())
+            .into_owned();
+        let Some(id) = UUID_PATTERN.captures(&decoded).map(|c| c[1].to_lowercase()) else {
+            continue;
+        };
+        let Some(etag) = ETAG_PATTERN
+            .captures(block)
+            .map(|c| c[1].trim().to_string())
+            .filter(|e| !e.is_empty())
+        else {
+            continue;
+        };
+        result.insert(id, etag);
+    }
+    result
 }
 
 /// Parst die Response-Blöcke einer PROPFIND-Antwort auf `{sync_folder}-assets/` in
@@ -1183,6 +1250,77 @@ mod tests {
     }
 
     // ── parse_server_assets ─────────────────────────────────────────────────────
+
+    // ── ETag-Helfer ─────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_etags_match_ignores_weak_prefix_and_quotes() {
+        assert!(etags_match(Some("W/\"abc123\""), Some("\"abc123\"")));
+        assert!(etags_match(Some("\"abc123\""), Some("abc123")));
+        assert!(etags_match(Some(" \"abc\" "), Some("abc")));
+        assert!(etags_match(Some("w/\"abc\""), Some("W/abc")));
+    }
+
+    #[test]
+    fn test_etags_match_different_values() {
+        assert!(!etags_match(Some("\"abc\""), Some("\"def\"")));
+    }
+
+    #[test]
+    fn test_etags_match_none_never_matches() {
+        // „Kein ETag" ist keine Aussage über Gleichheit — auch nicht None == None.
+        assert!(!etags_match(None, Some("\"abc\"")));
+        assert!(!etags_match(Some("\"abc\""), None));
+        assert!(!etags_match(None, None));
+    }
+
+    #[test]
+    fn test_parse_note_etags_maps_uuid_to_etag() {
+        let xml = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/notes/</d:href>
+    <d:propstat><d:prop><d:getetag>"dir"</d:getetag></d:prop></d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/notes/AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE.json</d:href>
+    <d:propstat><d:prop><d:getetag>W/"abc123"</d:getetag></d:prop></d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/notes/11111111-2222-3333-4444-555555555555.json</d:href>
+    <d:propstat><d:prop><d:getlastmodified>Mon, 01 Jan 2024 00:00:00 GMT</d:getlastmodified></d:prop></d:propstat>
+  </d:response>
+</d:multistatus>"#;
+        let map = parse_note_etags(xml);
+        // Verzeichnis-Block enthält keine UUID → kein Eintrag; ID wird lowercased.
+        assert_eq!(map.len(), 1);
+        assert_eq!(
+            map.get("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+                .map(|s| s.as_str()),
+            Some("W/\"abc123\"")
+        );
+    }
+
+    #[test]
+    fn test_parse_note_etags_url_encoded_and_apache_namespace() {
+        let xml = r#"<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/notes/Mein%20Ordner/11111111-2222-3333-4444-555555555555.json</D:href>
+    <D:propstat><D:prop><lp1:getetag>"deadbeef"</lp1:getetag></D:prop></D:propstat>
+  </D:response>
+</D:multistatus>"#;
+        let map = parse_note_etags(xml);
+        assert_eq!(
+            map.get("11111111-2222-3333-4444-555555555555")
+                .map(|s| s.as_str()),
+            Some("\"deadbeef\"")
+        );
+    }
+
+    #[test]
+    fn test_parse_note_etags_empty_body() {
+        assert!(parse_note_etags("").is_empty());
+    }
 
     #[test]
     fn test_parse_server_assets_extracts_name_and_mtime() {

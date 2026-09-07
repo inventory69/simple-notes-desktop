@@ -14,6 +14,7 @@ use crate::webdav::WebDavClient;
 const SYNC_STORE: &str = "sync_state.json";
 const KEY_NOTE_CACHE: &str = "note_cache";
 const KEY_LAST_SYNC: &str = "last_sync_at";
+const KEY_NOTE_ETAGS: &str = "note_etags";
 
 /// Ein Eintrag im lokalen Notiz-Cache (für Migration aus alter Architektur).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +51,31 @@ pub fn save_note_cache(app: &AppHandle, cache: &HashMap<String, NoteCacheEntry>)
         store.set(
             KEY_NOTE_CACHE,
             serde_json::to_value(cache).unwrap_or_default(),
+        );
+        let _ = store.save();
+    }
+}
+
+// ── ETag-Basis (Konflikterkennung) ──────────────────────────────────────────
+//
+// note_id → Server-ETag der Fassung, auf der die lokale Notiz aufsetzt. Pendant zu Androids
+// `etag_json_<id>`. Bewusst NICHT `NoteCacheEntry.etag` — das ist der auslaufende
+// Migrations-Cache. Ein Eintrag heißt: „so sah die Datei aus, als wir sie zuletzt gesehen
+// haben". Kein Eintrag heißt: „keine Aussage" — und führt nie zu einem Konflikt.
+
+pub fn load_etags(app: &AppHandle) -> HashMap<String, String> {
+    app.store(SYNC_STORE)
+        .ok()
+        .and_then(|s| s.get(KEY_NOTE_ETAGS))
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default()
+}
+
+pub fn save_etags(app: &AppHandle, etags: &HashMap<String, String>) {
+    if let Ok(store) = app.store(SYNC_STORE) {
+        store.set(
+            KEY_NOTE_ETAGS,
+            serde_json::to_value(etags).unwrap_or_default(),
         );
         let _ = store.save();
     }
@@ -114,10 +140,12 @@ fn save_last_sync_at(app: &AppHandle, ts: i64) {
 /// den Datenverlust in #128 — der Desktop GETtet bei jedem Sync jede Notiz einzeln).
 /// `complete` ist `false`, wenn das Ordner-Listing lückenhaft war oder mindestens ein GET
 /// fehlschlug — in dem Fall bricht `run_sync` die Löscherkennung für diesen Zyklus komplett ab.
+/// `etags` sind die Server-ETags aus demselben Listing (kein Extra-Request).
+#[allow(clippy::type_complexity)]
 async fn fetch_server_notes(
     client: &WebDavClient,
-) -> crate::error::Result<(Vec<Note>, HashSet<String>, bool)> {
-    let (note_locations, listing_complete) = client.list_notes_with_folders().await?;
+) -> crate::error::Result<(Vec<Note>, HashSet<String>, HashMap<String, String>, bool)> {
+    let (note_locations, server_etags, listing_complete) = client.list_notes_with_folders().await?;
     let server_ids: HashSet<String> = note_locations.iter().map(|(id, _)| id.clone()).collect();
     let mut complete = listing_complete;
     let mut notes = Vec::new();
@@ -130,7 +158,7 @@ async fn fetch_server_notes(
             }
         }
     }
-    Ok((notes, server_ids, complete))
+    Ok((notes, server_ids, server_etags, complete))
 }
 
 /// Menge aller Ordnernamen, die auf dem Server existieren (lowercased).
@@ -139,7 +167,7 @@ async fn collect_server_folder_names(
     client: &WebDavClient,
 ) -> crate::error::Result<HashSet<String>> {
     let mut names = HashSet::new();
-    let (locations, _complete) = client.list_notes_with_folders().await?;
+    let (locations, _etags, _complete) = client.list_notes_with_folders().await?;
     for (_id, folder) in locations {
         if let Some(f) = folder {
             names.insert(f.to_lowercase());
@@ -223,6 +251,22 @@ fn should_abort_deletion(
     !listing_complete || (server_notes_empty && local_synced_nonempty)
 }
 
+/// C3: Server-Fassung übernehmen, obwohl ihr `updated_at` **nicht** neuer ist?
+///
+/// Nur wenn lokal nichts Ungesichertes liegt (`SYNCED`), die Zeitstempel auseinanderlaufen und
+/// der Server-ETag von der Basis abweicht. Bei `PENDING`/`CONFLICT` gilt weiter der Halt aus der
+/// Download-Schleife — sonst überschriebe der Sync eine ungesicherte lokale Änderung.
+fn should_adopt_server(
+    local: &Note,
+    server_updated_at: i64,
+    server_etag: Option<&str>,
+    cached_etag: Option<&str>,
+) -> bool {
+    local.sync_status == SyncStatus::Synced
+        && server_updated_at != local.updated_at
+        && !crate::webdav::etags_match(server_etag, cached_etag)
+}
+
 /// Server-Sync: local_store ↔ Server reconcilen.
 ///
 /// Port von Android's `WebDavSyncService.syncNotes()`.
@@ -254,23 +298,27 @@ pub async fn run_sync(
     sync_folders(client, app, write_markdown).await;
 
     // 3. Server-Notizen abrufen
-    let (server_notes, server_ids, listing_complete) = match fetch_server_notes(client).await {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("[sync] fetch fehlgeschlagen: {}", e);
-            activity_log::log(
-                app,
-                Op::SyncFail,
-                Src::Local,
-                None,
-                None,
-                None,
-                None,
-                Some(&e.to_string()),
-            );
-            return summary;
-        }
-    };
+    let (server_notes, server_ids, server_etags, listing_complete) =
+        match fetch_server_notes(client).await {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("[sync] fetch fehlgeschlagen: {}", e);
+                activity_log::log(
+                    app,
+                    Op::SyncFail,
+                    Src::Local,
+                    None,
+                    None,
+                    None,
+                    None,
+                    Some(&e.to_string()),
+                );
+                return summary;
+            }
+        };
+
+    // ETag-Basis dieses Laufs; am Ende einmal zurückgeschrieben.
+    let mut etags = load_etags(app);
 
     // Local-only-Ordner einmal vorberechnen
     let local_only_set: HashSet<String> = local_store::active_folders(app)
@@ -337,6 +385,8 @@ pub async fn run_sync(
         {
             continue;
         }
+        let server_etag = server_etags.get(&sn.id).map(String::as_str);
+        let cached_etag = etags.get(&sn.id).map(String::as_str);
         match local_store::get_note(app, &sn.id) {
             None => {
                 let mut n = sn.clone();
@@ -415,8 +465,38 @@ pub async fn run_sync(
                         Some("self_heal_present_on_server"),
                         None,
                     );
+                } else if should_adopt_server(&local, sn.updated_at, server_etag, cached_etag) {
+                    // Der Server hat sich bewegt, ohne dabei einen neueren Zeitstempel zu
+                    // bekommen (z.B. „Meine behalten" auf einem anderen Gerät). Ohne diesen
+                    // Zweig liefe der Client dauerhaft still auseinander — der Download greift
+                    // nie, der Upload auch nicht (Status ist SYNCED).
+                    let mut n = sn.clone();
+                    n.sync_status = SyncStatus::Synced;
+                    local_store::put_note(app, &n);
+                    summary.notes_downloaded += 1;
+                    eprintln!("[sync] {} konvergiert über ETag (Server älter)", sn.id);
+                    activity_log::log(
+                        app,
+                        Op::Download,
+                        Src::Remote,
+                        Some(&sn.id),
+                        Some(&sn.title),
+                        sn.folder_name.as_deref(),
+                        Some("server_etag_changed"),
+                        None,
+                    );
                 }
                 // sonst: lokal neuer/gleich → wird ggf. in Upload-Phase behandelt
+            }
+        }
+
+        // ETag-Basis fortschreiben — aber nur, wenn lokal jetzt der Server-Stand steht.
+        // Bei PENDING/CONFLICT muss der alte Wert stehen bleiben: er ist die Basis, gegen die
+        // der Pre-Upload-Guard vergleicht.
+        if let Some(e) = server_etag {
+            if local_store::get_note(app, &sn.id).map(|n| n.sync_status) == Some(SyncStatus::Synced)
+            {
+                etags.insert(sn.id.clone(), e.to_string());
             }
         }
     }
@@ -594,6 +674,11 @@ pub async fn run_sync(
         }
     }
 
+    // ETag-Basis sichern; Einträge zu verschwundenen Notizen würden sonst unbegrenzt wachsen.
+    let known_ids: HashSet<&str> = final_notes.iter().map(|n| n.id.as_str()).collect();
+    etags.retain(|id, _| known_ids.contains(id.as_str()));
+    save_etags(app, &etags);
+
     save_last_sync_at(app, now);
     eprintln!(
         "[sync] Abgeschlossen: {} heruntergeladen, {} hochgeladen, {} Konflikte, {} auf Server gelöscht, {} wiederhergestellt",
@@ -661,6 +746,66 @@ mod tests {
             !json.contains("\"etag\""),
             "etag-Feld darf bei None nicht serialisiert werden"
         );
+    }
+
+    // ── Konflikt-Parität (Android v2.16.0) ──────────────────────────────────────────────────
+
+    fn note_with(status: SyncStatus, folder: Option<&str>) -> Note {
+        let mut n = Note::new("T".to_string(), "tauri-test".to_string());
+        n.sync_status = status;
+        n.folder_name = folder.map(str::to_owned);
+        n
+    }
+
+    #[test]
+    fn test_adopt_server_when_etag_changed_and_local_synced() {
+        // Befund B: Server-Fassung mit älterem updated_at (fremdes „Meine behalten").
+        let mut local = note_with(SyncStatus::Synced, None);
+        local.updated_at = 2_000;
+        assert!(should_adopt_server(
+            &local,
+            1_000,
+            Some("\"new\""),
+            Some("\"old\"")
+        ));
+    }
+
+    #[test]
+    fn test_adopt_server_never_overwrites_unsaved_local_edit() {
+        for status in [
+            SyncStatus::Pending,
+            SyncStatus::Conflict,
+            SyncStatus::LocalOnly,
+        ] {
+            let mut local = note_with(status, None);
+            local.updated_at = 2_000;
+            assert!(
+                !should_adopt_server(&local, 1_000, Some("\"new\""), Some("\"old\"")),
+                "{:?} darf nicht überschrieben werden",
+                local.sync_status
+            );
+        }
+    }
+
+    #[test]
+    fn test_adopt_server_not_when_etag_unchanged() {
+        let mut local = note_with(SyncStatus::Synced, None);
+        local.updated_at = 2_000;
+        assert!(!should_adopt_server(
+            &local,
+            1_000,
+            Some("W/\"same\""),
+            Some("\"same\"")
+        ));
+    }
+
+    #[test]
+    fn test_adopt_server_not_when_timestamps_equal() {
+        // Gleicher Zeitstempel = derselbe Stand; ein abweichender ETag ist dann nur eine
+        // veraltete Basis und darf kein Re-Download auslösen.
+        let mut local = note_with(SyncStatus::Synced, None);
+        local.updated_at = 1_000;
+        assert!(!should_adopt_server(&local, 1_000, Some("\"new\""), None));
     }
 
     // ── #128 Regression: unvollständiges Listing darf nie zur Löscherkennung führen ──────────
