@@ -5,7 +5,9 @@ use crate::models::{DeletionLedger, DeletionRecord, Note};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use regex::Regex;
 use reqwest::{Client, Method, StatusCode};
-use std::sync::LazyLock;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, LazyLock};
 
 /// UUID.json Pattern – compiled once at program start
 static UUID_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
@@ -34,6 +36,17 @@ static LAST_MODIFIED_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
         .expect("getlastmodified pattern is valid")
 });
 
+/// Regex zum Extrahieren von `<d:getetag>` innerhalb eines Response-Blocks.
+/// Toleranter im Namespace-Prefix als die anderen Muster: `getetag` ist eine Live-Property,
+/// Apache/mod_dav gibt sie als `<lp1:getetag>` aus, Nextcloud als `<d:getetag>`.
+static ETAG_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?is)<[A-Za-z0-9]*:?getetag>([^<]+)</[A-Za-z0-9]*:?getetag>")
+        .expect("getetag pattern is valid")
+});
+
+/// HTTP-Codes, mit denen ein Server signalisiert, dass er `If-Match` nicht auswerten kann.
+const PRECONDITION_UNSUPPORTED_CODES: [u16; 2] = [400, 501];
+
 /// PROPFIND and MKCOL are not in reqwest's built-in Method constants — define them once here
 /// rather than calling from_bytes().unwrap() at every call site.
 static PROPFIND: LazyLock<Method> =
@@ -49,6 +62,9 @@ pub struct WebDavClient {
     auth_header: String,
     /// Sync folder name (default: "notes"). JSON stored in `/{sync_folder}/`, Markdown in `/{sync_folder}-md/`.
     sync_folder: String,
+    /// Merkt sich, dass dieser Server `If-Match` nicht auswerten kann (400/501). Geteilt über
+    /// alle Clones des Clients, deshalb `Arc` — der Client wird pro Sync-Lauf geklont.
+    preconditions_unsupported: Arc<AtomicBool>,
 }
 
 impl WebDavClient {
@@ -88,6 +104,7 @@ impl WebDavClient {
             base_url,
             auth_header,
             sync_folder,
+            preconditions_unsupported: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -305,14 +322,23 @@ impl WebDavClient {
     // ── Notiz-Listing ────────────────────────────────────────────────────────────
 
     /// Listet alle Notizen mit ihrer Ordner-Zuordnung.
-    /// Gibt `(id, folder_name)` sowie ein `complete`-Flag zurück — `false`, wenn mindestens ein
-    /// Unterordner-PROPFIND fehlschlug (das Listing also lückenhaft ist). Aufrufer dürfen in dem
-    /// Fall keine Löscherkennung auf Basis der zurückgegebenen IDs durchführen.
-    pub async fn list_notes_with_folders(&self) -> Result<(Vec<(String, Option<String>)>, bool)> {
+    /// Gibt `(id, folder_name)`, die Server-ETags je Notiz-ID sowie ein `complete`-Flag zurück —
+    /// `false`, wenn mindestens ein Unterordner-PROPFIND fehlschlug (das Listing also lückenhaft
+    /// ist). Aufrufer dürfen in dem Fall keine Löscherkennung auf Basis der zurückgegebenen IDs
+    /// durchführen.
+    ///
+    /// Die ETags werden aus denselben Antworten geerntet (kein zusätzlicher Request) und
+    /// getrennt von der ID-Liste geführt: ein Server ohne `getetag` liefert weiter ein
+    /// vollständiges Listing, nur eben ohne Konfliktschutz.
+    #[allow(clippy::type_complexity)]
+    pub async fn list_notes_with_folders(
+        &self,
+    ) -> Result<(Vec<(String, Option<String>)>, HashMap<String, String>, bool)> {
         let root_url = format!("{}/{}/", self.base_url, self.sync_folder);
         let text = self.propfind_text(&root_url, "1").await?;
 
         let mut result: Vec<(String, Option<String>)> = Vec::new();
+        let mut etags = parse_note_etags(&text);
 
         // Schritt 1: Root-Notizen aus dem Depth-1 PROPFIND (nur direkte Kinder)
         let decoded_text = urlencoding::decode(&text).unwrap_or_else(|_| text.clone().into());
@@ -337,6 +363,7 @@ impl WebDavClient {
             let subdir_url = self.folder_json_dir_url(&folder_name);
             match self.propfind_text(&subdir_url, "1").await {
                 Ok(sub_text) => {
+                    etags.extend(parse_note_etags(&sub_text));
                     let sub_decoded =
                         urlencoding::decode(&sub_text).unwrap_or_else(|_| sub_text.clone().into());
                     for cap in UUID_PATTERN.captures_iter(&sub_decoded) {
@@ -359,7 +386,17 @@ impl WebDavClient {
             }
         }
 
-        Ok((result, complete))
+        Ok((result, etags, complete))
+    }
+
+    /// Server-ETags aller `{uuid}.json` in **einem** Ordner (`None` = Root).
+    /// Für den Pre-Upload-Snapshot: ein PROPFIND je Ordner, in den etwas hochgeladen wird.
+    pub async fn list_note_etags(&self, folder: Option<&str>) -> Result<HashMap<String, String>> {
+        let url = match folder {
+            Some(f) => self.folder_json_dir_url(f),
+            None => format!("{}/{}/", self.base_url, self.sync_folder),
+        };
+        Ok(parse_note_etags(&self.propfind_text(&url, "1").await?))
     }
 
     /// Extrahiert direkte Unterordner-Namen aus einer PROPFIND-Antwort auf das Root-Verzeichnis.
@@ -413,6 +450,17 @@ impl WebDavClient {
     /// Lädt eine einzelne Notiz aus dem angegebenen Ordner.
     /// `folder` = None → Root-Ebene; der path ist maßgebend für `note.folder_name`.
     pub async fn get_note(&self, id: &str, folder: Option<&str>) -> Result<Note> {
+        self.get_note_with_etag(id, folder).await.map(|(n, _)| n)
+    }
+
+    /// Wie `get_note`, gibt zusätzlich den ETag der Antwort zurück — also die Fassung, auf der
+    /// die lokale Kopie danach aufsetzt. Genau dieser Wert gehört als ETag-Basis in den Store;
+    /// ein aus dem Listing nachgereichter wäre schon wieder eine andere Fassung.
+    pub async fn get_note_with_etag(
+        &self,
+        id: &str,
+        folder: Option<&str>,
+    ) -> Result<(Note, Option<String>)> {
         let url = self.note_json_url(folder, id);
 
         let response = self
@@ -425,6 +473,12 @@ impl WebDavClient {
 
         match response.status() {
             StatusCode::OK => {
+                let etag = response
+                    .headers()
+                    .get("etag")
+                    .or_else(|| response.headers().get("oc-etag"))
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::to_string);
                 let mut note: Note = response
                     .json()
                     .await
@@ -436,7 +490,7 @@ impl WebDavClient {
                 // Pfad ist maßgebend — überschreibt was im JSON-Body steht
                 note.folder_name = folder.map(str::to_owned);
 
-                Ok(note)
+                Ok((note, etag))
             }
             StatusCode::NOT_FOUND => Err(AppError::NoteNotFound(id.to_string())),
             status => Err(AppError::WebDav(format!("GET failed: {}", status))),
@@ -446,7 +500,16 @@ impl WebDavClient {
     /// Speichert eine Notiz (JSON immer, Markdown nur wenn `write_markdown`), ordner-bewusst.
     ///
     /// Löscht die alte `.md`-Datei wenn der Titel geändert wurde (nur wenn der Spiegel aktiv ist).
-    pub async fn save_note(&self, note: &Note, write_markdown: bool) -> Result<()> {
+    ///
+    /// `if_match` = der gecachte Server-ETag, auf dem diese Änderung aufsetzt. Gibt der Server
+    /// eine fremde Fassung zurück, kommt `AppError::PreconditionFailed`. Rückgabe ist der ETag
+    /// der PUT-Antwort (`None`, wenn der Server keinen schickt).
+    pub async fn save_note(
+        &self,
+        note: &Note,
+        write_markdown: bool,
+        if_match: Option<&str>,
+    ) -> Result<Option<String>> {
         let folder = note.folder_name.as_deref();
 
         // MKCOL Unterverzeichnisse, falls Notiz in einem Ordner liegt
@@ -470,14 +533,14 @@ impl WebDavClient {
             }
         }
 
-        self.save_json(note).await?;
+        let etag = self.save_json(note, if_match).await?;
         if write_markdown {
             self.save_markdown(note).await?;
         }
-        Ok(())
+        Ok(etag)
     }
 
-    async fn save_json(&self, note: &Note) -> Result<()> {
+    async fn save_json(&self, note: &Note, if_match: Option<&str>) -> Result<Option<String>> {
         let url = self.note_json_url(note.folder_name.as_deref(), &note.id);
 
         #[cfg(debug_assertions)]
@@ -486,26 +549,64 @@ impl WebDavClient {
         let json_content =
             serde_json::to_string_pretty(note).map_err(|e| AppError::ParseError(e.to_string()))?;
 
-        let response = self
-            .client
-            .put(&url)
-            .header("Authorization", &self.auth_header)
-            .header("Content-Type", "application/json")
-            .body(json_content)
-            .send()
-            .await
-            .map_err(|e| AppError::NetworkError(e.to_string()))?;
+        // `If-Match` ist nur die zweite Reihe — der empfohlene Server (hacdias/webdav) wertet
+        // Write-Preconditions gar nicht aus und antwortet mit 201. Der eigentliche Schutz ist
+        // der ETag-Vergleich vor dem Upload (sync_engine::is_stale_against_server).
+        let mut precondition = if_match
+            .map(str::trim)
+            .filter(|e| !e.is_empty() && !self.preconditions_unsupported.load(Ordering::Relaxed))
+            .map(to_if_match_value);
 
-        let status = response.status();
-        if !status.is_success() {
+        loop {
+            let mut req = self
+                .client
+                .put(&url)
+                .header("Authorization", &self.auth_header)
+                .header("Content-Type", "application/json");
+            if let Some(p) = &precondition {
+                req = req.header("If-Match", p.as_str());
+            }
+
+            let response = req
+                .body(json_content.clone())
+                .send()
+                .await
+                .map_err(|e| AppError::NetworkError(e.to_string()))?;
+
+            let status = response.status();
+            if status.is_success() {
+                // Nextcloud schickt bei 201 keinen `ETag`, wohl aber `OC-ETag` mit demselben
+                // Wert, den ein späteres PROPFIND als `getetag` liefert.
+                return Ok(response
+                    .headers()
+                    .get("etag")
+                    .or_else(|| response.headers().get("oc-etag"))
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::to_string));
+            }
+            if status == StatusCode::PRECONDITION_FAILED {
+                return Err(AppError::PreconditionFailed);
+            }
+            if precondition.is_some() && PRECONDITION_UNSUPPORTED_CODES.contains(&status.as_u16()) {
+                // Der Server kann die Precondition nicht auswerten. Einmal ohne wiederholen und
+                // für diese Verbindung merken — ein dauerhaft blockierter Upload wäre schlimmer
+                // als der fehlende Konfliktschutz.
+                eprintln!(
+                    "[WebDAV] Server lehnt If-Match ab ({}) — Wiederholung ohne Precondition",
+                    status
+                );
+                self.preconditions_unsupported
+                    .store(true, Ordering::Relaxed);
+                precondition = None;
+                continue;
+            }
+
             let error_body = response.text().await.unwrap_or_default();
             return Err(AppError::WebDav(format!(
                 "PUT JSON failed: {} - {}",
                 status, error_body
             )));
         }
-
-        Ok(())
     }
 
     async fn save_markdown(&self, note: &Note) -> Result<()> {
@@ -607,8 +708,9 @@ impl WebDavClient {
             self.ensure_folder_dirs(f, true).await;
         }
 
-        // Am neuen Pfad speichern (JSON + MD)
-        self.save_json(&note).await?;
+        // Am neuen Pfad speichern (JSON + MD). Ohne Precondition: das Ziel ist ein neuer Pfad,
+        // die ETag-Basis der Notiz gehört zum alten.
+        self.save_json(&note, None).await?;
         self.save_markdown(&note).await?;
 
         // Alten JSON-Pfad löschen (Fehler ignorieren)
@@ -935,6 +1037,7 @@ impl WebDavClient {
     <d:getcontenttype/>
     <d:resourcetype/>
     <d:getlastmodified/>
+    <d:getetag/>
   </d:prop>
 </d:propfind>"#;
 
@@ -992,6 +1095,60 @@ fn merge_deletion(
         .deleted_notes
         .retain(|r| now - r.deleted_at <= retention_ms);
     ledger
+}
+
+/// Vergleicht zwei ETags formattolerant: `W/"abc"`, `"abc"` und `abc` gelten als gleich.
+///
+/// Derselbe Server liefert denselben Wert im PUT-`ETag`-Header anders als im PROPFIND-`getetag`.
+/// Ohne die Normalisierung gäbe das Phantom-Konflikte. `None` matcht nie — „kein ETag" ist keine
+/// Aussage über Gleichheit. Android-Parität: `etagsMatch`.
+pub fn etags_match(a: Option<&str>, b: Option<&str>) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => normalize_etag(a) == normalize_etag(b),
+        _ => false,
+    }
+}
+
+fn normalize_etag(etag: &str) -> &str {
+    etag.trim()
+        .trim_start_matches("W/")
+        .trim_start_matches("w/")
+        .trim_matches('"')
+}
+
+/// Formt einen gespeicherten ETag zu einem gültigen `If-Match`-Wert.
+/// Gespeichert wird der rohe Server-Wert — mit Quotes, ohne, oder als schwacher Tag (`W/"abc"`).
+/// `If-Match` verlangt einen starken, gequoteten Entity-Tag.
+fn to_if_match_value(etag: &str) -> String {
+    format!("\"{}\"", normalize_etag(etag))
+}
+
+/// Sammelt `{uuid}.json` → ETag aus den Response-Blöcken einer PROPFIND-Antwort.
+/// Reine Funktion (wie `parse_server_assets`), damit sie ohne Server testbar ist.
+fn parse_note_etags(text: &str) -> HashMap<String, String> {
+    let mut result = HashMap::new();
+    for block_cap in RESPONSE_BLOCK_PATTERN.captures_iter(text) {
+        let block = &block_cap[1];
+        let Some(href_cap) = HREF_PATTERN.captures(block) else {
+            continue;
+        };
+        let href = href_cap[1].trim();
+        let decoded = urlencoding::decode(href)
+            .unwrap_or_else(|_| href.into())
+            .into_owned();
+        let Some(id) = UUID_PATTERN.captures(&decoded).map(|c| c[1].to_lowercase()) else {
+            continue;
+        };
+        let Some(etag) = ETAG_PATTERN
+            .captures(block)
+            .map(|c| c[1].trim().to_string())
+            .filter(|e| !e.is_empty())
+        else {
+            continue;
+        };
+        result.insert(id, etag);
+    }
+    result
 }
 
 /// Parst die Response-Blöcke einer PROPFIND-Antwort auf `{sync_folder}-assets/` in
@@ -1104,6 +1261,7 @@ mod tests {
             base_url: "http://server".to_string(),
             auth_header: "Basic dGVzdA==".to_string(),
             sync_folder: "notes".to_string(),
+            preconditions_unsupported: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -1183,6 +1341,84 @@ mod tests {
     }
 
     // ── parse_server_assets ─────────────────────────────────────────────────────
+
+    // ── ETag-Helfer ─────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_etags_match_ignores_weak_prefix_and_quotes() {
+        assert!(etags_match(Some("W/\"abc123\""), Some("\"abc123\"")));
+        assert!(etags_match(Some("\"abc123\""), Some("abc123")));
+        assert!(etags_match(Some(" \"abc\" "), Some("abc")));
+        assert!(etags_match(Some("w/\"abc\""), Some("W/abc")));
+    }
+
+    #[test]
+    fn test_etags_match_different_values() {
+        assert!(!etags_match(Some("\"abc\""), Some("\"def\"")));
+    }
+
+    #[test]
+    fn test_etags_match_none_never_matches() {
+        // „Kein ETag" ist keine Aussage über Gleichheit — auch nicht None == None.
+        assert!(!etags_match(None, Some("\"abc\"")));
+        assert!(!etags_match(Some("\"abc\""), None));
+        assert!(!etags_match(None, None));
+    }
+
+    #[test]
+    fn test_to_if_match_value_always_strong_and_quoted() {
+        assert_eq!(to_if_match_value("W/\"abc\""), "\"abc\"");
+        assert_eq!(to_if_match_value("abc"), "\"abc\"");
+        assert_eq!(to_if_match_value(" \"abc\" "), "\"abc\"");
+    }
+
+    #[test]
+    fn test_parse_note_etags_maps_uuid_to_etag() {
+        let xml = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/notes/</d:href>
+    <d:propstat><d:prop><d:getetag>"dir"</d:getetag></d:prop></d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/notes/AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE.json</d:href>
+    <d:propstat><d:prop><d:getetag>W/"abc123"</d:getetag></d:prop></d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/notes/11111111-2222-3333-4444-555555555555.json</d:href>
+    <d:propstat><d:prop><d:getlastmodified>Mon, 01 Jan 2024 00:00:00 GMT</d:getlastmodified></d:prop></d:propstat>
+  </d:response>
+</d:multistatus>"#;
+        let map = parse_note_etags(xml);
+        // Verzeichnis-Block enthält keine UUID → kein Eintrag; ID wird lowercased.
+        assert_eq!(map.len(), 1);
+        assert_eq!(
+            map.get("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+                .map(|s| s.as_str()),
+            Some("W/\"abc123\"")
+        );
+    }
+
+    #[test]
+    fn test_parse_note_etags_url_encoded_and_apache_namespace() {
+        let xml = r#"<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/notes/Mein%20Ordner/11111111-2222-3333-4444-555555555555.json</D:href>
+    <D:propstat><D:prop><lp1:getetag>"deadbeef"</lp1:getetag></D:prop></D:propstat>
+  </D:response>
+</D:multistatus>"#;
+        let map = parse_note_etags(xml);
+        assert_eq!(
+            map.get("11111111-2222-3333-4444-555555555555")
+                .map(|s| s.as_str()),
+            Some("\"deadbeef\"")
+        );
+    }
+
+    #[test]
+    fn test_parse_note_etags_empty_body() {
+        assert!(parse_note_etags("").is_empty());
+    }
 
     #[test]
     fn test_parse_server_assets_extracts_name_and_mtime() {
