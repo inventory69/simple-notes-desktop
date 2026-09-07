@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-07
+
+### Fixed
+
+- Two devices editing the same note no longer silently overwrite each other: before uploading, sync checks whether the server copy has moved since the local edit and flags a conflict instead of writing over it ([0da7167](https://github.com/inventory69/simple-notes-desktop/commit/0da71673d395bb60007fa92b61d3949e5d8e7d91))
+  - Uncertain cases still upload as before, so a sync can never get permanently stuck
+- Devices no longer drift apart when the server copy changes without a newer timestamp — for example after another device resolved a conflict with "keep mine", whose result arrives with an older timestamp than the local copy ([774ce4e](https://github.com/inventory69/simple-notes-desktop/commit/774ce4e6f0e1e0e4da98b5d81ae5a1326e3d1953))
+  - Unsaved local edits are kept: only notes already in sync are updated this way
+- Conflict resolution now leaves sync in a consistent state; "Load server version" previously left a stale baseline behind, causing a phantom conflict on the next local edit that could discard that edit ([3c92741](https://github.com/inventory69/simple-notes-desktop/commit/3c92741ab4d03e1df70ffd8a533d788ac51394fa))
+
 ## [0.13.0] - 2026-08-04
 
 ### Added

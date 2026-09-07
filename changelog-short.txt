@@ -1,5 +1,5 @@
+- Editing the same note on two devices no longer silently overwrites the other change — you get a conflict to decide instead
+- Devices that had drifted apart now converge again, even when the other side's copy carries an older timestamp
+- Fixed conflict resolution: "Load server version" could produce a phantom conflict afterwards that discarded your next edit
 - Set a default image size (Small/Medium/Large/Full) in Settings, applied to every newly inserted image
-- Share notes via the system clipboard: copy with images inlined, or as plain text, from a new ⋮ menu
-- Copy a single image straight to the clipboard from its popup menu
-- New local-only activity log tracks trash, restore, sync and conflict events on this device, viewable in Settings
-- Fixed a sync bug that could wrongly trash notes when a server listing partially failed
+- Share notes via the system clipboard: copy with images inlined, or as plain text, from the editor's ⋮ menu
