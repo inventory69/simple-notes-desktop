@@ -5,7 +5,7 @@ pkgrel=1
 pkgdesc="Cross-platform note-taking app with WebDAV sync, built with Tauri"
 arch=('x86_64')
 url="https://github.com/inventory69/simple-notes-desktop"
-license=('MIT')
+license=('AGPL-3.0-only')
 depends=(
   'webkit2gtk-4.1'
   'gtk3'

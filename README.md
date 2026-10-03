@@ -11,7 +11,7 @@
 [![Windows](https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](#-download)
 [![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](#-download)
 [![Tauri](https://img.shields.io/badge/Tauri_2.0-24C8DB?style=for-the-badge&logo=tauri&logoColor=white)](https://tauri.app/)
-[![License](https://img.shields.io/badge/License-MIT-F5C400?style=for-the-badge)](LICENSE)
+[![License](https://img.shields.io/badge/License-AGPL_v3-F5C400?style=for-the-badge)](LICENSE)
 
 </div>
 
@@ -197,7 +197,7 @@ pnpm build
 
 ## 📄 License
 
-MIT License — see [LICENSE](LICENSE)
+GNU Affero General Public License v3.0, the same license as the Android app. See [LICENSE](LICENSE)
 
 ---
 
