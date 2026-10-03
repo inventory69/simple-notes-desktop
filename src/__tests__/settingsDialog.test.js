@@ -277,6 +277,19 @@ describe('SettingsDialog', () => {
       expect(tauri.disconnect).not.toHaveBeenCalled();
     });
 
+    it('should say sync is paused when the folder is end-to-end encrypted', async () => {
+      tauri.e2eeActive.mockResolvedValueOnce(true);
+      const dialog = new SettingsDialog();
+      dialog.serverUrlInput.value = 'http://test.local';
+      dialog.serverUsernameInput.value = 'admin';
+      dialog.serverPasswordInput.value = 'pw';
+      await dialog._testConnection();
+      expect(tauri.e2eeActive).toHaveBeenCalledWith('http://test.local', 'admin', 'pw', 'notes');
+      expect(dialogService.info).toHaveBeenCalledWith(
+        expect.objectContaining({ message: expect.stringContaining('end-to-end encrypted') }),
+      );
+    });
+
     it('should show error dialog when test returns false', async () => {
       tauri.testConnection.mockResolvedValue(false);
       const dialog = new SettingsDialog();

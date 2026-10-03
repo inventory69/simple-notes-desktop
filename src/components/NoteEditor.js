@@ -14,6 +14,7 @@ import { colorPicker } from '../utils/ColorPicker.js';
 import { buildCalendarPayload, buildCalendarPayloadForItem } from '../utils/calendarExport.js';
 import { computeImageRewrite, parseImageAlt } from '../utils/imageAltTokens.js';
 import { markdownHighlightExtensions } from '../utils/markdownHighlight.js';
+import { tolerantTables } from '../utils/markdownTable.js';
 import {
   applyBold,
   applyChecklist,
@@ -25,6 +26,7 @@ import {
   applyLink,
   applyList,
   applyStrikethrough,
+  applyTable,
 } from '../utils/markdownToolbar.js';
 import { getColorPair } from '../utils/noteColors.js';
 import { collectAssetNames, markdownToShareHtml, noteToMarkdown, noteToPlainText } from '../utils/noteShare.js';
@@ -61,7 +63,7 @@ let previewImgOrdinal = 0;
  *  `src` — DOMPurify's default ALLOWED_URI_REGEXP doesn't know the `snasset:` scheme and would
  *  strip it; `src` is set after sanitizing instead (see updatePreview()). External image URLs
  *  fall through to the default renderer (`return false`). */
-const previewMarked = new Marked().use({
+const previewMarked = new Marked(tolerantTables).use({
   renderer: {
     image({ href, text }) {
       const name = assetNameFrom(href);
@@ -113,6 +115,7 @@ export class NoteEditor {
     this.mdBtnList = document.getElementById('md-btn-list');
     this.mdBtnChecklist = document.getElementById('md-btn-checklist');
     this.mdBtnHr = document.getElementById('md-btn-hr');
+    this.mdBtnTable = document.getElementById('md-btn-table');
 
     this.editorView = null;
     this.currentNote = null;
@@ -270,6 +273,7 @@ export class NoteEditor {
     this.mdBtnList?.addEventListener('click', () => this._mdFormat('list'));
     this.mdBtnChecklist?.addEventListener('click', () => this._mdFormat('checklist'));
     this.mdBtnHr?.addEventListener('click', () => this._mdFormat('hr'));
+    this.mdBtnTable?.addEventListener('click', () => this._mdFormat('table'));
 
     // Ctrl+B / Ctrl+I shortcuts for bold and italic (text notes only)
     document.addEventListener('keydown', (e) => {
@@ -335,6 +339,9 @@ export class NoteEditor {
         break;
       case 'hr':
         applyHR(this.editorView);
+        break;
+      case 'table':
+        applyTable(this.editorView);
         break;
     }
   }

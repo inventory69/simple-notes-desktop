@@ -25,6 +25,7 @@ class App {
     this.newNoteBtn = document.getElementById('new-note-btn');
     this.newChecklistBtn = document.getElementById('new-checklist-btn');
     this.syncBtn = document.getElementById('sync-btn');
+    this.syncBlockedBanner = document.getElementById('sync-blocked-banner');
     this.selectModeBtn = document.getElementById('select-mode-btn');
     this.settingsBtn = document.getElementById('settings-btn');
 
@@ -72,6 +73,7 @@ class App {
     // emittieren kann.
     listen('notes-synced', async () => {
       noteService.firstSyncPending = false;
+      this.refreshSyncBlocked();
       const openNote = this.noteEditor.currentNote;
       await Promise.all([noteService.loadNotes(), noteService.loadFolders()]);
       if (!openNote) return;
@@ -423,7 +425,19 @@ class App {
     }
   }
 
+  // Banner from the state the last sync stored, so it also shows after a restart without server.
+  async refreshSyncBlocked() {
+    let blocked = false;
+    try {
+      blocked = this.online && (await tauri.syncBlocked());
+    } catch (_e) {
+      /* keep hidden */
+    }
+    this.syncBlockedBanner.hidden = !blocked;
+  }
+
   async handleConnected() {
+    this.refreshSyncBlocked();
     // Clear editor and selection state before loading new folder
     this.noteEditor.clear();
     this.notesList.clearSelection();
@@ -543,7 +557,7 @@ class App {
       console.error('Sync failed:', error);
       this.syncBtn.disabled = false;
       this.syncBtn.classList.remove('spinning');
-      this._flashSync(false, error.message || 'Could not synchronize notes');
+      this._flashSync(false, error.message || error || 'Could not synchronize notes');
     }
   }
 

@@ -21,6 +21,8 @@ const ACTIVITY_OP_LABELS = {
   SYNC_OK: 'Sync completed',
   SYNC_FAIL: 'Sync failed',
   DELETION_SKIPPED: 'Deletion detection skipped',
+  SYNC_BLOCKED: 'Sync paused, folder encrypted',
+  SYNC_UNBLOCKED: 'Sync resumed',
 };
 
 export class SettingsDialog {
@@ -303,7 +305,16 @@ export class SettingsDialog {
             /* informational only — ignore failures */
           }
         }
-        await dialogService.info({ title: 'Connection OK', message: `Server reachable.${mirrorMsg}` });
+        let encrypted = false;
+        try {
+          encrypted = await tauri.e2eeActive(url, username, password, syncFolder);
+        } catch (_e) {
+          /* informational only, the sync checks again itself */
+        }
+        const message = encrypted
+          ? 'Connected. This sync folder is end-to-end encrypted, sync is paused.'
+          : `Server reachable.${mirrorMsg}`;
+        await dialogService.info({ title: 'Connection OK', message });
       } else {
         this.connectionStatus.textContent = prevStatus;
         await dialogService.error({ title: 'Connection Failed', message: 'Could not connect to the server.' });

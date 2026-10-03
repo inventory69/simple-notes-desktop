@@ -1026,8 +1026,12 @@ async fn sync(
         None => return Ok(()),
     };
     let device_id = get_or_create_device_id(&app, &device_id_state)?;
-    sync_engine::run_sync(&client, &app, &device_id, TRASH_RETENTION_MS).await;
+    let summary = sync_engine::run_sync(&client, &app, &device_id, TRASH_RETENTION_MS).await;
     let _ = app.emit("notes-synced", ());
+    // Sonst meldete der Sync-Knopf grün „synchronisiert", obwohl nichts passiert ist.
+    if summary.e2ee_blocked {
+        return Err(AppError::E2eeBlocked);
+    }
     Ok(())
 }
 
@@ -1057,6 +1061,10 @@ async fn resolve_conflict(
                 lock.clone()
             };
             let client = client.ok_or(AppError::NotConnected)?;
+            // Direktpfad: frisch prüfen, fail-closed (kein nächster Lauf fasst hier nach).
+            if client.e2ee_active().await? {
+                return Err(AppError::E2eeBlocked);
+            }
             let folder = local_store::get_note(&app, &id).and_then(|n| n.folder_name);
             let (mut note, etag) = client.get_note_with_etag(&id, folder.as_deref()).await?;
             note.sync_status = SyncStatus::Synced;
@@ -1142,6 +1150,11 @@ async fn replace_with_new_target(
     {
         return Err(AppError::NotConnected);
     }
+    // Verschlüsseltes Ziel: ablehnen, bevor lokal etwas gelöscht wird. Danach käme sonst
+    // „keine Notizen auf dem Server" heraus, mit leerem lokalen Stand. Prüffehler ebenso.
+    if client.e2ee_active().await? {
+        return Err(AppError::E2eeBlocked);
+    }
 
     let _guard = sync_lock.0.lock().await;
 
@@ -1172,6 +1185,38 @@ async fn md_mirror_exists(
     let folder = sync_folder.unwrap_or_else(|| "notes".to_string());
     let client = WebDavClient::new(&url, &username, &password, &folder)?;
     client.md_mirror_exists().await
+}
+
+/// Banner-Zustand ohne Request (auch offline nach Neustart): gesperrt, solange die vom Sync
+/// gespeicherte Marker-URL zur aktuellen Konfiguration passt.
+#[tauri::command]
+async fn sync_blocked(app: AppHandle) -> Result<bool> {
+    let Some(stored) = sync_engine::e2ee_blocked_marker(&app) else {
+        return Ok(false);
+    };
+    let store = app
+        .store("settings.json")
+        .map_err(|e| AppError::StorageError(e.to_string()))?;
+    let get = |key: &str| store.get(key).and_then(|v| v.as_str().map(String::from));
+    let Some(url) = get("server_url") else {
+        return Ok(false);
+    };
+    let folder = get("sync_folder").unwrap_or_else(|| "notes".to_string());
+    let current = WebDavClient::new(&url, "", "", &folder)?.e2ee_marker_url();
+    Ok(stored == current)
+}
+
+/// Für die Verbindungstest-Meldung: ist der Zielordner Ende-zu-Ende verschlüsselt?
+#[tauri::command]
+async fn e2ee_active(
+    url: String,
+    username: String,
+    password: String,
+    sync_folder: Option<String>,
+) -> Result<bool> {
+    let folder = sync_folder.unwrap_or_else(|| "notes".to_string());
+    let client = WebDavClient::new(&url, &username, &password, &folder)?;
+    client.e2ee_active().await
 }
 
 /// Letzte lokale Aktivitätsprotokoll-Einträge, neueste zuerst (Tail-Read, kein Voll-Laden).
@@ -1510,6 +1555,8 @@ pub fn run() {
             replace_with_new_target,
             backfill_markdown,
             md_mirror_exists,
+            sync_blocked,
+            e2ee_active,
             list_activity_log,
             clear_activity_log,
             show_main_window,

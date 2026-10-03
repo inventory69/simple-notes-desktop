@@ -5,6 +5,7 @@ import { dialogService } from '../services/DialogService.js';
 import noteService from '../services/noteService.js';
 import { colorPicker } from '../utils/ColorPicker.js';
 import { imagePreviewText } from '../utils/imageAltTokens.js';
+import { flattenTableRows } from '../utils/markdownTable.js';
 import { getColorPair, NOTE_COLORS } from '../utils/noteColors.js';
 
 /**
@@ -1081,7 +1082,7 @@ export class NotesList {
       return ['Empty note'];
     }
 
-    const lines = imagePreviewText(note.content)
+    const lines = imagePreviewText(flattenTableRows(note.content))
       .split('\n')
       .map((line) => line.trim())
       .filter((line) => line.length > 0);

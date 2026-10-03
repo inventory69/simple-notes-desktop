@@ -15,6 +15,9 @@ const SYNC_STORE: &str = "sync_state.json";
 const KEY_NOTE_CACHE: &str = "note_cache";
 const KEY_LAST_SYNC: &str = "last_sync_at";
 const KEY_NOTE_ETAGS: &str = "note_etags";
+/// Marker-URL der E2EE-Sperre. Bewusst die URL, kein Flag: gesperrt nur, solange sie zur
+/// aktuellen Konfiguration passt, ein Server-/Ordnerwechsel hebt die Anzeige ohne Reset-Hook auf.
+const KEY_E2EE_BLOCKED_MARKER: &str = "e2ee_blocked_marker";
 
 /// Ein Eintrag im lokalen Notiz-Cache (für Migration aus alter Architektur).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,6 +36,8 @@ pub struct SyncSummary {
     pub conflicts_detected: usize,
     pub notes_deleted_on_server: usize,
     pub notes_healed: usize,
+    /// Ordner ist auf einem anderen Gerät Ende-zu-Ende verschlüsselt, der Lauf hat nichts getan.
+    pub e2ee_blocked: bool,
 }
 
 // ── Cache-Zugriff (für Migration) ───────────────────────────────────────────
@@ -147,6 +152,44 @@ async fn get_asset_with_retry(client: &WebDavClient, name: &str) -> crate::error
         }
     }
     Err(last_err.expect("loop runs at least once"))
+}
+
+// ── E2EE-Gate (Slice 1) ─────────────────────────────────────────────────────
+
+pub fn e2ee_blocked_marker(app: &AppHandle) -> Option<String> {
+    app.store(SYNC_STORE)
+        .ok()
+        .and_then(|s| s.get(KEY_E2EE_BLOCKED_MARKER))
+        .and_then(|v| v.as_str().map(str::to_string))
+}
+
+/// Protokolleintrag für eine Marker-Prüfung, nur beim Übergang. Inaktiv bei einer **anderen**
+/// gespeicherten URL heißt Ordner-/Serverwechsel weg vom gesperrten: aufgehoben wurde nichts.
+fn e2ee_gate_log_op(stored: Option<&str>, marker_url: &str, active: bool) -> Option<Op> {
+    match (active, stored == Some(marker_url)) {
+        (true, false) => Some(Op::SyncBlocked),
+        (false, true) => Some(Op::SyncUnblocked),
+        _ => None,
+    }
+}
+
+/// Zustand nach einer Prüfung. **Nur** `run_sync` ruft das: Direktpfade und der Ziel-Wechsel
+/// prüfen Konfigurationen, die gleich wieder verworfen werden können.
+fn record_e2ee_gate(app: &AppHandle, marker_url: &str, active: bool) {
+    let stored = e2ee_blocked_marker(app);
+    if let Ok(store) = app.store(SYNC_STORE) {
+        if active && stored.as_deref() != Some(marker_url) {
+            store.set(KEY_E2EE_BLOCKED_MARKER, serde_json::json!(marker_url));
+            let _ = store.save();
+        } else if !active && stored.is_some() {
+            store.delete(KEY_E2EE_BLOCKED_MARKER);
+            let _ = store.save();
+        }
+    }
+    if let Some(op) = e2ee_gate_log_op(stored.as_deref(), marker_url, active) {
+        let why = (op == Op::SyncBlocked).then_some("e2ee_active");
+        activity_log::log(app, op, Src::Local, None, None, None, why, None);
+    }
 }
 
 fn save_last_sync_at(app: &AppHandle, ts: i64) {
@@ -402,6 +445,33 @@ pub async fn run_sync(
     // Einmal pro Lauf gelesen (nicht auf dem Client gecacht), damit ein Toggle in den
     // Einstellungen ohne Reconnect beim nächsten Sync greift.
     let write_markdown = crate::markdown_export_enabled(app);
+
+    // 0. E2EE-Gate: allererster Server-Zugriff, vor Queue, MKCOL, PROPFIND und PUT. Ein
+    // verschlüsselter Ordner wird nicht mehr angefasst; ein Prüffehler beendet nur diesen Lauf.
+    let marker_url = client.e2ee_marker_url();
+    match client.e2ee_active().await {
+        Ok(true) => {
+            eprintln!("[sync] e2ee gate: active, sync paused");
+            record_e2ee_gate(app, &marker_url, true);
+            summary.e2ee_blocked = true;
+            return summary;
+        }
+        Ok(false) => record_e2ee_gate(app, &marker_url, false),
+        Err(e) => {
+            eprintln!("[sync] e2ee gate check failed: {}", e);
+            activity_log::log(
+                app,
+                Op::SyncFail,
+                Src::Local,
+                None,
+                None,
+                None,
+                None,
+                Some(&e.to_string()),
+            );
+            return summary;
+        }
+    }
 
     // 1. Offline-Queue abarbeiten (ausstehende Löschungen + Move-Cleanups + Ordner-Tombstones)
     sync_queue::drain_sync_queue(client, app, device_id, retention_ms).await;
@@ -1024,5 +1094,25 @@ mod tests {
     fn test_no_abort_on_complete_listing() {
         assert!(!should_abort_deletion(true, false, true));
         assert!(!should_abort_deletion(true, true, false));
+    }
+
+    // ── E2EE-Gate: Protokoll nur beim Übergang ──────────────────────────────────
+
+    #[test]
+    fn test_e2ee_gate_log_op_transitions() {
+        let a = "http://s/a-e2ee/e2ee.json";
+        let b = "http://s/b-e2ee/e2ee.json";
+        assert_eq!(e2ee_gate_log_op(None, a, true), Some(Op::SyncBlocked));
+        assert_eq!(
+            e2ee_gate_log_op(Some(a), a, true),
+            None,
+            "still blocked: no second entry"
+        );
+        assert_eq!(e2ee_gate_log_op(Some(a), a, false), Some(Op::SyncUnblocked));
+        assert_eq!(e2ee_gate_log_op(None, a, false), None);
+        // Ordnerwechsel weg vom gesperrten: still räumen, aufgehoben wurde nichts
+        assert_eq!(e2ee_gate_log_op(Some(a), b, false), None);
+        // Wechsel auf einen anderen gesperrten Ordner ist eine neue Sperre
+        assert_eq!(e2ee_gate_log_op(Some(a), b, true), Some(Op::SyncBlocked));
     }
 }

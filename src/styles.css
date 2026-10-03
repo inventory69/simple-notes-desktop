@@ -1113,6 +1113,16 @@ body {
   display: none;
 }
 
+/* E2EE-Sperre (Slice 1) */
+.sync-blocked-banner {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  color: var(--color-fg);
+  background-color: color-mix(in srgb, var(--color-warning) 15%, transparent);
+  border-bottom: 1px solid var(--color-border);
+}
+
 /* Toolbar */
 .toolbar {
   display: flex;
@@ -1625,6 +1635,15 @@ body {
 .preview th {
   background-color: var(--color-hover);
   font-weight: 600;
+}
+
+/* Column alignment from the delimiter row (`:---:` / `---:`), wins over the text-align above */
+.preview [align="center"] {
+  text-align: center;
+}
+
+.preview [align="right"] {
+  text-align: right;
 }
 
 .md-img {

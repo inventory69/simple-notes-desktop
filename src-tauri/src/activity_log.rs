@@ -43,6 +43,9 @@ pub enum Op {
     SyncOk,
     SyncFail,
     DeletionSkipped,
+    /// E2EE-Sperre beginnt (why `e2ee_active`), nur beim Übergang und statt `SyncFail`.
+    SyncBlocked,
+    SyncUnblocked,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -1,5 +1,6 @@
 import { EditorSelection } from '@codemirror/state';
 import { buildImageAlt, DEFAULT_ALIGN, DEFAULT_SIZE_PERCENT } from './imageAltTokens.js';
+import { tableAt } from './markdownTable.js';
 
 function wrapSelection(view, prefix, suffix) {
   const { state } = view;
@@ -168,6 +169,42 @@ export function applyHR(view) {
   view.dispatch({
     changes: { from: insertPos, insert },
     selection: EditorSelection.cursor(insertPos + insert.length),
+  });
+  view.focus();
+}
+
+const TABLE_HEADER = 'Header';
+const TABLE_CELL = 'Cell';
+
+/**
+ * Android parity (MarkdownToolbar.insertTable). Cursor inside a table: append a row at the END
+ * (between header and delimiter row it would break the table). Otherwise insert a skeleton after a
+ * blank line; without it a table right above would swallow header and delimiter as body rows.
+ * The first placeholder is selected so typing replaces it.
+ */
+export function applyTable(view) {
+  const { state } = view;
+  const pos = state.selection.main.from;
+  const table = tableAt(state.doc.toString().split('\n'), state.doc.lineAt(pos).number - 1);
+
+  let from, insert, placeholder, selStart;
+  if (table) {
+    from = state.doc.line(table.lastLine + 1).to;
+    insert = `\n| ${Array(table.columns).fill(TABLE_CELL).join(' | ')} |`;
+    placeholder = TABLE_CELL;
+    selStart = from + '\n| '.length;
+  } else {
+    const before = state.sliceDoc(0, pos);
+    const prefix = before === '' || before.endsWith('\n\n') ? '' : before.endsWith('\n') ? '\n' : '\n\n';
+    from = pos;
+    insert = `${prefix}| ${TABLE_HEADER} | ${TABLE_HEADER} |\n| --- | --- |\n| ${TABLE_CELL} | ${TABLE_CELL} |\n`;
+    placeholder = TABLE_HEADER;
+    selStart = pos + prefix.length + '| '.length;
+  }
+
+  view.dispatch({
+    changes: { from, insert },
+    selection: EditorSelection.range(selStart, selStart + placeholder.length),
   });
   view.focus();
 }

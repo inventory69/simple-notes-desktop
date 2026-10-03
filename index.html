@@ -135,6 +135,13 @@
           </div>
         </div>
 
+        <!-- E2EE-Sperre: sichtbar, solange der Sync pausiert (sync_blocked) -->
+        <div id="sync-blocked-banner" class="sync-blocked-banner" role="status" hidden>
+          Sync paused: this sync folder was end-to-end encrypted on another device. Simple Notes Desktop can't read
+          encrypted folders yet, so nothing on the server is changed. Your notes stay on this computer. Turn encryption
+          off on the other device to sync again.
+        </div>
+
         <!-- Main Layout -->
         <div class="main-layout">
           <!-- Sidebar -->
@@ -300,6 +307,14 @@
                     <line x1="3" y1="8" x2="21" y2="8"/>
                     <line x1="3" y1="12" x2="21" y2="12" stroke-width="3"/>
                     <line x1="3" y1="16" x2="21" y2="16"/>
+                  </svg>
+                </button>
+                <button class="md-toolbar-btn" id="md-btn-table" type="button" title="Table (inside a table: add a row)" aria-label="Table">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="3" y="4" width="18" height="16" rx="2"/>
+                    <line x1="3" y1="10" x2="21" y2="10"/>
+                    <line x1="3" y1="15" x2="21" y2="15"/>
+                    <line x1="12" y1="4" x2="12" y2="20"/>
                   </svg>
                 </button>
               </div>
