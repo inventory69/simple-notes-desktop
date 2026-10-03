@@ -47,6 +47,41 @@ static ETAG_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 /// HTTP-Codes, mit denen ein Server signalisiert, dass er `If-Match` nicht auswerten kann.
 const PRECONDITION_UNSUPPORTED_CODES: [u16; 2] = [400, 501];
 
+/// Kennung in `{sync_folder}-e2ee/e2ee.json`, **mit** Anführungszeichen: sonst sperrte eine
+/// Soft-404-Seite, die den Pfad `/simple-notes-e2ee/` zurückgibt. Vertrag (beide Clients,
+/// Testvektoren): `project-docs/simple-notes-sync/e2ee/slice-1.md`.
+const E2EE_MARKER: &str = "\"simple-notes-e2ee\"";
+const E2EE_MAX_BODY_BYTES: usize = 64 * 1024;
+
+/// Ergebnis der Marker-Prüfung (Android-Parität `E2eeGate.Probe`).
+#[derive(Debug, PartialEq, Eq)]
+pub enum E2eeProbe {
+    Active,
+    Inactive,
+    Error,
+}
+
+/// Vertragstabelle. `body_prefix` sind höchstens die ersten 64 KiB, siehe [`push_capped`].
+pub fn classify_e2ee_probe(status: u16, body_prefix: Option<&str>) -> E2eeProbe {
+    match status {
+        200..=299 if body_prefix.is_some_and(|b| b.contains(E2EE_MARKER)) => E2eeProbe::Active,
+        200..=299 => E2eeProbe::Inactive,
+        // Vorübergehend (Auth, Timeout, Rate-Limit): als INAKTIV gewertet schriebe genau dieser
+        // Lauf in einen toten Ordner.
+        401 | 407 | 408 | 425 | 429 => E2eeProbe::Error,
+        400..=499 => E2eeProbe::Inactive,
+        // 5xx und alles, was nach dem Redirect-Folgen noch 3xx ist
+        _ => E2eeProbe::Error,
+    }
+}
+
+/// Hängt `chunk` an `buf` an, aber nie über 64 KiB hinaus. `true` = voll, Stream schließen.
+fn push_capped(buf: &mut Vec<u8>, chunk: &[u8]) -> bool {
+    let room = E2EE_MAX_BODY_BYTES - buf.len();
+    buf.extend_from_slice(&chunk[..chunk.len().min(room)]);
+    buf.len() >= E2EE_MAX_BODY_BYTES
+}
+
 /// PROPFIND and MKCOL are not in reqwest's built-in Method constants — define them once here
 /// rather than calling from_bytes().unwrap() at every call site.
 static PROPFIND: LazyLock<Method> =
@@ -178,6 +213,12 @@ impl WebDavClient {
         format!("{}/{}-assets/", self.base_url, self.sync_folder)
     }
 
+    /// URL der E2EE-Markierungsdatei: `{base}/{sync_folder}-e2ee/e2ee.json`. Ein leerer
+    /// `-e2ee/`-Ordner sperrt nicht, nur diese Datei.
+    pub fn e2ee_marker_url(&self) -> String {
+        format!("{}/{}-e2ee/e2ee.json", self.base_url, self.sync_folder)
+    }
+
     /// URL eines einzelnen Assets: `{base}/{sync_folder}-assets/{enc(name)}`
     fn asset_url(&self, name: &str) -> String {
         format!(
@@ -253,13 +294,60 @@ impl WebDavClient {
                     .to_string(),
             )),
             StatusCode::NOT_FOUND => {
-                self.ensure_directories(write_markdown).await?;
+                // Verschlüsselter Ordner: nichts anlegen, aber Erfolg melden. Scheiterte
+                // `connect`, käme der Client nie in den State und die Sperre höbe sich nie
+                // selbst auf. Ein Prüffehler bricht ohne MKCOL ab.
+                if !self.e2ee_active().await? {
+                    self.ensure_directories(write_markdown).await?;
+                }
                 Ok(true)
             }
             status => Err(AppError::WebDav(format!(
                 "Connection test failed: {}",
                 status
             ))),
+        }
+    }
+
+    /// Ein GET auf die E2EE-Markierungsdatei, ohne Cache. `Ok(true)` = ein anderes Gerät hat den
+    /// Ordner verschlüsselt, der Server darf nicht mehr angefasst werden. Prüffehler (401, 429,
+    /// 5xx, Timeout, …) kommen als `Err`: der Sync endet dann ohne Schreibzugriff, Direktpfade
+    /// lehnen ab (fail-closed).
+    pub async fn e2ee_active(&self) -> Result<bool> {
+        let mut response = self
+            .client
+            .get(self.e2ee_marker_url())
+            .header("Authorization", &self.auth_header)
+            .send()
+            .await
+            .map_err(|e| AppError::NetworkError(e.to_string()))?;
+        let status = response.status();
+        let body = if status.is_success() {
+            // Nicht `.bytes()`: das liest unbegrenzt.
+            let mut buf = Vec::new();
+            while let Some(chunk) = response
+                .chunk()
+                .await
+                .map_err(|e| AppError::NetworkError(e.to_string()))?
+            {
+                if push_capped(&mut buf, &chunk) {
+                    break;
+                }
+            }
+            Some(String::from_utf8_lossy(&buf).into_owned())
+        } else {
+            None
+        };
+        match classify_e2ee_probe(status.as_u16(), body.as_deref()) {
+            E2eeProbe::Active => Ok(true),
+            E2eeProbe::Inactive => Ok(false),
+            E2eeProbe::Error
+                if status == StatusCode::UNAUTHORIZED
+                    || status == StatusCode::PROXY_AUTHENTICATION_REQUIRED =>
+            {
+                Err(AppError::InvalidCredentials)
+            }
+            E2eeProbe::Error => Err(AppError::WebDav(format!("E2EE check failed: {}", status))),
         }
     }
 
@@ -1671,5 +1759,176 @@ mod tests {
             1,
             "no duplicate"
         );
+    }
+
+    // ── E2EE-Gate (Slice 1): Testvektoren aus project-docs/.../e2ee/slice-1.md ────
+
+    /// Body wie aus dem Stream: in 4-KiB-Stücken über `push_capped`, dann verlustbehaftet dekodiert.
+    fn capped_body(body: &str) -> String {
+        let mut buf = Vec::new();
+        for chunk in body.as_bytes().chunks(4096) {
+            if push_capped(&mut buf, chunk) {
+                break;
+            }
+        }
+        String::from_utf8_lossy(&buf).into_owned()
+    }
+
+    #[test]
+    fn test_classify_e2ee_probe_contract_vectors() {
+        use E2eeProbe::*;
+        let k = E2EE_MARKER;
+        let at_limit = format!("{}{}", " ".repeat(65_517), k);
+        let over_limit = format!("{}{}", " ".repeat(65_518), k);
+        let bodies: [(u16, &str, E2eeProbe); 9] = [
+            (200, r#"{"format":"simple-notes-e2ee","version":1}"#, Active), // 1
+            (200, r#"{"format":"simple-notes-e2ee","#, Active),             // 2
+            (207, r#"{"format":"simple-notes-e2ee"}"#, Active),             // 3
+            (200, &at_limit, Active),                                       // 4
+            (200, &over_limit, Inactive),                                   // 5
+            (200, "", Inactive),                                            // 6
+            (200, "<html><body>Login</body></html>", Inactive),             // 7
+            (
+                200,
+                "<html>Not found: /simple-notes-e2ee/e2ee.json</html>",
+                Inactive,
+            ), // 8
+            (200, r#"{"format":"simple-notes"}"#, Inactive),                // 9
+        ];
+        for (i, (status, body, expected)) in bodies.into_iter().enumerate() {
+            let got = classify_e2ee_probe(status, Some(&capped_body(body)));
+            assert_eq!(got, expected, "vector {}", i + 1);
+        }
+        // 10–14: Body egal, auch mit Kennung
+        let by_status: [(&[u16], E2eeProbe); 5] = [
+            (&[404, 410], Inactive),
+            (&[400, 403, 405, 409, 418], Inactive),
+            (&[401, 407, 408, 425, 429], Error),
+            (&[500, 502, 503], Error),
+            (&[301, 302, 307], Error),
+        ];
+        for (statuses, expected) in by_status {
+            for &status in statuses {
+                assert_eq!(classify_e2ee_probe(status, None), expected, "{}", status);
+                assert_eq!(classify_e2ee_probe(status, Some(k)), expected, "{}", status);
+            }
+        }
+    }
+
+    #[test]
+    fn test_e2ee_marker_url_uses_sanitized_folder() {
+        assert_eq!(
+            make_client().e2ee_marker_url(),
+            "http://server/notes-e2ee/e2ee.json"
+        );
+        let c = WebDavClient::new("http://server/dav/", "u", "p", "my notes!").unwrap();
+        assert_eq!(
+            c.e2ee_marker_url(),
+            "http://server/dav/mynotes-e2ee/e2ee.json"
+        );
+    }
+
+    // ── HTTP-Schicht gegen einen Mock-Server ────────────────────────────────────
+
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    const MARKER_PATH: &str = "/notes-e2ee/e2ee.json";
+
+    async fn mock_marker(server: &MockServer, response: ResponseTemplate) {
+        Mock::given(method("GET"))
+            .and(path(MARKER_PATH))
+            .respond_with(response)
+            .expect(1)
+            .mount(server)
+            .await;
+    }
+
+    async fn probe(response: ResponseTemplate) -> Result<bool> {
+        let server = MockServer::start().await;
+        mock_marker(&server, response).await;
+        let client = WebDavClient::new(&server.uri(), "u", "p", "notes").unwrap();
+        client.e2ee_active().await
+        // `expect(1)` wird beim Drop des Servers geprüft: genau ein Request, kein Retry.
+    }
+
+    #[tokio::test]
+    async fn test_e2ee_active_inactive_responses() {
+        assert!(!probe(ResponseTemplate::new(404)).await.unwrap());
+        assert!(!probe(ResponseTemplate::new(403)).await.unwrap());
+        assert!(
+            !probe(ResponseTemplate::new(200).set_body_string("<html>Login</html>"))
+                .await
+                .unwrap()
+        );
+        let over_limit = format!("{}{}", " ".repeat(65_518), E2EE_MARKER);
+        assert!(
+            !probe(ResponseTemplate::new(200).set_body_string(over_limit))
+                .await
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_e2ee_active_marker_present() {
+        let body = r#"{"format":"simple-notes-e2ee","version":1}"#;
+        assert!(probe(ResponseTemplate::new(200).set_body_string(body))
+            .await
+            .unwrap());
+        let at_limit = format!("{}{}", " ".repeat(65_517), E2EE_MARKER);
+        assert!(probe(ResponseTemplate::new(200).set_body_string(at_limit))
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_e2ee_active_errors() {
+        assert!(matches!(
+            probe(ResponseTemplate::new(401)).await,
+            Err(AppError::InvalidCredentials)
+        ));
+        assert!(matches!(
+            probe(ResponseTemplate::new(429)).await,
+            Err(AppError::WebDav(_))
+        ));
+        assert!(matches!(
+            probe(ResponseTemplate::new(500)).await,
+            Err(AppError::WebDav(_))
+        ));
+        // 15: keine Antwort (Port 1 nimmt nichts an)
+        let unreachable = WebDavClient::new("http://127.0.0.1:1", "u", "p", "notes").unwrap();
+        assert!(matches!(
+            unreachable.e2ee_active().await,
+            Err(AppError::NetworkError(_))
+        ));
+    }
+
+    async fn test_connection_missing_folder(marker: ResponseTemplate, mkcols: u64) {
+        let server = MockServer::start().await;
+        Mock::given(method("PROPFIND"))
+            .and(path("/notes/"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        mock_marker(&server, marker).await;
+        Mock::given(method("MKCOL"))
+            .respond_with(ResponseTemplate::new(201))
+            .expect(mkcols)
+            .mount(&server)
+            .await;
+        let client = WebDavClient::new(&server.uri(), "u", "p", "notes").unwrap();
+        assert!(client.test_connection(false).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_connection_encrypted_folder_creates_nothing() {
+        let body = r#"{"format":"simple-notes-e2ee","version":1}"#;
+        test_connection_missing_folder(ResponseTemplate::new(200).set_body_string(body), 0).await;
+    }
+
+    #[tokio::test]
+    async fn test_connection_missing_folder_still_created_without_marker() {
+        // {sf}/ und {sf}-assets/ (Markdown-Spiegel aus)
+        test_connection_missing_folder(ResponseTemplate::new(404), 2).await;
     }
 }

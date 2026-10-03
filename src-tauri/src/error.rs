@@ -37,6 +37,11 @@ pub enum AppError {
     #[error("Precondition failed: server copy has changed")]
     PreconditionFailed,
 
+    /// Sync-Ordner ist auf einem anderen Gerät Ende-zu-Ende verschlüsselt (E2EE-Slice 1). Kein
+    /// Update-Versprechen im Text: der Desktop liest verschlüsselte Ordner erst mit Slice 6.
+    #[error("Sync paused: this sync folder was end-to-end encrypted on another device. Simple Notes Desktop can't read encrypted folders yet, so nothing on the server is changed. Your notes stay on this computer. Turn encryption off on the other device to sync again.")]
+    E2eeBlocked,
+
     /// Ungültiges Timestamp-Format
     #[allow(dead_code)]
     #[error("Invalid timestamp: {0}")]
