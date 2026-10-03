@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Tables render like on Android in the preview and in shared HTML: typing into the delimiter row no longer turns the table into raw pipes, an extra cell widens the table instead of being cut off, and column alignment (`:---:`, `---:`) is applied ([e730663](https://github.com/inventory69/simple-notes-desktop/commit/e730663027e4e08b5e7f36bb8c5cb74ae3458762))
   - The note list shows table rows as plain text ("Name · Value") instead of raw pipes
+- License changed from MIT to the GNU Affero General Public License v3.0, the same license as the Android app ([a979a64](https://github.com/inventory69/simple-notes-desktop/commit/a979a64a02dc1dd47b062b5cf6f48af81ceb1ff2))
 
 ## [0.14.0] - 2026-09-07
 
