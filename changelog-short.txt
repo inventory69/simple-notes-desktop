@@ -1,5 +1,5 @@
+- The window now fits small screens instead of reaching past the edge with the title bar out of reach
 - New table button in the Markdown toolbar: insert a table, click again inside it to add a row
 - Tables now look the same as on Android, even with a half-typed delimiter row, and column alignment works
-- The note list shows tables as readable text instead of raw pipes
 - Preparation for the upcoming end-to-end encryption: if another device encrypts the sync folder, sync pauses instead of overwriting anything
 - License: now AGPL v3, the same as the Android app

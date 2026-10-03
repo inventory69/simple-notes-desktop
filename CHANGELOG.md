@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-10-04
+
+### Fixed
+
+- The window now fits small screens: on first start, or with a size saved on a larger monitor, it could reach past the screen edge with the title bar out of reach, for example on a 1366x768 laptop. It is now reduced to fit and centered before it first appears ([8792247](https://github.com/inventory69/simple-notes-desktop/commit/8792247da5af6ba56a8b61bc10a84bae50a4974d))
+  - Maximized windows and windows that already fit are left as they are
+
 ## [0.15.0] - 2026-10-03
 
 ### Added
