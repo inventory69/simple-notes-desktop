@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-03
+
+### Added
+
+- Table button in the Markdown toolbar (Android parity): inserts a table skeleton with the first header selected, and adds a row at the end when the cursor is already inside a table ([42f10c2](https://github.com/inventory69/simple-notes-desktop/commit/42f10c2d85c78b2dcbb727d33e9ddeaf9f8d45f6))
+- Preparation for the upcoming end-to-end encryption: when another device encrypts the sync folder, sync pauses instead of overwriting anything on the server ([5505b28](https://github.com/inventory69/simple-notes-desktop/commit/5505b281441cdac8afc50d6f8108b60d8b848786))
+  - Every sync first checks for the folder's encryption marker; nothing is uploaded, downloaded or deleted while it is present, and your notes keep working locally
+  - A banner explains the pause, also right after a restart without server access, and the connection test says when a folder is encrypted ([4e77a55](https://github.com/inventory69/simple-notes-desktop/commit/4e77a5528e530c91dc82c41c18174055e6d7a246))
+  - Sync resumes on its own once encryption is turned off on the other device
+
+### Changed
+
+- Tables render like on Android in the preview and in shared HTML: typing into the delimiter row no longer turns the table into raw pipes, an extra cell widens the table instead of being cut off, and column alignment (`:---:`, `---:`) is applied ([e730663](https://github.com/inventory69/simple-notes-desktop/commit/e730663027e4e08b5e7f36bb8c5cb74ae3458762))
+  - The note list shows table rows as plain text ("Name · Value") instead of raw pipes
+
 ## [0.14.0] - 2026-09-07
 
 ### Fixed

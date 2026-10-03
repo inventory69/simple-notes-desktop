@@ -1,5 +1,5 @@
-- Editing the same note on two devices no longer silently overwrites the other change — you get a conflict to decide instead
-- Devices that had drifted apart now converge again, even when the other side's copy carries an older timestamp
-- Fixed conflict resolution: "Load server version" could produce a phantom conflict afterwards that discarded your next edit
-- Set a default image size (Small/Medium/Large/Full) in Settings, applied to every newly inserted image
-- Share notes via the system clipboard: copy with images inlined, or as plain text, from the editor's ⋮ menu
+- New table button in the Markdown toolbar: insert a table, click again inside it to add a row
+- Tables now look the same as on Android, even with a half-typed delimiter row, and column alignment works
+- The note list shows tables as readable text instead of raw pipes
+- Preparation for the upcoming end-to-end encryption: if another device encrypts the sync folder, sync pauses instead of overwriting anything
+- Editing the same note on two devices no longer silently overwrites the other change, you get a conflict to decide instead
