@@ -60,10 +60,11 @@ fi
 
 cd "${PKGNAME}"
 
-# Copy PKGBUILD and .SRCINFO
+# Copy PKGBUILD, .SRCINFO and LICENSE
 echo "[3/5] Copying package files..."
 cp "${SCRIPT_DIR}/PKGBUILD" .
 cp "${SCRIPT_DIR}/.SRCINFO" .
+cp "${SCRIPT_DIR}/../LICENSE" .
 echo "  ✓ Files copied"
 
 # Validate PKGBUILD
@@ -75,7 +76,7 @@ echo "  ✓ Validation complete"
 
 # Commit and push
 echo "[5/5] Pushing to AUR..."
-git add PKGBUILD .SRCINFO
+git add PKGBUILD .SRCINFO LICENSE
 git commit -m "Update ${PKGNAME} to $(grep pkgver= PKGBUILD | cut -d= -f2)" 2>/dev/null || {
     echo "  No changes to commit"
     rm -rf "${TMPDIR}"

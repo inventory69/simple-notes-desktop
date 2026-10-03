@@ -18,8 +18,11 @@ optdepends=(
 provides=('simple-notes-desktop')
 conflicts=('simple-notes-desktop' 'simple-notes-desktop-git')
 options=('!strip')
-source=("${pkgname}-${pkgver}.deb::${url}/releases/download/v${pkgver}/Simple.Notes.Desktop_${pkgver}_amd64.deb")
-sha256sums=('SKIP')
+# LICENSE liegt im AUR-Repo (upload-aur.sh kopiert es aus dem Repo-Root), die .deb enthält keins.
+source=("${pkgname}-${pkgver}.deb::${url}/releases/download/v${pkgver}/Simple.Notes.Desktop_${pkgver}_amd64.deb"
+        "LICENSE")
+# Eine Zeile lassen: die Skripte ersetzen per sed nur den ersten Eintrag (die .deb).
+sha256sums=('SKIP' '0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0')
 
 package() {
   # Extract data from deb package
@@ -40,5 +43,5 @@ package() {
   fi
 
   # Install license
-  install -Dm644 /dev/null "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install -Dm644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
 }

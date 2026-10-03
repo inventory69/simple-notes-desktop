@@ -74,7 +74,7 @@ echo "  ✓ tauri.conf.json → $NEW_VERSION"
 echo "[4/6] Updating aur/PKGBUILD..."
 sed -i "s/^pkgver=.*/pkgver=$NEW_VERSION/" aur/PKGBUILD
 sed -i "s/^pkgrel=.*/pkgrel=1/" aur/PKGBUILD
-sed -i "s/^sha256sums=.*/sha256sums=('SKIP')/" aur/PKGBUILD
+sed -i "s/^sha256sums=('[^']*'/sha256sums=('SKIP'/" aur/PKGBUILD   # nur die .deb, LICENSE-Hash bleibt
 echo "  ✓ PKGBUILD → $NEW_VERSION (sha256sums='SKIP' – update after release!)"
 
 # ─── 5. aur/.SRCINFO ──────────────────────────────────────────────────
@@ -82,7 +82,7 @@ echo "[5/6] Updating aur/.SRCINFO..."
 sed -i "s/pkgver = $CURRENT_VERSION/pkgver = $NEW_VERSION/" aur/.SRCINFO
 sed -i "s/pkgrel = .*/pkgrel = 1/" aur/.SRCINFO
 sed -i "s|simple-notes-desktop-bin-${CURRENT_VERSION}.deb::https://github.com/inventory69/simple-notes-desktop/releases/download/v${CURRENT_VERSION}/Simple.Notes.Desktop_${CURRENT_VERSION}_amd64.deb|simple-notes-desktop-bin-${NEW_VERSION}.deb::https://github.com/inventory69/simple-notes-desktop/releases/download/v${NEW_VERSION}/Simple.Notes.Desktop_${NEW_VERSION}_amd64.deb|" aur/.SRCINFO
-sed -i "s/sha256sums = .*/sha256sums = SKIP/" aur/.SRCINFO
+sed -i "0,/sha256sums = .*/s//sha256sums = SKIP/" aur/.SRCINFO   # nur der erste (die .deb)
 echo "  ✓ .SRCINFO → $NEW_VERSION"
 
 # ─── 6. README.md ─────────────────────────────────────────────────────

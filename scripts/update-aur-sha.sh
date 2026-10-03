@@ -44,8 +44,10 @@ rm -f "$TMPFILE"
 
 # Update PKGBUILD and .SRCINFO
 echo "[3/3] Updating aur/PKGBUILD and aur/.SRCINFO..."
-sed -i "s/^sha256sums=.*/sha256sums=('${SHA256}')/" aur/PKGBUILD
-sed -i "s/sha256sums = .*/sha256sums = ${SHA256}/" aur/.SRCINFO
+LICENSE_SHA=$(sha256sum LICENSE | cut -d' ' -f1)
+sed -i "s/^sha256sums=.*/sha256sums=('${SHA256}' '${LICENSE_SHA}')/" aur/PKGBUILD
+# .SRCINFO aus dem PKGBUILD erzeugen statt per sed (zwei Quellen, zwei Hashes)
+(cd aur && makepkg --printsrcinfo > .SRCINFO)
 echo "  ✓ Updated"
 
 echo ""
