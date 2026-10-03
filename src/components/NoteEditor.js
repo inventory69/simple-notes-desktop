@@ -25,6 +25,7 @@ import {
   applyLink,
   applyList,
   applyStrikethrough,
+  applyTable,
 } from '../utils/markdownToolbar.js';
 import { getColorPair } from '../utils/noteColors.js';
 import { collectAssetNames, markdownToShareHtml, noteToMarkdown, noteToPlainText } from '../utils/noteShare.js';
@@ -113,6 +114,7 @@ export class NoteEditor {
     this.mdBtnList = document.getElementById('md-btn-list');
     this.mdBtnChecklist = document.getElementById('md-btn-checklist');
     this.mdBtnHr = document.getElementById('md-btn-hr');
+    this.mdBtnTable = document.getElementById('md-btn-table');
 
     this.editorView = null;
     this.currentNote = null;
@@ -270,6 +272,7 @@ export class NoteEditor {
     this.mdBtnList?.addEventListener('click', () => this._mdFormat('list'));
     this.mdBtnChecklist?.addEventListener('click', () => this._mdFormat('checklist'));
     this.mdBtnHr?.addEventListener('click', () => this._mdFormat('hr'));
+    this.mdBtnTable?.addEventListener('click', () => this._mdFormat('table'));
 
     // Ctrl+B / Ctrl+I shortcuts for bold and italic (text notes only)
     document.addEventListener('keydown', (e) => {
@@ -335,6 +338,9 @@ export class NoteEditor {
         break;
       case 'hr':
         applyHR(this.editorView);
+        break;
+      case 'table':
+        applyTable(this.editorView);
         break;
     }
   }
