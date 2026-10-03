@@ -1243,8 +1243,77 @@ struct TraySettings(Mutex<bool>);
 #[tauri::command]
 fn show_main_window(app: tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
+        show_first_time(&window);
     }
+}
+
+/// Erstes Anzeigen: vorher an den Bildschirm anpassen. Erst hier, nicht in `setup`: dort steckt
+/// die von window-state wiederhergestellte Größe noch in der Event-Queue. Nur im Main-Thread.
+fn show_first_time(window: &tauri::WebviewWindow) {
+    if let Ok(false) = window.is_visible() {
+        fit_to_monitor(window);
+    }
+    let _ = window.show();
+}
+
+/// Neue Fenstergröße, wenn das Fenster nicht auf die Arbeitsfläche passt, sonst `None`. Eine zu
+/// große Achse wird auf 90 % der Fläche verkleinert; die Mindestgröße aus tauri.conf.json setzt
+/// das Fenstersystem selbst durch.
+fn fit_window_size(window: (u32, u32), area: (u32, u32)) -> Option<(u32, u32)> {
+    let fit = |w: u32, a: u32| if w > a { a * 9 / 10 } else { w };
+    let fitted = (fit(window.0, area.0), fit(window.1, area.1));
+    (fitted != window).then_some(fitted)
+}
+
+/// Der Standard 1000×850 oder eine auf einem größeren Monitor gespeicherte Größe ragt auf kleinen
+/// Bildschirmen über den Rand; zentriert landet dann die Titelleiste oberhalb des Bildschirms
+/// (z. B. 1366×768, oder der 800×600-Test des AppImage-Katalogs).
+fn fit_to_monitor(window: &tauri::WebviewWindow) {
+    if window.is_maximized().unwrap_or(false) {
+        return;
+    }
+    // Ein noch verstecktes Fenster kennt seinen Monitor nicht überall (Wayland), daher Fallbacks
+    let monitor = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten())
+        .or_else(|| window.available_monitors().ok()?.into_iter().next());
+    // Nur die Innengröße: outer_size() und damit center() liefern für ein noch verstecktes
+    // X11-Fenster Unsinn (negative Werte als u32). Für Rahmen/Titelleiste reichen die 10 % Luft.
+    let (Some(monitor), Some(size)) = (monitor, pending_inner_size(window)) else {
+        return;
+    };
+    let area = monitor.work_area();
+    let Some((w, h)) = fit_window_size(
+        (size.width, size.height),
+        (area.size.width, area.size.height),
+    ) else {
+        return;
+    };
+    eprintln!(
+        "[window] {}x{} does not fit the {}x{} work area, resizing to {}x{}",
+        size.width, size.height, area.size.width, area.size.height, w, h
+    );
+    let _ = window.set_size(tauri::PhysicalSize::new(w, h));
+    let _ = window.set_position(tauri::PhysicalPosition::new(
+        area.position.x + ((area.size.width - w) / 2) as i32,
+        area.position.y + ((area.size.height - h) / 2) as i32,
+    ));
+}
+
+/// Innengröße eines noch versteckten Fensters. tao kennt sie unter Linux erst nach dem ersten
+/// configure-Event (also nach dem Anzeigen); GTK liefert vorher die angeforderte Größe.
+fn pending_inner_size(window: &tauri::WebviewWindow) -> Option<tauri::PhysicalSize<u32>> {
+    #[cfg(target_os = "linux")]
+    {
+        use gtk::prelude::GtkWindowExt;
+        let (w, h) = window.gtk_window().ok()?.size();
+        let scale = window.scale_factor().ok()?;
+        Some(tauri::LogicalSize::new(w as f64, h as f64).to_physical(scale))
+    }
+    #[cfg(not(target_os = "linux"))]
+    window.inner_size().ok()
 }
 
 fn restore_window(window: &tauri::WebviewWindow) {
@@ -1491,7 +1560,8 @@ pub fn run() {
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                     if let Ok(false) = window_for_timeout.is_visible() {
-                        let _ = window_for_timeout.show();
+                        let w = window_for_timeout.clone();
+                        let _ = window_for_timeout.run_on_main_thread(move || show_first_time(&w));
                     }
                 });
             }
@@ -1568,4 +1638,25 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fit_window_size;
+
+    #[test]
+    fn test_fit_window_size() {
+        // Passt: nichts ändern
+        assert_eq!(fit_window_size((1000, 850), (3440, 1400)), None);
+        assert_eq!(fit_window_size((800, 600), (800, 600)), None);
+        // AppImage-Katalog 800x600: beide Achsen auf 90 %
+        assert_eq!(fit_window_size((1000, 850), (800, 600)), Some((720, 540)));
+        // 1366x768 mit Panel: nur die Höhe ist zu groß
+        assert_eq!(fit_window_size((1000, 850), (1366, 728)), Some((1000, 655)));
+        // Gespeicherte Größe vom großen Monitor auf einem Full-HD-Bildschirm
+        assert_eq!(
+            fit_window_size((2400, 1300), (1920, 1040)),
+            Some((1728, 936))
+        );
+    }
 }
