@@ -342,6 +342,22 @@ export async function mdMirrorExists(url, username, password, syncFolder = null)
 }
 
 /**
+ * Whether the last sync found the configured sync folder end-to-end encrypted. No request.
+ * @returns {Promise<boolean>}
+ */
+export async function syncBlocked() {
+  return await invoke('sync_blocked');
+}
+
+/**
+ * Check whether the sync folder is end-to-end encrypted on the server ({syncFolder}-e2ee/e2ee.json).
+ * @returns {Promise<boolean>}
+ */
+export async function e2eeActive(url, username, password, syncFolder = null) {
+  return await invoke('e2ee_active', { url, username, password, syncFolder });
+}
+
+/**
  * Backfill the Markdown mirror for all existing notes after enabling the setting
  * (false → true). Marks every note PENDING so the next sync writes its `.md` file too.
  * @returns {Promise<void>}
