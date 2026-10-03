@@ -6,6 +6,7 @@
  */
 import { Marked } from 'marked';
 import { IMAGE_REGEX, imagePlaceholderText, parseImageAlt } from './imageAltTokens.js';
+import { tolerantTables } from './markdownTable.js';
 
 /** Matches a `.assets/<name>` image href (mirrors NoteEditor's ASSET_HREF_REGEX). */
 const ASSET_HREF_REGEX = /^\.assets\/([A-Za-z0-9][A-Za-z0-9._-]*)$/;
@@ -56,7 +57,7 @@ export function collectAssetNames(content) {
  * External image URLs are left to Marked's default renderer.
  */
 export function markdownToShareHtml(markdown, dataUrls) {
-  const shareMarked = new Marked().use({
+  const shareMarked = new Marked(tolerantTables).use({
     renderer: {
       image({ href, text }) {
         const name = ASSET_HREF_REGEX.exec(href || '')?.[1];

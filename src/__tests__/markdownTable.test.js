@@ -1,6 +1,7 @@
 import { EditorSelection, EditorState } from '@codemirror/state';
+import { Marked } from 'marked';
 import { describe, expect, it } from 'vitest';
-import { tableAt } from '../utils/markdownTable.js';
+import { flattenTableRows, tableAt, tolerantTables } from '../utils/markdownTable.js';
 import { applyTable } from '../utils/markdownToolbar.js';
 
 /** Minimal stand-in for an EditorView: applyTable only uses state, dispatch and focus. */
@@ -79,5 +80,58 @@ describe('applyTable', () => {
     applyTable(view);
     applyTable(view);
     expect(view.state.doc.toString()).toBe('| Header | Header |\n| --- | --- |\n| Cell | Cell |\n| Cell | Cell |\n');
+  });
+});
+
+describe('tolerantTables (Android MarkdownEngine parity)', () => {
+  const md = new Marked(tolerantTables);
+  const cells = (html, tag) => [...html.matchAll(new RegExp(`<${tag}[^>]*>([^<]*)</${tag}>`, 'g'))].map((m) => m[1]);
+
+  it('renders a regular table like marked, alignment included', () => {
+    const src = '| a | b |\n| --- | :-: |\n| 1 | 2 |';
+    expect(md.parse(src)).toBe(new Marked().parse(src));
+  });
+
+  it('keeps the table when the delimiter row is half-typed', () => {
+    const html = md.parse('| a | b |\n| -lblblb-- | --- |\n| 1 | 2 |');
+    expect(cells(html, 'th')).toEqual(['a', 'b']);
+    expect(cells(html, 'td')).toEqual(['1', '2']);
+  });
+
+  it('widens the table to the widest row instead of cutting cells', () => {
+    const html = md.parse('| a | b |\n| --- | --- |\n| 1 | 2 | 3 |');
+    expect(cells(html, 'th')).toEqual(['a', 'b', '']);
+    expect(cells(html, 'td')).toEqual(['1', '2', '3']);
+  });
+
+  it('drops a body row made only of delimiter cells, keeps one with content', () => {
+    expect(cells(md.parse('| a |\n| --- |\n| --- |\n| 1 |'), 'td')).toEqual(['1']);
+    expect(cells(md.parse('| a | b |\n| --- | --- |\n| --- | offen |'), 'td')).toEqual(['---', 'offen']);
+  });
+
+  it('ends the table at a line without a pipe', () => {
+    const html = md.parse('| a |\n| --- |\n| 1 |\nProsa');
+    expect(cells(html, 'td')).toEqual(['1']);
+    expect(html).toContain('<p>Prosa</p>');
+  });
+
+  it('leaves prose with a pipe alone', () => {
+    expect(md.parse('a | b\nnoch Text')).toBe('<p>a | b\nnoch Text</p>\n');
+  });
+});
+
+describe('flattenTableRows', () => {
+  it('turns table rows into "a · b" and drops the delimiter row', () => {
+    expect(flattenTableRows('Vorher\n\n| Name | Header |\n| --- | --- |\n| Eins | Cell |')).toBe(
+      'Vorher\n\nName · Header\nEins · Cell',
+    );
+  });
+
+  it('leaves prose with a pipe untouched', () => {
+    expect(flattenTableRows('a | b\nText')).toBe('a | b\nText');
+  });
+
+  it('drops a body row made only of delimiter cells', () => {
+    expect(flattenTableRows('| a | b |\n| --- | --- |\n| --- | --- |\n| 1 | 2 |')).toBe('a · b\n1 · 2');
   });
 });

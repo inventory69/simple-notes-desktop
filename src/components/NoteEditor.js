@@ -14,6 +14,7 @@ import { colorPicker } from '../utils/ColorPicker.js';
 import { buildCalendarPayload, buildCalendarPayloadForItem } from '../utils/calendarExport.js';
 import { computeImageRewrite, parseImageAlt } from '../utils/imageAltTokens.js';
 import { markdownHighlightExtensions } from '../utils/markdownHighlight.js';
+import { tolerantTables } from '../utils/markdownTable.js';
 import {
   applyBold,
   applyChecklist,
@@ -62,7 +63,7 @@ let previewImgOrdinal = 0;
  *  `src` — DOMPurify's default ALLOWED_URI_REGEXP doesn't know the `snasset:` scheme and would
  *  strip it; `src` is set after sanitizing instead (see updatePreview()). External image URLs
  *  fall through to the default renderer (`return false`). */
-const previewMarked = new Marked().use({
+const previewMarked = new Marked(tolerantTables).use({
   renderer: {
     image({ href, text }) {
       const name = assetNameFrom(href);

@@ -1637,6 +1637,15 @@ body {
   font-weight: 600;
 }
 
+/* Column alignment from the delimiter row (`:---:` / `---:`), wins over the text-align above */
+.preview [align="center"] {
+  text-align: center;
+}
+
+.preview [align="right"] {
+  text-align: right;
+}
+
 .md-img {
   display: block;
   max-width: 100%;
