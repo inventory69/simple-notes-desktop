@@ -30,6 +30,13 @@ static RESPONSE_BLOCK_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
         .expect("response block pattern is valid")
 });
 
+/// Ordner-Marker innerhalb eines Response-Blocks, präfixunabhängig wie Android
+/// (`PropfindParser.kt`): `<D:collection/>` im `resourcetype` oder `httpd/unix-directory`.
+static COLLECTION_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)<(?:[a-z][\w.-]*:)?collection[\s/>]|httpd/unix-directory")
+        .expect("collection pattern is valid")
+});
+
 /// Regex zum Extrahieren von `<d:getlastmodified>` innerhalb eines Response-Blocks (RFC1123).
 static LAST_MODIFIED_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?is)<[Dd]:getlastmodified>([^<]+)</[Dd]:getlastmodified>")
@@ -488,15 +495,25 @@ impl WebDavClient {
     }
 
     /// Extrahiert direkte Unterordner-Namen aus einer PROPFIND-Antwort auf das Root-Verzeichnis.
+    ///
+    /// Zwei Wege zum Ordner: jeder `href` mit `/` am Ende (wie bisher, deckt auch Apache, dessen
+    /// `<D:response xmlns:…>` das `RESPONSE_BLOCK_PATTERN` nicht trifft) und jeder Block mit
+    /// Ordner-Marker (Android-Regel). Koofr schickt Ordner ohne `/` am Ende (Issue #10).
     fn extract_subdirs_from_propfind(&self, text: &str) -> Vec<String> {
         let mut subdirs: Vec<String> = Vec::new();
 
-        for cap in HREF_PATTERN.captures_iter(text) {
-            let href = cap[1].trim();
-            if !href.ends_with('/') {
-                continue;
-            }
+        let slash_hrefs = HREF_PATTERN
+            .captures_iter(text)
+            .filter_map(|c| c.get(1))
+            .map(|m| m.as_str().trim())
+            .filter(|href| href.ends_with('/'));
+        let collection_hrefs = RESPONSE_BLOCK_PATTERN.captures_iter(text).filter_map(|b| {
+            let block = b.get(1)?.as_str();
+            let href = HREF_PATTERN.captures(block)?.get(1)?.as_str().trim();
+            is_collection(block, href).then_some(href)
+        });
 
+        for href in slash_hrefs.chain(collection_hrefs) {
             // URL-decode und letztes Pfadsegment ermitteln
             let decoded = urlencoding::decode(href.trim_end_matches('/'))
                 .unwrap_or_else(|_| href.trim_end_matches('/').into())
@@ -1211,6 +1228,12 @@ fn to_if_match_value(etag: &str) -> String {
     format!("\"{}\"", normalize_etag(etag))
 }
 
+/// Ist dieser Response-Block ein Verzeichnis? `/` am `href`-Ende **oder** Ordner-Marker im Block
+/// (Android-Parität; Koofr schickt Ordner ohne `/` am Ende).
+fn is_collection(block: &str, href: &str) -> bool {
+    href.ends_with('/') || COLLECTION_PATTERN.is_match(block)
+}
+
 /// Sammelt `{uuid}.json` → ETag aus den Response-Blöcken einer PROPFIND-Antwort.
 /// Reine Funktion (wie `parse_server_assets`), damit sie ohne Server testbar ist.
 fn parse_note_etags(text: &str) -> HashMap<String, String> {
@@ -1249,7 +1272,7 @@ fn parse_server_assets(text: &str) -> Vec<(String, Option<i64>)> {
             continue;
         };
         let href = href_cap[1].trim();
-        if href.ends_with('/') {
+        if is_collection(block, href) {
             continue; // das Verzeichnis selbst
         }
         let decoded = urlencoding::decode(href)
@@ -1584,6 +1607,85 @@ mod tests {
 "#;
         let subdirs = c.extract_subdirs_from_propfind(body);
         assert_eq!(subdirs.len(), 1);
+    }
+
+    // Echte Koofr-Antworten (Issue #10, 04.10.2026): Ordner-hrefs ohne `/` am Ende, als
+    // Ordner erkennbar nur an `<D:collection/>`. Leere Live-Properties stehen in einem
+    // zweiten `404`-propstat.
+    const KOOFR_PROPFIND_ROOT: &str = r#"<?xml version="1.0" encoding="UTF-8"?><D:multistatus xmlns:D="DAV:"><D:response><D:href>/dav/Koofr/notes</D:href><D:propstat><D:prop><D:displayname>notes</D:displayname><D:resourcetype><D:collection xmlns:D="DAV:"/></D:resourcetype><D:getlastmodified>Sun, 04 Oct 2026 15:54:17 GMT</D:getlastmodified></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat><D:propstat><D:prop><D:getcontenttype></D:getcontenttype><D:getetag></D:getetag></D:prop><D:status>HTTP/1.1 404 Not Found</D:status></D:propstat></D:response><D:response><D:href>/dav/Koofr/notes/folders.json</D:href><D:propstat><D:prop><D:displayname>folders.json</D:displayname><D:getcontenttype>application/json</D:getcontenttype><D:resourcetype></D:resourcetype><D:getlastmodified>Sun, 04 Oct 2026 15:54:21 GMT</D:getlastmodified><D:getetag>"18db5e92cbb866803c"</D:getetag></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response><D:response><D:href>/dav/Koofr/notes/ideas</D:href><D:propstat><D:prop><D:displayname>ideas</D:displayname><D:resourcetype><D:collection xmlns:D="DAV:"/></D:resourcetype><D:getlastmodified>Sun, 04 Oct 2026 15:54:18 GMT</D:getlastmodified></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat><D:propstat><D:prop><D:getcontenttype></D:getcontenttype><D:getetag></D:getetag></D:prop><D:status>HTTP/1.1 404 Not Found</D:status></D:propstat></D:response></D:multistatus>"#;
+
+    const KOOFR_PROPFIND_IDEAS: &str = r#"<?xml version="1.0" encoding="UTF-8"?><D:multistatus xmlns:D="DAV:"><D:response><D:href>/dav/Koofr/notes/ideas</D:href><D:propstat><D:prop><D:displayname>ideas</D:displayname><D:resourcetype><D:collection xmlns:D="DAV:"/></D:resourcetype><D:getlastmodified>Sun, 04 Oct 2026 15:54:18 GMT</D:getlastmodified></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat><D:propstat><D:prop><D:getcontenttype></D:getcontenttype><D:getetag></D:getetag></D:prop><D:status>HTTP/1.1 404 Not Found</D:status></D:propstat></D:response><D:response><D:href>/dav/Koofr/notes/ideas/f58d47ad-5b35-456c-841b-eed400b74b6b.json</D:href><D:propstat><D:prop><D:displayname>f58d47ad-5b35-456c-841b-eed400b74b6b.json</D:displayname><D:getcontenttype>application/json</D:getcontenttype><D:resourcetype></D:resourcetype><D:getlastmodified>Sun, 04 Oct 2026 15:54:21 GMT</D:getlastmodified><D:getetag>"18db5e92edb1e900ef"</D:getetag></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response></D:multistatus>"#;
+
+    #[test]
+    fn test_extract_subdirs_koofr() {
+        let c = make_client();
+        assert_eq!(
+            c.extract_subdirs_from_propfind(KOOFR_PROPFIND_ROOT),
+            vec!["ideas".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_parse_note_etags_koofr() {
+        let map = parse_note_etags(KOOFR_PROPFIND_IDEAS);
+        assert_eq!(map.len(), 1);
+        assert_eq!(
+            map.get("f58d47ad-5b35-456c-841b-eed400b74b6b")
+                .map(|s| s.as_str()),
+            Some("\"18db5e92edb1e900ef\"")
+        );
+    }
+
+    #[test]
+    fn test_extract_subdirs_collection_without_slash() {
+        let c = make_client();
+        let body = r#"<d:multistatus xmlns:d="DAV:">
+<d:response><d:href>/dav/notes</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response>
+<d:response><d:href>/dav/notes/Work</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response>
+<d:response><d:href>/dav/notes/Old</d:href><d:propstat><d:prop><d:getcontenttype>httpd/unix-directory</d:getcontenttype></d:prop></d:propstat></d:response>
+</d:multistatus>"#;
+        assert_eq!(
+            c.extract_subdirs_from_propfind(body),
+            vec!["Work".to_string(), "Old".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_extract_subdirs_files_never_folders() {
+        let c = make_client();
+        let body = r#"<d:multistatus xmlns:d="DAV:">
+<d:response><d:href>/dav/notes/folders.json</d:href><d:propstat><d:prop><d:resourcetype/><d:getcontenttype>application/json</d:getcontenttype></d:prop></d:propstat></d:response>
+<d:response><d:href>/dav/notes/11111111-1111-1111-1111-111111111111.json</d:href><d:propstat><d:prop><d:resourcetype></d:resourcetype></d:prop></d:propstat></d:response>
+</d:multistatus>"#;
+        assert!(c.extract_subdirs_from_propfind(body).is_empty());
+    }
+
+    // Apache mod_dav setzt Namespaces an `<D:response …>`, das RESPONSE_BLOCK_PATTERN trifft
+    // den Block nicht. Der `/`-Weg muss deshalb erhalten bleiben.
+    #[test]
+    fn test_extract_subdirs_apache_response_attributes() {
+        let c = make_client();
+        let body = r#"<D:multistatus xmlns:D="DAV:" xmlns:ns0="DAV:">
+<D:response xmlns:lp1="DAV:" xmlns:lp2="http://apache.org/dav/props/"><D:href>/dav/notes/</D:href><D:propstat><D:prop><lp1:resourcetype><D:collection/></lp1:resourcetype></D:prop></D:propstat></D:response>
+<D:response xmlns:lp1="DAV:" xmlns:lp2="http://apache.org/dav/props/"><D:href>/dav/notes/Work/</D:href><D:propstat><D:prop><lp1:resourcetype><D:collection/></lp1:resourcetype></D:prop></D:propstat></D:response>
+</D:multistatus>"#;
+        assert_eq!(
+            c.extract_subdirs_from_propfind(body),
+            vec!["Work".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_parse_server_assets_koofr_skips_directory() {
+        // Echte Koofr-Antwort auf `notes-assets/` mit einer Datei.
+        let body = r#"<?xml version="1.0" encoding="UTF-8"?><D:multistatus xmlns:D="DAV:"><D:response><D:href>/dav/Koofr/notes-assets</D:href><D:propstat><D:prop><D:displayname>notes-assets</D:displayname><D:resourcetype><D:collection xmlns:D="DAV:"/></D:resourcetype><D:getlastmodified>Sun, 04 Oct 2026 15:56:48 GMT</D:getlastmodified></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat><D:propstat><D:prop><D:getcontenttype></D:getcontenttype><D:getetag></D:getetag></D:prop><D:status>HTTP/1.1 404 Not Found</D:status></D:propstat></D:response><D:response><D:href>/dav/Koofr/notes-assets/abc123.webp</D:href><D:propstat><D:prop><D:displayname>abc123.webp</D:displayname><D:getcontenttype>image/webp</D:getcontenttype><D:resourcetype></D:resourcetype><D:getlastmodified>Sun, 04 Oct 2026 16:31:09 GMT</D:getlastmodified><D:getetag>"18db6094f2de86004"</D:getetag></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response></D:multistatus>"#;
+        let assets = parse_server_assets(body);
+        assert_eq!(
+            assets.len(),
+            1,
+            "directory entry must be skipped: {assets:?}"
+        );
+        assert_eq!(assets[0].0, "abc123.webp");
     }
 
     // ── merge_deletion Tests ─────────────────────────────────────────────────────
