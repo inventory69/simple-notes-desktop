@@ -789,6 +789,7 @@ pub async fn run_sync(
     let snapshot = fetch_server_snapshot(client, &to_upload, &etags).await;
 
     let mut uploaded_ids: Vec<String> = Vec::new();
+    let mut without_put_etag: Vec<(String, Option<String>)> = Vec::new();
     for n in to_upload {
         let cached_etag = etags.get(&n.id).map(String::as_str);
         if is_stale_against_server(&n, cached_etag, &snapshot) {
@@ -799,14 +800,14 @@ pub async fn run_sync(
             Ok(put_etag) => {
                 local_store::mark_synced_if_unchanged(app, &n.id, n.updated_at);
                 // Kein ETag in der PUT-Antwort → keine belastbare Basis. Lieber vergessen als
-                // veraltet: das nächste Listing frischt sie auf, bis dahin gilt „im Zweifel
-                // hochladen".
+                // veraltet: das Listing nach der Schleife holt sie nach.
                 match put_etag {
                     Some(e) => {
                         etags.insert(n.id.clone(), e);
                     }
                     None => {
                         etags.remove(&n.id);
+                        without_put_etag.push((n.id.clone(), n.folder_name.clone()));
                     }
                 }
                 uploaded_ids.push(n.id.clone());
@@ -833,6 +834,25 @@ pub async fn run_sync(
                 mark_upload_conflict(app, &n, &mut summary, "if_match_412");
             }
             Err(e) => eprintln!("[sync] upload {} fehlgeschlagen: {}", n.id, e),
+        }
+    }
+    // PUT-Antwort ohne ETag (Apache): die Basis sofort per Listing nachholen wie Androids
+    // `NoteUploader`, sonst läuft der nächste Upload bis zum nächsten Sync ungeprüft durch.
+    let refetch_folders: HashSet<Option<String>> =
+        without_put_etag.iter().map(|(_, f)| f.clone()).collect();
+    for folder in refetch_folders {
+        match client.list_note_etags(folder.as_deref()).await {
+            Ok(listed) => {
+                for (id, _) in without_put_etag.iter().filter(|(_, f)| *f == folder) {
+                    if let Some(e) = listed.get(id) {
+                        etags.insert(id.clone(), e.clone());
+                    }
+                }
+            }
+            Err(e) => eprintln!(
+                "[sync] ETag-Listing nach Upload für Ordner {:?} fehlgeschlagen: {}",
+                folder, e
+            ),
         }
     }
     // Frisch (wieder-)hochgeladene Notizen aus dem Server-Lösch-Ledger streichen,
