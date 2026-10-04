@@ -17,16 +17,19 @@ static UUID_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     .expect("UUID pattern is valid")
 });
 
-/// Regex zum Extrahieren von WebDAV `<d:href>` (Namespace-Prefix-Varianten: d/D)
+// Die DAV-Muster nehmen jedes Namespace-Präfix oder keins, wie Androids `PropfindParser.kt`:
+// `d:`/`D:` (Nextcloud, Koofr), `ns0:` (WsgiDAV), `a:` (IIS), `<href>` im Default-Namespace.
+
+/// Regex zum Extrahieren von WebDAV `<d:href>`
 static HREF_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"<[Dd]:[Hh][Rr][Ee][Ff]>([^<]+)</[Dd]:[Hh][Rr][Ee][Ff]>")
+    Regex::new(r"(?i)<(?:[a-z][\w.-]*:)?href>([^<]+)</(?:[a-z][\w.-]*:)?href>")
         .expect("HREF pattern is valid")
 });
 
-/// Ein einzelner `<d:response>`-Block einer PROPFIND-Antwort (für die Href+mtime-Paarung
-/// beim Asset-Listing — das reine HREF_PATTERN liefert Namen ohne mtime).
+/// Ein einzelner `<d:response>`-Block einer PROPFIND-Antwort. Attribute am Element sind erlaubt:
+/// Apache (mod_dav) schreibt `<D:response xmlns:lp1="DAV:" …>`.
 static RESPONSE_BLOCK_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?is)<[Dd]:response>(.*?)</[Dd]:response>")
+    Regex::new(r"(?is)<(?:[a-z][\w.-]*:)?response(?:\s[^>]*)?>(.*?)</(?:[a-z][\w.-]*:)?response>")
         .expect("response block pattern is valid")
 });
 
@@ -39,15 +42,16 @@ static COLLECTION_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 
 /// Regex zum Extrahieren von `<d:getlastmodified>` innerhalb eines Response-Blocks (RFC1123).
 static LAST_MODIFIED_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?is)<[Dd]:getlastmodified>([^<]+)</[Dd]:getlastmodified>")
-        .expect("getlastmodified pattern is valid")
+    Regex::new(
+        r"(?is)<(?:[a-z][\w.-]*:)?getlastmodified>([^<]+)</(?:[a-z][\w.-]*:)?getlastmodified>",
+    )
+    .expect("getlastmodified pattern is valid")
 });
 
-/// Regex zum Extrahieren von `<d:getetag>` innerhalb eines Response-Blocks.
-/// Toleranter im Namespace-Prefix als die anderen Muster: `getetag` ist eine Live-Property,
-/// Apache/mod_dav gibt sie als `<lp1:getetag>` aus, Nextcloud als `<d:getetag>`.
+/// Regex zum Extrahieren von `<d:getetag>` innerhalb eines Response-Blocks. Live-Properties
+/// haben bei Apache ein eigenes Präfix (`<lp1:getetag>`).
 static ETAG_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?is)<[A-Za-z0-9]*:?getetag>([^<]+)</[A-Za-z0-9]*:?getetag>")
+    Regex::new(r"(?is)<(?:[a-z][\w.-]*:)?getetag>([^<]+)</(?:[a-z][\w.-]*:)?getetag>")
         .expect("getetag pattern is valid")
 });
 
@@ -495,25 +499,17 @@ impl WebDavClient {
     }
 
     /// Extrahiert direkte Unterordner-Namen aus einer PROPFIND-Antwort auf das Root-Verzeichnis.
-    ///
-    /// Zwei Wege zum Ordner: jeder `href` mit `/` am Ende (wie bisher, deckt auch Apache, dessen
-    /// `<D:response xmlns:…>` das `RESPONSE_BLOCK_PATTERN` nicht trifft) und jeder Block mit
-    /// Ordner-Marker (Android-Regel). Koofr schickt Ordner ohne `/` am Ende (Issue #10).
+    /// Je Response-Block zählt der erste `href`, Ordner erkennt `is_collection` (Android-Regel).
     fn extract_subdirs_from_propfind(&self, text: &str) -> Vec<String> {
         let mut subdirs: Vec<String> = Vec::new();
 
-        let slash_hrefs = HREF_PATTERN
-            .captures_iter(text)
-            .filter_map(|c| c.get(1))
-            .map(|m| m.as_str().trim())
-            .filter(|href| href.ends_with('/'));
         let collection_hrefs = RESPONSE_BLOCK_PATTERN.captures_iter(text).filter_map(|b| {
             let block = b.get(1)?.as_str();
             let href = HREF_PATTERN.captures(block)?.get(1)?.as_str().trim();
             is_collection(block, href).then_some(href)
         });
 
-        for href in slash_hrefs.chain(collection_hrefs) {
+        for href in collection_hrefs {
             // URL-decode und letztes Pfadsegment ermitteln
             let decoded = urlencoding::decode(href.trim_end_matches('/'))
                 .unwrap_or_else(|_| href.trim_end_matches('/').into())
@@ -1660,21 +1656,6 @@ mod tests {
         assert!(c.extract_subdirs_from_propfind(body).is_empty());
     }
 
-    // Apache mod_dav setzt Namespaces an `<D:response …>`, das RESPONSE_BLOCK_PATTERN trifft
-    // den Block nicht. Der `/`-Weg muss deshalb erhalten bleiben.
-    #[test]
-    fn test_extract_subdirs_apache_response_attributes() {
-        let c = make_client();
-        let body = r#"<D:multistatus xmlns:D="DAV:" xmlns:ns0="DAV:">
-<D:response xmlns:lp1="DAV:" xmlns:lp2="http://apache.org/dav/props/"><D:href>/dav/notes/</D:href><D:propstat><D:prop><lp1:resourcetype><D:collection/></lp1:resourcetype></D:prop></D:propstat></D:response>
-<D:response xmlns:lp1="DAV:" xmlns:lp2="http://apache.org/dav/props/"><D:href>/dav/notes/Work/</D:href><D:propstat><D:prop><lp1:resourcetype><D:collection/></lp1:resourcetype></D:prop></D:propstat></D:response>
-</D:multistatus>"#;
-        assert_eq!(
-            c.extract_subdirs_from_propfind(body),
-            vec!["Work".to_string()]
-        );
-    }
-
     #[test]
     fn test_parse_server_assets_koofr_skips_directory() {
         // Echte Koofr-Antwort auf `notes-assets/` mit einer Datei.
@@ -1686,6 +1667,218 @@ mod tests {
             "directory entry must be skipped: {assets:?}"
         );
         assert_eq!(assets[0].0, "abc123.webp");
+    }
+
+    // Echte Antworten fremder Server (04.10.2026). Apache 2.4.69 (mod_dav) setzt Namespaces an
+    // `<D:response xmlns:lp1=…>` und gibt Live-Properties als `lp1:` aus, WsgiDAV 4.3.5 nimmt
+    // `ns0:` als Präfix und liefert ETags ohne Quotes.
+    const APACHE_PROPFIND_ROOT: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:" xmlns:ns0="DAV:">
+<D:response xmlns:lp1="DAV:" xmlns:lp2="http://apache.org/dav/props/" xmlns:g0="DAV:">
+<D:href>/dav/notes/</D:href>
+<D:propstat>
+<D:prop>
+<D:getcontenttype>httpd/unix-directory</D:getcontenttype>
+<lp1:resourcetype><D:collection/></lp1:resourcetype>
+<lp1:getlastmodified>Sun, 04 Oct 2026 16:37:00 GMT</lp1:getlastmodified>
+<lp1:getetag>"50-65d065fe81930"</lp1:getetag>
+</D:prop>
+<D:status>HTTP/1.1 200 OK</D:status>
+</D:propstat>
+<D:propstat>
+<D:prop>
+<g0:displayname/>
+</D:prop>
+<D:status>HTTP/1.1 404 Not Found</D:status>
+</D:propstat>
+</D:response>
+<D:response xmlns:lp1="DAV:" xmlns:lp2="http://apache.org/dav/props/" xmlns:g0="DAV:">
+<D:href>/dav/notes/folders.json</D:href>
+<D:propstat>
+<D:prop>
+<D:getcontenttype>application/json</D:getcontenttype>
+<lp1:resourcetype/>
+<lp1:getlastmodified>Sun, 04 Oct 2026 16:37:00 GMT</lp1:getlastmodified>
+<lp1:getetag>"55-65d065fe81930"</lp1:getetag>
+</D:prop>
+<D:status>HTTP/1.1 200 OK</D:status>
+</D:propstat>
+<D:propstat>
+<D:prop>
+<g0:displayname/>
+</D:prop>
+<D:status>HTTP/1.1 404 Not Found</D:status>
+</D:propstat>
+</D:response>
+<D:response xmlns:lp1="DAV:" xmlns:lp2="http://apache.org/dav/props/" xmlns:g0="DAV:">
+<D:href>/dav/notes/ideas/</D:href>
+<D:propstat>
+<D:prop>
+<D:getcontenttype>httpd/unix-directory</D:getcontenttype>
+<lp1:resourcetype><D:collection/></lp1:resourcetype>
+<lp1:getlastmodified>Sun, 04 Oct 2026 16:36:06 GMT</lp1:getlastmodified>
+<lp1:getetag>"3c-65d065cac94d4"</lp1:getetag>
+</D:prop>
+<D:status>HTTP/1.1 200 OK</D:status>
+</D:propstat>
+<D:propstat>
+<D:prop>
+<g0:displayname/>
+</D:prop>
+<D:status>HTTP/1.1 404 Not Found</D:status>
+</D:propstat>
+</D:response>
+</D:multistatus>"#;
+
+    const APACHE_PROPFIND_IDEAS: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:" xmlns:ns0="DAV:">
+<D:response xmlns:lp1="DAV:" xmlns:lp2="http://apache.org/dav/props/" xmlns:g0="DAV:">
+<D:href>/dav/notes/ideas/</D:href>
+<D:propstat>
+<D:prop>
+<D:getcontenttype>httpd/unix-directory</D:getcontenttype>
+<lp1:resourcetype><D:collection/></lp1:resourcetype>
+<lp1:getlastmodified>Sun, 04 Oct 2026 16:34:36 GMT</lp1:getlastmodified>
+<lp1:getetag>W/"3c-65d0657523f23"</lp1:getetag>
+</D:prop>
+<D:status>HTTP/1.1 200 OK</D:status>
+</D:propstat>
+<D:propstat>
+<D:prop>
+<g0:displayname/>
+</D:prop>
+<D:status>HTTP/1.1 404 Not Found</D:status>
+</D:propstat>
+</D:response>
+<D:response xmlns:lp1="DAV:" xmlns:lp2="http://apache.org/dav/props/" xmlns:g0="DAV:">
+<D:href>/dav/notes/ideas/aaaaaaaa-1111-2222-3333-444444444444.json</D:href>
+<D:propstat>
+<D:prop>
+<D:getcontenttype>application/json</D:getcontenttype>
+<lp1:resourcetype/>
+<lp1:getlastmodified>Sun, 04 Oct 2026 16:34:36 GMT</lp1:getlastmodified>
+<lp1:getetag>W/"ea-65d0657523f23"</lp1:getetag>
+</D:prop>
+<D:status>HTTP/1.1 200 OK</D:status>
+</D:propstat>
+<D:propstat>
+<D:prop>
+<g0:displayname/>
+</D:prop>
+<D:status>HTTP/1.1 404 Not Found</D:status>
+</D:propstat>
+</D:response>
+</D:multistatus>"#;
+
+    const APACHE_PROPFIND_ASSETS: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:" xmlns:ns0="DAV:">
+<D:response xmlns:lp1="DAV:" xmlns:lp2="http://apache.org/dav/props/" xmlns:g0="DAV:">
+<D:href>/dav/notes-assets/</D:href>
+<D:propstat>
+<D:prop>
+<D:getcontenttype>httpd/unix-directory</D:getcontenttype>
+<lp1:resourcetype><D:collection/></lp1:resourcetype>
+<lp1:getlastmodified>Sun, 04 Oct 2026 16:36:06 GMT</lp1:getlastmodified>
+<lp1:getetag>"3c-65d065cacdf0c"</lp1:getetag>
+</D:prop>
+<D:status>HTTP/1.1 200 OK</D:status>
+</D:propstat>
+<D:propstat>
+<D:prop>
+<g0:displayname/>
+</D:prop>
+<D:status>HTTP/1.1 404 Not Found</D:status>
+</D:propstat>
+</D:response>
+<D:response xmlns:lp1="DAV:" xmlns:lp2="http://apache.org/dav/props/" xmlns:g0="DAV:">
+<D:href>/dav/notes-assets/pic1.png</D:href>
+<D:propstat>
+<D:prop>
+<D:getcontenttype>image/png</D:getcontenttype>
+<lp1:resourcetype/>
+<lp1:getlastmodified>Sun, 04 Oct 2026 16:36:06 GMT</lp1:getlastmodified>
+<lp1:getetag>"7b-65d065cac3714"</lp1:getetag>
+</D:prop>
+<D:status>HTTP/1.1 200 OK</D:status>
+</D:propstat>
+<D:propstat>
+<D:prop>
+<g0:displayname/>
+</D:prop>
+<D:status>HTTP/1.1 404 Not Found</D:status>
+</D:propstat>
+</D:response>
+</D:multistatus>"#;
+
+    const WSGIDAV_PROPFIND_ROOT: &str = r#"<?xml version="1.0" encoding="utf-8" ?>
+<ns0:multistatus xmlns:ns0="DAV:"><ns0:response><ns0:href>/notes/</ns0:href><ns0:propstat><ns0:prop><ns0:displayname>notes</ns0:displayname><ns0:resourcetype><ns0:collection /></ns0:resourcetype><ns0:getlastmodified>Sun, 04 Oct 2026 16:36:06 GMT</ns0:getlastmodified></ns0:prop><ns0:status>HTTP/1.1 200 OK</ns0:status></ns0:propstat><ns0:propstat><ns0:prop><ns0:getcontenttype /><ns0:getetag /></ns0:prop><ns0:status>HTTP/1.1 404 Not Found</ns0:status></ns0:propstat></ns0:response><ns0:response><ns0:href>/notes/folders.json</ns0:href><ns0:propstat><ns0:prop><ns0:displayname>folders.json</ns0:displayname><ns0:getcontenttype>application/json</ns0:getcontenttype><ns0:resourcetype /><ns0:getlastmodified>Sun, 04 Oct 2026 16:36:06 GMT</ns0:getlastmodified><ns0:getetag>1095-1791131766-60</ns0:getetag></ns0:prop><ns0:status>HTTP/1.1 200 OK</ns0:status></ns0:propstat></ns0:response><ns0:response><ns0:href>/notes/ideas/</ns0:href><ns0:propstat><ns0:prop><ns0:displayname>ideas</ns0:displayname><ns0:resourcetype><ns0:collection /></ns0:resourcetype><ns0:getlastmodified>Sun, 04 Oct 2026 16:36:06 GMT</ns0:getlastmodified></ns0:prop><ns0:status>HTTP/1.1 200 OK</ns0:status></ns0:propstat><ns0:propstat><ns0:prop><ns0:getcontenttype /><ns0:getetag /></ns0:prop><ns0:status>HTTP/1.1 404 Not Found</ns0:status></ns0:propstat></ns0:response></ns0:multistatus>"#;
+
+    const WSGIDAV_PROPFIND_IDEAS: &str = r#"<?xml version="1.0" encoding="utf-8" ?>
+<ns0:multistatus xmlns:ns0="DAV:"><ns0:response><ns0:href>/notes/ideas/</ns0:href><ns0:propstat><ns0:prop><ns0:displayname>ideas</ns0:displayname><ns0:resourcetype><ns0:collection /></ns0:resourcetype><ns0:getlastmodified>Sun, 04 Oct 2026 16:36:06 GMT</ns0:getlastmodified></ns0:prop><ns0:status>HTTP/1.1 200 OK</ns0:status></ns0:propstat><ns0:propstat><ns0:prop><ns0:getcontenttype /><ns0:getetag /></ns0:prop><ns0:status>HTTP/1.1 404 Not Found</ns0:status></ns0:propstat></ns0:response><ns0:response><ns0:href>/notes/ideas/bbbbbbbb-1111-2222-3333-444444444444.json</ns0:href><ns0:propstat><ns0:prop><ns0:displayname>bbbbbbbb-1111-2222-3333-444444444444.json</ns0:displayname><ns0:getcontenttype>application/json</ns0:getcontenttype><ns0:resourcetype /><ns0:getlastmodified>Sun, 04 Oct 2026 16:36:06 GMT</ns0:getlastmodified><ns0:getetag>1096-1791131766-235</ns0:getetag></ns0:prop><ns0:status>HTTP/1.1 200 OK</ns0:status></ns0:propstat></ns0:response></ns0:multistatus>"#;
+
+    const WSGIDAV_PROPFIND_ASSETS: &str = r#"<?xml version="1.0" encoding="utf-8" ?>
+<ns0:multistatus xmlns:ns0="DAV:"><ns0:response><ns0:href>/notes-assets/</ns0:href><ns0:propstat><ns0:prop><ns0:displayname>notes-assets</ns0:displayname><ns0:resourcetype><ns0:collection /></ns0:resourcetype><ns0:getlastmodified>Sun, 04 Oct 2026 16:36:06 GMT</ns0:getlastmodified></ns0:prop><ns0:status>HTTP/1.1 200 OK</ns0:status></ns0:propstat><ns0:propstat><ns0:prop><ns0:getcontenttype /><ns0:getetag /></ns0:prop><ns0:status>HTTP/1.1 404 Not Found</ns0:status></ns0:propstat></ns0:response><ns0:response><ns0:href>/notes-assets/pic1.png</ns0:href><ns0:propstat><ns0:prop><ns0:displayname>pic1.png</ns0:displayname><ns0:getcontenttype>image/png</ns0:getcontenttype><ns0:resourcetype /><ns0:getlastmodified>Sun, 04 Oct 2026 16:36:06 GMT</ns0:getlastmodified><ns0:getetag>1098-1791131766-123</ns0:getetag></ns0:prop><ns0:status>HTTP/1.1 200 OK</ns0:status></ns0:propstat></ns0:response></ns0:multistatus>"#;
+
+    #[test]
+    fn test_extract_subdirs_apache_and_wsgidav() {
+        let c = make_client();
+        assert_eq!(
+            c.extract_subdirs_from_propfind(APACHE_PROPFIND_ROOT),
+            vec!["ideas".to_string()]
+        );
+        assert_eq!(
+            c.extract_subdirs_from_propfind(WSGIDAV_PROPFIND_ROOT),
+            vec!["ideas".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_parse_note_etags_apache_and_wsgidav() {
+        let apache = parse_note_etags(APACHE_PROPFIND_IDEAS);
+        assert_eq!(
+            apache
+                .get("aaaaaaaa-1111-2222-3333-444444444444")
+                .map(|s| s.as_str()),
+            Some("W/\"ea-65d0657523f23\"")
+        );
+        let wsgidav = parse_note_etags(WSGIDAV_PROPFIND_IDEAS);
+        assert_eq!(
+            wsgidav
+                .get("bbbbbbbb-1111-2222-3333-444444444444")
+                .map(|s| s.as_str()),
+            Some("1096-1791131766-235")
+        );
+    }
+
+    #[test]
+    fn test_parse_server_assets_apache_and_wsgidav() {
+        for body in [APACHE_PROPFIND_ASSETS, WSGIDAV_PROPFIND_ASSETS] {
+            let assets = parse_server_assets(body);
+            assert_eq!(assets.len(), 1, "{assets:?}");
+            assert_eq!(assets[0].0, "pic1.png");
+            assert!(assets[0].1.is_some(), "mtime must parse: {assets:?}");
+        }
+    }
+
+    // Android parst auch den Default-Namespace ohne Präfix (`PropfindParserTest`).
+    #[test]
+    fn test_propfind_default_namespace() {
+        let c = make_client();
+        let body = r#"<multistatus xmlns="DAV:">
+<response><href>/dav/notes/</href><propstat><prop><resourcetype><collection/></resourcetype></prop></propstat></response>
+<response><href>/dav/notes/Work/</href><propstat><prop><resourcetype><collection/></resourcetype></prop></propstat></response>
+<response><href>/dav/notes/11111111-2222-3333-4444-555555555555.json</href><propstat><prop><resourcetype/><getetag>"e1"</getetag></prop></propstat></response>
+</multistatus>"#;
+        assert_eq!(
+            c.extract_subdirs_from_propfind(body),
+            vec!["Work".to_string()]
+        );
+        assert_eq!(
+            parse_note_etags(body)
+                .get("11111111-2222-3333-4444-555555555555")
+                .map(|s| s.as_str()),
+            Some("\"e1\"")
+        );
     }
 
     // ── merge_deletion Tests ─────────────────────────────────────────────────────
