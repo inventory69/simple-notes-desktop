@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.2] - 2026-10-04
+
+### Fixed
+
+- Notes inside folders now show up with Koofr and other WebDAV servers that list folders without a trailing slash; the folder appeared but stayed empty ([76c0564](https://github.com/inventory69/simple-notes-desktop/commit/76c0564e757cb57350d2d71aaf6ec94c1ab90bb2))
+  - A folder is now recognized by its WebDAV collection marker, the same rule as in the Android app
+  - On these servers the image folder itself no longer counts as an image
+  - Reported by [@HudHudh](https://github.com/HudHudh), closes [#10](https://github.com/inventory69/simple-notes-desktop/issues/10)
+- Sync now works with WsgiDAV, Apache (mod_dav) and other servers that answer with a different XML namespace prefix ([93d92a0](https://github.com/inventory69/simple-notes-desktop/commit/93d92a0dcb6eb8c392a94de8a175efd560990f4f))
+  - WsgiDAV: notes inside folders were missing, the same symptom as #10
+  - Apache: images added on another device never reached the desktop, and the server listing gave no basis for conflict detection
+- Edits from another device are no longer overwritten on servers that send no ETag after an upload, such as Apache: the desktop now fetches it right after the upload, like the Android app ([bce0636](https://github.com/inventory69/simple-notes-desktop/commit/bce0636cba699873a3b74ea70ba1e3f7f111a94a))
+
 ## [0.15.1] - 2026-10-04
 
 ### Fixed

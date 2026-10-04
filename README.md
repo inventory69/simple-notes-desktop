@@ -203,6 +203,6 @@ GNU Affero General Public License v3.0, the same license as the Android app. See
 
 <div align="center">
 
-**v0.15.1** · Built with ❤️ using [Tauri](https://tauri.app/) + [CodeMirror](https://codemirror.net/)
+**v0.15.2** · Built with ❤️ using [Tauri](https://tauri.app/) + [CodeMirror](https://codemirror.net/)
 
 </div>
