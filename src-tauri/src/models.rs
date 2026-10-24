@@ -137,6 +137,16 @@ pub struct Note {
     )]
     pub archived_at: Option<i64>,
 
+    /// Android v2.21.0: letzte Inhaltsänderung (Titel, Text, Checkliste), nur für Anzeige und
+    /// Sortierung. `updated_at` bleibt die LWW-Sync-Uhr und steigt auch bei Ordner, Pin, Farbe.
+    /// Beim Laden mit `updated_at` vorbelegt ([`Note::fill_content_updated_at`]).
+    #[serde(
+        rename = "contentUpdatedAt",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub content_updated_at: Option<i64>,
+
     /// Cross-App-Kompatibilität: Auffangbecken für alle weiteren Notiz-Felder, die
     /// die Desktop-App nicht modelliert (inkl. künftiger Android-Schema-Erweiterungen).
     /// Werden beim Round-Trip 1:1 erhalten — der Kern des Datenverlust-Fix.
@@ -166,8 +176,42 @@ impl Note {
             folder_name: None,
             trashed_at: None,
             archived_at: None,
+            content_updated_at: Some(now),
             extra: serde_json::Map::new(),
         }
+    }
+
+    /// Angezeigte Bearbeitungszeit, Fallback für alte Notizen und alte Clients.
+    pub fn edited_at(&self) -> i64 {
+        self.content_updated_at.unwrap_or(self.updated_at)
+    }
+
+    /// Vorbelegung nach jedem Laden: Sonst fiele eine Bestandsnotiz nach Verschieben/Pin/Farbe
+    /// auf das gerade erhöhte `updated_at` zurück, und genau das soll die Inhaltszeit verhindern.
+    pub fn fill_content_updated_at(&mut self) {
+        self.content_updated_at.get_or_insert(self.updated_at);
+    }
+
+    /// Inhalt verschieden? Typabhängig wie Android: Bei Checklisten nur Titel und Items (Text,
+    /// Haken, Reihenfolge), nie der Fallback-`content`, den die Checkliste mitschleppt.
+    pub fn content_differs(&self, other: &Note) -> bool {
+        if self.note_type != other.note_type || self.title != other.title {
+            return true;
+        }
+        if self.note_type != NoteType::Checklist {
+            return self.content.trim() != other.content.trim();
+        }
+        let sorted = |n: &Note| {
+            let mut items: Vec<(i32, String, bool)> = n
+                .checklist_items
+                .iter()
+                .flatten()
+                .map(|i| (i.order, i.text.clone(), i.is_checked))
+                .collect();
+            items.sort_by_key(|i| i.0);
+            items
+        };
+        sorted(self) != sorted(other)
     }
 
     /// Erstellt eine neue Checklisten-Notiz
@@ -232,10 +276,24 @@ pub struct NoteMetadata {
         skip_serializing_if = "Option::is_none"
     )]
     pub archived_at: Option<i64>,
+    /// Android v2.21.0: Inhaltszeit für Anzeige und Sortierung (Frontend: `contentUpdatedAt ?? updatedAt`).
+    #[serde(
+        rename = "contentUpdatedAt",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub content_updated_at: Option<i64>,
     /// Sync-Status für Konflikt-Badge im Frontend (Phase 6).
     /// Wird aus dem Sync-Cache überlagert; default SYNCED für Server-Notizen ohne Cache-Eintrag.
     #[serde(default)]
     pub sync_status: SyncStatus,
+}
+
+impl NoteMetadata {
+    /// Wie [`Note::edited_at`].
+    pub fn edited_at(&self) -> i64 {
+        self.content_updated_at.unwrap_or(self.updated_at)
+    }
 }
 
 impl From<&Note> for NoteMetadata {
@@ -254,6 +312,7 @@ impl From<&Note> for NoteMetadata {
             folder_name: note.folder_name.clone(),
             trashed_at: note.trashed_at,
             archived_at: note.archived_at,
+            content_updated_at: note.content_updated_at,
             sync_status: note.sync_status,
         }
     }
@@ -725,5 +784,34 @@ mod tests {
         // 404 / empty body case — serde must not panic
         let ledger: DeletionLedger = serde_json::from_str("{}").unwrap();
         assert!(ledger.deleted_notes.is_empty());
+    }
+
+    #[test]
+    fn test_content_updated_at_round_trip_and_prefill() {
+        let json =
+            r#"{"id":"x","title":"T","content":"c","createdAt":1,"updatedAt":7000,"deviceId":"d"}"#;
+        let mut note: Note = serde_json::from_str(json).unwrap();
+        assert_eq!(note.content_updated_at, None);
+        assert_eq!(note.edited_at(), 7000);
+        note.fill_content_updated_at();
+        note.updated_at = 9000; // z.B. verschoben
+        assert_eq!(note.edited_at(), 7000);
+
+        let out = serde_json::to_value(&note).unwrap();
+        assert_eq!(out["contentUpdatedAt"], 7000);
+        assert!(!note.extra.contains_key("contentUpdatedAt"));
+        let back: Note = serde_json::from_value(out).unwrap();
+        assert_eq!(back.content_updated_at, Some(7000));
+    }
+
+    #[test]
+    fn test_content_differs_text() {
+        let a = Note::new("T".into(), "d".into());
+        let mut b = a.clone();
+        b.color = Some("#FF0000".into());
+        b.is_pinned = Some(true);
+        assert!(!a.content_differs(&b));
+        b.content = "neu".into();
+        assert!(a.content_differs(&b));
     }
 }

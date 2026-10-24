@@ -153,12 +153,12 @@ class NoteService {
           this.notes.unshift(updatedNote);
         }
 
-        // Re-sort to match server ordering: pinned first, then updatedAt desc.
+        // Re-sort to match server ordering: pinned first, then edited time desc.
         this.notes.sort((a, b) => {
           const aPin = a.isPinned ? 1 : 0;
           const bPin = b.isPinned ? 1 : 0;
           if (bPin !== aPin) return bPin - aPin;
-          return b.updatedAt - a.updatedAt;
+          return editedAt(b) - editedAt(a);
         });
 
         this.currentNote = updatedNote;
@@ -464,5 +464,8 @@ class NoteService {
     return this.notes;
   }
 }
+
+/** Angezeigte Bearbeitungszeit: Inhaltszeit (Android v2.21.0), Fallback für alte Notizen. */
+export const editedAt = (note) => note.contentUpdatedAt ?? note.updatedAt;
 
 export default new NoteService();

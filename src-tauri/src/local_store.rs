@@ -247,8 +247,14 @@ pub fn put_note(app: &AppHandle, note: &Note) {
 /// Notiz laden. Gibt `None` zurück wenn nicht vorhanden.
 pub fn get_note(app: &AppHandle, id: &str) -> Option<Note> {
     let map = load_notes_map(app);
-    map.get(id)
-        .and_then(|v| serde_json::from_value::<Note>(v.clone()).ok())
+    map.get(id).and_then(decode_note)
+}
+
+/// Deserialisiert eine Notiz und belegt `contentUpdatedAt` vor (Bestandsnotizen ohne Feld).
+fn decode_note(v: &serde_json::Value) -> Option<Note> {
+    let mut note = serde_json::from_value::<Note>(v.clone()).ok()?;
+    note.fill_content_updated_at();
+    Some(note)
 }
 
 /// Prüft ob eine Notiz im lokalen Store existiert (nach ID, unabhängig vom Ordner-Status).
@@ -298,7 +304,7 @@ fn should_mark_synced(note: &Note, uploaded_updated_at: i64) -> bool {
 pub fn list_notes(app: &AppHandle) -> Vec<Note> {
     load_notes_map(app)
         .values()
-        .filter_map(|v| serde_json::from_value::<Note>(v.clone()).ok())
+        .filter_map(decode_note)
         .collect()
 }
 

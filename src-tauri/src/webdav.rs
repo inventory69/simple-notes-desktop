@@ -587,6 +587,7 @@ impl WebDavClient {
 
                 // Fix noteType basierend auf checklistItems (für alte Notizen ohne noteType-Feld)
                 note.fix_note_type();
+                note.fill_content_updated_at();
 
                 // Pfad ist maßgebend — überschreibt was im JSON-Body steht
                 note.folder_name = folder.map(str::to_owned);

@@ -2,7 +2,7 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { dialogService } from '../services/DialogService.js';
-import noteService from '../services/noteService.js';
+import noteService, { editedAt } from '../services/noteService.js';
 import { colorPicker } from '../utils/ColorPicker.js';
 import { imagePreviewText } from '../utils/imageAltTokens.js';
 import { flattenTableRows } from '../utils/markdownTable.js';
@@ -899,7 +899,7 @@ export class NotesList {
           const ta = a.noteType === 'TEXT' ? 0 : 1;
           const tb = b.noteType === 'TEXT' ? 0 : 1;
           if (ta !== tb) return asc ? ta - tb : tb - ta;
-          return b.updatedAt - a.updatedAt;
+          return editedAt(b) - editedAt(a);
         });
         break;
       case 'COLOR': {
@@ -911,12 +911,12 @@ export class NotesList {
         rest.sort((a, b) => {
           const diff = colorIdx(a.color) - colorIdx(b.color);
           if (diff !== 0) return asc ? diff : -diff;
-          return b.updatedAt - a.updatedAt;
+          return editedAt(b) - editedAt(a);
         });
         break;
       }
       default: // UPDATED_AT
-        rest.sort((a, b) => (asc ? a.updatedAt - b.updatedAt : b.updatedAt - a.updatedAt));
+        rest.sort((a, b) => (asc ? editedAt(a) - editedAt(b) : editedAt(b) - editedAt(a)));
     }
 
     return [...pinned, ...rest];
@@ -1006,7 +1006,7 @@ export class NotesList {
 
   renderNoteItem(note) {
     const previewLines = this.getPreviewLines(note);
-    const date = this.formatDate(note.updatedAt);
+    const date = this.formatDate(editedAt(note));
     const isActive = note.id === this.selectedId && !this.selectionMode;
     const isSelected = this.selectedIds.has(note.id);
     const pinIcon = note.isPinned
@@ -1064,7 +1064,7 @@ export class NotesList {
             ${note.syncStatus === 'DELETED_ON_SERVER' ? `<span class="sync-deleted-badge" title="Deleted on server">🗑</span>` : ''}
           </div>
           <div class="note-item-preview">${previewLines.map((line) => `<div class="preview-line">${note.noteType === 'CHECKLIST' ? this.escapeHtml(line) : this.renderPreviewLine(line)}</div>`).join('')}</div>
-          <div class="note-item-meta">${pinIcon}<span class="note-item-date" data-ts="${note.updatedAt}">${date}</span></div>
+          <div class="note-item-meta">${pinIcon}<span class="note-item-date" data-ts="${editedAt(note)}">${date}</span></div>
         </div>
       </div>
     `;
