@@ -1,3 +1,4 @@
+import DOMPurify from 'dompurify';
 import { describe, expect, it } from 'vitest';
 import { collectAssetNames, markdownToShareHtml, noteToMarkdown, noteToPlainText } from '../utils/noteShare.js';
 
@@ -96,5 +97,31 @@ describe('markdownToShareHtml', () => {
     const md = '![alt](https://example.com/pic.png)';
     const html = markdownToShareHtml(md, new Map());
     expect(html).toContain('<img src="https://example.com/pic.png"');
+  });
+});
+
+describe('print HTML (NoteEditor.print)', () => {
+  it('keeps checked and unchecked checkboxes through DOMPurify, title as <h1>', () => {
+    const note = {
+      title: 'Shopping',
+      noteType: 'CHECKLIST',
+      checklistItems: [
+        { id: '1', text: 'Milk', isChecked: true, order: 0 },
+        { id: '2', text: 'Bread', isChecked: false, order: 1 },
+      ],
+    };
+    const root = document.createElement('div');
+    root.innerHTML = DOMPurify.sanitize(markdownToShareHtml(noteToMarkdown(note), new Map()));
+    expect(root.querySelector('h1').textContent).toBe('Shopping');
+    const boxes = [...root.querySelectorAll('li > input[type="checkbox"]')];
+    expect(boxes.map((b) => [b.parentElement.textContent.trim(), b.checked])).toEqual([
+      ['Milk', true],
+      ['Bread', false],
+    ]);
+  });
+
+  it('keeps data: URL images through DOMPurify', () => {
+    const html = markdownToShareHtml('![](.assets/x.png)', new Map([['x.png', 'data:image/png;base64,AAA=']]));
+    expect(DOMPurify.sanitize(html)).toContain('src="data:image/png;base64,AAA="');
   });
 });

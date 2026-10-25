@@ -360,6 +360,15 @@ class App {
         return;
       }
 
+      // Ctrl+P → Print the open note (instead of the WebView printing the whole app UI)
+      if (e.ctrlKey && e.key === 'p') {
+        e.preventDefault();
+        if (this.noteEditor.currentNote) {
+          this.noteEditor.print();
+        }
+        return;
+      }
+
       // Ctrl+F → Focus search input
       if (e.ctrlKey && e.key === 'f') {
         e.preventDefault();

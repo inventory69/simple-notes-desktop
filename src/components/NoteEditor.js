@@ -1089,6 +1089,7 @@ export class NoteEditor {
       <div class="sort-menu-item" data-action="share">Copy with images</div>
       <div class="sort-menu-item" data-action="copy-text">Copy as text</div>
       <div class="sort-menu-item" data-action="calendar">Add to calendar</div>
+      <div class="sort-menu-item" data-action="print">Print</div>
       <div class="sort-menu-separator"></div>
       <div class="sort-menu-item" data-action="archive">${archived ? 'Unarchive' : 'Archive'}</div>
     `;
@@ -1117,6 +1118,9 @@ export class NoteEditor {
           break;
         case 'calendar':
           this._handleCalendar();
+          break;
+        case 'print':
+          this.print();
           break;
         case 'archive':
           this.handleArchiveToggle();
@@ -1196,6 +1200,31 @@ export class NoteEditor {
     } catch (error) {
       console.error('Failed to copy note with images:', error);
       await dialogService.error({ title: 'Copy with Images', message: error.message || String(error) });
+    }
+  }
+
+  /** ⋮ → Print / Ctrl+P: renders the note into #print-root (the only element shown under
+   *  @media print) and opens the system print dialog. Checklists print all items, checked ones
+   *  struck through. ponytail: images past SHARE_DATA_URL_BUDGET print as [🖼 alt] placeholders. */
+  async print() {
+    const note = this.currentNote;
+    if (!note) return;
+    const md = noteToMarkdown(note);
+    if (!md.trim()) {
+      await dialogService.error({ message: 'Note is empty' });
+      return;
+    }
+    const root = document.getElementById('print-root');
+    try {
+      const dataUrls = await this._resolveShareDataUrls(collectAssetNames(md));
+      root.innerHTML = DOMPurify.sanitize(markdownToShareHtml(md, dataUrls));
+      await Promise.all([...root.querySelectorAll('img')].map((img) => img.decode().catch(() => {})));
+      window.addEventListener('afterprint', () => root.replaceChildren(), { once: true });
+      window.print();
+    } catch (error) {
+      root.replaceChildren();
+      console.error('Failed to print note:', error);
+      await dialogService.error({ title: 'Print', message: error.message || String(error) });
     }
   }
 

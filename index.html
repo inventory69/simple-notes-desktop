@@ -604,6 +604,10 @@
       </div>
     </div>
 
+    <!-- Print target: filled by NoteEditor.print(), the only thing visible under @media print.
+         .preview reuses the preview pane's Markdown styles (lists, tables, headings). -->
+    <div id="print-root" class="preview" hidden></div>
+
     <!-- Color Picker Popup -->
     <div id="color-picker-popup" class="color-picker-popup hidden" role="dialog" aria-label="Choose note color">
       <div class="color-circles">
