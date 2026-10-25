@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-25
+
+### Added
+
+- Print notes and checklists from the note menu or with Ctrl+P, which used to print the whole app window ([1b23ab5](https://github.com/inventory69/simple-notes-desktop/commit/1b23ab580da2b8651f5c425796fddad2c307057e))
+  - Only the open note is printed, black on white regardless of theme; checked items are struck through and images print at their position
+  - On Windows the date, title and URL header and footer that WebView2 adds are removed
+
+### Changed
+
+- The note list now shows and sorts by the last content edit, so pinning, coloring or moving a note no longer makes it look freshly edited ([e68a15a](https://github.com/inventory69/simple-notes-desktop/commit/e68a15a8db5cbcec91f12961f526cf06f676abe9))
+  - Reads and writes `contentUpdatedAt`, the field Android v2.21.0 introduced; notes without it fall back to `updatedAt`
+  - The content time only moves when the title, text or checklist actually changes
+
 ## [0.15.2] - 2026-10-04
 
 ### Fixed

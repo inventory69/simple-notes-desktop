@@ -1,5 +1,5 @@
+- Print notes and checklists from the note menu or with Ctrl+P
+- The note list now sorts by the last content edit: pinning, coloring or moving a note no longer moves it to the top
 - Notes inside folders now show up with Koofr and similar WebDAV servers instead of an empty folder
-- Images added on another device now reach the desktop on Apache-based WebDAV servers
 - Sync works with more WebDAV servers, such as WsgiDAV and Apache
-- Edits from another device are no longer overwritten on servers that report no version after saving
 - The window now fits small screens instead of reaching past the edge with the title bar out of reach
