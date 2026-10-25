@@ -173,7 +173,7 @@ async fn list_notes(app: AppHandle) -> Result<Vec<NoteMetadata>> {
         let b_pin = b.is_pinned.unwrap_or(false);
         b_pin
             .cmp(&a_pin)
-            .then_with(|| b.updated_at.cmp(&a.updated_at))
+            .then_with(|| b.edited_at().cmp(&a.edited_at()))
     });
     Ok(notes)
 }
@@ -189,10 +189,22 @@ async fn get_note(id: String, app: AppHandle) -> Result<Note> {
 #[tauri::command]
 async fn save_note(mut note: Note, app: AppHandle) -> Result<Note> {
     note.updated_at = chrono::Utc::now().timestamp_millis();
+    let stored = local_store::get_note(&app, &note.id);
+    note.content_updated_at = Some(content_time(&note, stored.as_ref()));
     local_store::mark_dirty(&app, &mut note);
     local_store::put_note(&app, &note);
     scheduler::trigger_sync(&app);
     Ok(note)
+}
+
+/// Inhaltszeit für `save_note`: neu bei neuer Notiz oder geändertem Inhalt, sonst die der
+/// **gespeicherten** Notiz, nicht die des Frontend-Objekts. So bleibt eine reine Farbänderung
+/// aus dem Editor ohne Effekt.
+fn content_time(note: &Note, stored: Option<&Note>) -> i64 {
+    match stored {
+        Some(prev) if !note.content_differs(prev) => prev.edited_at(),
+        _ => note.updated_at,
+    }
 }
 
 /// Erzeugt ein .ics-Event aus Titel/Beschreibung und öffnet es mit der Standard-App
@@ -751,7 +763,7 @@ async fn list_archive(app: AppHandle) -> Result<Vec<NoteMetadata>> {
         let b_pin = b.is_pinned.unwrap_or(false);
         b_pin
             .cmp(&a_pin)
-            .then_with(|| b.updated_at.cmp(&a.updated_at))
+            .then_with(|| b.edited_at().cmp(&a.edited_at()))
     });
     Ok(archived)
 }
@@ -1642,7 +1654,8 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::fit_window_size;
+    use super::{content_time, fit_window_size};
+    use crate::models::{self, Note};
 
     #[test]
     fn test_fit_window_size() {
@@ -1658,5 +1671,50 @@ mod tests {
             fit_window_size((2400, 1300), (1920, 1040)),
             Some((1728, 936))
         );
+    }
+
+    fn checklist() -> Note {
+        let mut note = Note::new_checklist("List".into(), "tauri-test".into());
+        note.updated_at = 1_000;
+        note.content_updated_at = Some(1_000);
+        note.content = "[ ] a".into();
+        note.checklist_items = Some(vec![models::ChecklistItem {
+            id: "1".into(),
+            text: "a".into(),
+            order: 0,
+            ..Default::default()
+        }]);
+        note
+    }
+
+    #[test]
+    fn content_time_ignores_color_and_checklist_fallback() {
+        let stored = checklist();
+        let mut edited = stored.clone();
+        edited.updated_at = 9_000;
+        edited.color = Some("#FF0000".into());
+        edited.content = String::new(); // Frontend schickt den Fallback-Text nicht mit
+        edited.content_updated_at = Some(9_000); // Frontend-Wert zählt nicht
+        assert_eq!(content_time(&edited, Some(&stored)), 1_000);
+    }
+
+    #[test]
+    fn content_time_moves_on_tick_and_for_new_notes() {
+        let stored = checklist();
+        let mut ticked = stored.clone();
+        ticked.updated_at = 9_000;
+        ticked.checklist_items.as_mut().unwrap()[0].is_checked = true;
+        assert_eq!(content_time(&ticked, Some(&stored)), 9_000);
+        assert_eq!(content_time(&ticked, None), 9_000);
+    }
+
+    #[test]
+    fn content_time_falls_back_for_stored_note_without_field() {
+        let mut stored = checklist();
+        stored.content_updated_at = None;
+        let mut moved = stored.clone();
+        moved.updated_at = 9_000;
+        moved.folder_name = Some("Work".into());
+        assert_eq!(content_time(&moved, Some(&stored)), 1_000);
     }
 }

@@ -2928,3 +2928,82 @@ select.dialog-input option {
   white-space: nowrap;
   font-weight: 500;
 }
+
+/* Print: only #print-root (filled by NoteEditor.print()), black on white regardless of theme */
+@media print {
+  body {
+    overflow: visible;
+    background: #fff;
+  }
+
+  body > :not(#print-root) {
+    /* biome-ignore lint/complexity/noImportantStyles: must beat .dialog/.hidden and inline display styles */
+    display: none !important;
+  }
+
+  #print-root {
+    /* biome-ignore lint/complexity/noImportantStyles: overrides the [hidden] attribute */
+    display: block !important;
+    color: #000;
+    background: #fff;
+    font-size: 13pt;
+    /* Backgrounds (checkmark, table header) are dropped in print unless forced */
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+    padding: 0;
+    border: 0;
+    overflow: visible;
+    --color-border: #999;
+    --color-hover: #eee;
+    --color-primary: #000;
+  }
+
+  #print-root > :first-child {
+    margin-top: 0;
+  }
+
+  /* WebView2 (Chromium) prints a date/title/URL header and footer into the page margin. A zero
+     margin suppresses them; the padding takes over as margin, cloned onto every page. Gated on
+     clone support: WebKitGTK only has the prefixed form, which doesn't clone across pages */
+  @supports (box-decoration-break: clone) {
+    @page {
+      margin: 0;
+    }
+
+    #print-root {
+      padding: 15mm 18mm;
+      box-decoration-break: clone;
+    }
+  }
+
+  #print-root img {
+    max-width: 100%;
+    break-inside: avoid;
+  }
+
+  #print-root li:has(> input[type="checkbox"]) {
+    list-style: none;
+  }
+
+  /* Native disabled checkboxes print tiny and faded in the theme accent color */
+  #print-root input[type="checkbox"] {
+    appearance: none;
+    width: 0.9em;
+    height: 0.9em;
+    margin-right: 0.4em;
+    vertical-align: -0.1em;
+    border: 1.5px solid #000;
+    border-radius: 2px;
+  }
+
+  #print-root input[type="checkbox"]:checked {
+    background:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 8.5l3.5 3.5L13 4.5' fill='none' stroke='%23000' stroke-width='2.5'/%3E%3C/svg%3E")
+      center / contain no-repeat;
+  }
+
+  #print-root li:has(> input:checked) {
+    text-decoration: line-through;
+    color: #555;
+  }
+}
