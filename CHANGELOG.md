@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-11-27
+
+### Fixed
+
+- Pressing Enter while the conflict dialog pops up during typing now keeps your text; the dialog used to default to the server version and discarded it ([ff2aff6](https://github.com/inventory69/simple-notes-desktop/commit/ff2aff687a4e6bfcf1575722d4ee729c144f1836))
+  - The dialog offers Keep mine, Use server and Cancel; after Cancel it no longer returns on every sync, and the ⚡ badge in the note list resolves the conflict later
+  - Reported by [@TobyMaroni](https://github.com/TobyMaroni) with a screenshot from [@Willem243](https://github.com/Willem243), closes [#12](https://github.com/inventory69/simple-notes-desktop/issues/12)
+- Servers that reject every upload carrying a version check, such as Nutstore, no longer turn each edit into a conflict ([5183c21](https://github.com/inventory69/simple-notes-desktop/commit/5183c21ed0b22289e6cefe0ffa1c086edf907882))
+  - After such a rejection the app checks whether the file on the server is unchanged and then uploads normally; a real change from another device is still a conflict
+- Moving a note to another folder no longer marks it as a conflict on Nextcloud and Apache ([a98de96](https://github.com/inventory69/simple-notes-desktop/commit/a98de96623f85512092875342edc4f6122afcdf9))
+  - Moving a note to another folder and back before it synced no longer deletes it from the server
+- Saving a note that sync updated from another device while it was open now marks a conflict instead of overwriting the other version, for example with autosave off ([ce33ea3](https://github.com/inventory69/simple-notes-desktop/commit/ce33ea3175571ca27b7e9bca3dc947bbc5cf4ed1))
+- The activity log shows the reason next to each conflict and wraps long entries instead of cutting them off ([43d8ef6](https://github.com/inventory69/simple-notes-desktop/commit/43d8ef68ce991e7a7f7b5c70be887af668cfe57e))
+
 ## [0.16.0] - 2026-10-25
 
 ### Added

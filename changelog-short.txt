@@ -1,5 +1,5 @@
-- Print notes and checklists from the note menu or with Ctrl+P
-- The note list now sorts by the last content edit: pinning, coloring or moving a note no longer moves it to the top
-- Notes inside folders now show up with Koofr and similar WebDAV servers instead of an empty folder
-- Sync works with more WebDAV servers, such as WsgiDAV and Apache
-- The window now fits small screens instead of reaching past the edge with the title bar out of reach
+- Pressing Enter while the conflict dialog appears now keeps your text instead of loading the server version
+- Fewer false sync conflicts on Nutstore, Nextcloud and Apache, for example after moving a note to another folder
+- A note moved to another folder and back before syncing no longer disappears from the server
+- Saving over a version that another device synced in the meantime now asks instead of overwriting it
+- The activity log shows why a conflict happened and no longer cuts off long entries
