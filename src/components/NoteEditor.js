@@ -1247,6 +1247,7 @@ export class NoteEditor {
   }
 
   loadNote(note) {
+    this._conflictDismissed = false;
     // Flush any pending autosave for the previous note before switching
     if (this.saveTimeout) {
       clearTimeout(this.saveTimeout);
@@ -1488,21 +1489,32 @@ export class NoteEditor {
    */
   /** Echter Server-Konflikt (Backend hat SyncStatus=CONFLICT gesetzt). */
   async handleServerConflict() {
-    if (!this.currentNote) return;
+    // Ein weiterer Sync während des offenen Dialogs darf keinen zweiten darüberlegen.
+    if (!this.currentNote || this._conflictDialogOpen || this._conflictDismissed) return;
     const id = this.currentNote.id;
-    const confirmed = await dialogService.confirm({
-      title: 'Note Updated on Server',
-      message: 'This note was changed on another device. Load the server version and discard your local changes?',
-      confirmText: 'Load Server Version',
-      cancelText: 'Keep Mine',
-      type: 'warning',
-    });
+    this._conflictDialogOpen = true;
+    // „Keep mine" hat den Fokus: wer beim Erscheinen weitertippt und Enter drückt, behält
+    // seinen Text. Vorher war „Load Server Version" der Standard und verwarf ihn (#12).
+    let resolution;
+    try {
+      resolution = await dialogService.confirmConflictResolve({ isDeleted: false });
+    } finally {
+      this._conflictDialogOpen = false;
+    }
+    if (this.currentNote?.id !== id) return;
+    // Abgebrochen: Konflikt bleibt stehen (Autosave hält ihn, lädt nichts hoch), lösbar über das
+    // Badge in der Notizliste. Nicht bei jedem Sync erneut fragen, erst nach neuem Laden.
+    // Den Autosave-Timer hier NICHT löschen — loadNote speichert beim Wechsel nur mit Timer nach.
+    if (resolution === null) {
+      this._conflictDismissed = true;
+      return;
+    }
     if (this.saveTimeout) {
       clearTimeout(this.saveTimeout);
       this.saveTimeout = null;
     }
-    if (!confirmed && this._isDirty) await this.save();
-    await noteService.resolveConflict(id, confirmed ? 'use_server' : 'keep_mine');
+    if (resolution === 'keep_mine' && this._isDirty) await this.save();
+    await noteService.resolveConflict(id, resolution);
     // notes enthält NoteMetadata (kein deviceId) — volles Note-Objekt holen.
     const resolved = await noteService.getNote(id);
     if (resolved) this.loadNote(resolved);
