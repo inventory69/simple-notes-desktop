@@ -688,7 +688,12 @@ class DialogService {
       this._attachBackdropHandler(() => done(null));
       document.addEventListener('keydown', handleKeydown);
 
-      setTimeout(() => document.getElementById('cr-keep')?.focus(), 100);
+      // WebKit lässt beim Fokuswechsel die Auswahl im Editor stehen: der nächste Buchstabe landet
+      // dort und holt den Fokus zurück, Enter wählt dann nicht mehr „Keep mine" (#12).
+      setTimeout(() => {
+        document.getSelection()?.removeAllRanges();
+        document.getElementById('cr-keep')?.focus();
+      }, 100);
     });
   }
 

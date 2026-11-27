@@ -686,10 +686,18 @@ impl WebDavClient {
                     .and_then(|v| v.to_str().ok())
                     .map(str::to_string));
             }
-            if status == StatusCode::PRECONDITION_FAILED {
+            let unsupported = match &precondition {
+                Some(p) => {
+                    PRECONDITION_UNSUPPORTED_CODES.contains(&status.as_u16())
+                        || (status == StatusCode::PRECONDITION_FAILED
+                            && self.still_lists_etag(note, p).await)
+                }
+                None => false,
+            };
+            if status == StatusCode::PRECONDITION_FAILED && !unsupported {
                 return Err(AppError::PreconditionFailed);
             }
-            if precondition.is_some() && PRECONDITION_UNSUPPORTED_CODES.contains(&status.as_u16()) {
+            if unsupported {
                 // Der Server kann die Precondition nicht auswerten. Einmal ohne wiederholen und
                 // für diese Verbindung merken — ein dauerhaft blockierter Upload wäre schlimmer
                 // als der fehlende Konfliktschutz.
@@ -708,6 +716,21 @@ impl WebDavClient {
                 "PUT JSON failed: {} - {}",
                 status, error_body
             )));
+        }
+    }
+
+    /// Meldet der Server nach einem `412` im Listing noch genau den ETag, den das `If-Match`
+    /// trug? Dann hat niemand sonst geschrieben, der Server wertet die Precondition nur falsch
+    /// aus — Nutstore (坚果云) lehnt so jedes `If-Match` ab (Android-Parität #182). Kostet einen
+    /// PROPFIND, nur im 412-Fall und danach nie wieder (Flag). Schlägt das Listing fehl, bleibt
+    /// es ein Konflikt.
+    async fn still_lists_etag(&self, note: &Note, sent: &str) -> bool {
+        match self.list_note_etags(note.folder_name.as_deref()).await {
+            Ok(etags) => etags_match(etags.get(&note.id).map(String::as_str), Some(sent)),
+            Err(e) => {
+                eprintln!("[WebDAV] Nachprüfung nach 412 fehlgeschlagen: {}", e);
+                false
+            }
         }
     }
 

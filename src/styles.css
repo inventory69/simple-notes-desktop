@@ -782,9 +782,8 @@ body {
 .activity-log-row-text {
   flex: 1;
   color: var(--text-color);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Umbrechen statt abschneiden: Grund und Fehlermeldung stehen am Zeilenende. */
+  overflow-wrap: anywhere;
 }
 
 .activity-log-actions {

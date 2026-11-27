@@ -458,10 +458,10 @@ export class SettingsDialog {
   _describeActivityEntry(entry) {
     const label = ACTIVITY_OP_LABELS[entry.op] || entry.op;
     if (entry.err) return `${label}: ${entry.err}`;
-    if (entry.title) return `${label}: ${entry.title}`;
-    if (entry.folder) return `${label}: ${entry.folder}`;
-    if (entry.why) return `${label} (${entry.why})`;
-    return label;
+    // Grund auch bei Einträgen mit Titel zeigen — sonst bleibt z.B. der Konfliktgrund unsichtbar.
+    const why = entry.why ? ` (${entry.why})` : '';
+    const subject = entry.title || entry.folder;
+    return subject ? `${label}: ${subject}${why}` : `${label}${why}`;
   }
 
   async _handleClearActivityLog() {

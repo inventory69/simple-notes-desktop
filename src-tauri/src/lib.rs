@@ -188,13 +188,53 @@ async fn get_note(id: String, app: AppHandle) -> Result<Note> {
 
 #[tauri::command]
 async fn save_note(mut note: Note, app: AppHandle) -> Result<Note> {
-    note.updated_at = chrono::Utc::now().timestamp_millis();
+    // ponytail: get + put ohne gemeinsamen Lock — ein Download genau dazwischen entgeht der
+    // Prüfung. Fenster ohne await, also winzig; ein update-Closure im local_store schlösse es.
     let stored = local_store::get_note(&app, &note.id);
+    let outdated = stored
+        .as_ref()
+        .is_some_and(|s| editor_base_outdated(&note, s));
+    note.updated_at = chrono::Utc::now().timestamp_millis();
     note.content_updated_at = Some(content_time(&note, stored.as_ref()));
     local_store::mark_dirty(&app, &mut note);
+    // Ein bestehender Konflikt bleibt bis zur Auflösung stehen, sonst machte ihn der nächste
+    // Autosave zu PENDING (Android-Parität).
+    if outdated || stored.is_some_and(|s| s.sync_status == SyncStatus::Conflict) {
+        note.sync_status = SyncStatus::Conflict;
+    }
     local_store::put_note(&app, &note);
+    if outdated {
+        eprintln!(
+            "[save_note] {} während der Bearbeitung vom Sync aktualisiert → CONFLICT",
+            note.id
+        );
+        activity_log::log(
+            &app,
+            activity_log::Op::Conflict,
+            activity_log::Src::Local,
+            Some(&note.id),
+            Some(&note.title),
+            note.folder_name.as_deref(),
+            Some("editor_outdated_base"),
+            None,
+        );
+    }
     scheduler::trigger_sync(&app);
     Ok(note)
+}
+
+/// Hat der Sync eine fremde Fassung heruntergeladen, während die Notiz im Editor offen war?
+/// (Android-Parität `editor_outdated_base`). Das Frontend schickt die Inhaltszeit der zuletzt
+/// geladenen bzw. gespeicherten Fassung mit — die Basis des Editors. Steht lokal inzwischen eine
+/// SYNCED-Fassung mit anderer Inhaltszeit und anderem Inhalt, hat der Download die ETag-Basis schon
+/// aufgefrischt: ohne diese Prüfung überschriebe der Upload die fremde Änderung ohne Rückfrage.
+/// Fehlt die Basis, gibt es kein Urteil (Zweifelsfall blockiert nicht).
+fn editor_base_outdated(note: &Note, stored: &Note) -> bool {
+    stored.sync_status == SyncStatus::Synced
+        && note
+            .content_updated_at
+            .is_some_and(|base| base != stored.edited_at())
+        && note.content_differs(stored)
 }
 
 /// Inhaltszeit für `save_note`: neu bei neuer Notiz oder geändertem Inhalt, sonst die der
@@ -1654,8 +1694,8 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{content_time, fit_window_size};
-    use crate::models::{self, Note};
+    use super::{content_time, editor_base_outdated, fit_window_size};
+    use crate::models::{self, Note, SyncStatus};
 
     #[test]
     fn test_fit_window_size() {
@@ -1706,6 +1746,32 @@ mod tests {
         ticked.checklist_items.as_mut().unwrap()[0].is_checked = true;
         assert_eq!(content_time(&ticked, Some(&stored)), 9_000);
         assert_eq!(content_time(&ticked, None), 9_000);
+    }
+
+    #[test]
+    fn editor_base_outdated_only_for_foreign_synced_content() {
+        let mut stored = checklist();
+        stored.sync_status = SyncStatus::Synced;
+        // Editor setzt auf genau dieser Fassung auf und hakt ab → normales Speichern.
+        let mut edit = stored.clone();
+        edit.checklist_items.as_mut().unwrap()[0].is_checked = true;
+        assert!(!editor_base_outdated(&edit, &stored));
+        // Sync hat inzwischen eine fremde Fassung geholt (andere Inhaltszeit) → Konflikt.
+        let mut downloaded = stored.clone();
+        downloaded.content_updated_at = Some(5_000);
+        downloaded.title = "Changed elsewhere".into();
+        assert!(editor_base_outdated(&edit, &downloaded));
+        // Noch nicht hochgeladen (PENDING) → eigene Änderung, kein Konflikt.
+        downloaded.sync_status = SyncStatus::Pending;
+        assert!(!editor_base_outdated(&edit, &downloaded));
+        // Gleicher Inhalt wie der Download → nichts geht verloren.
+        downloaded.sync_status = SyncStatus::Synced;
+        let mut same = downloaded.clone();
+        same.content_updated_at = Some(1_000);
+        assert!(!editor_base_outdated(&same, &downloaded));
+        // Frontend ohne Basis → kein Urteil.
+        edit.content_updated_at = None;
+        assert!(!editor_base_outdated(&edit, &downloaded));
     }
 
     #[test]

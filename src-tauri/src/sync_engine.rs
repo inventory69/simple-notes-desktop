@@ -340,11 +340,25 @@ fn should_adopt_server(
 /// Server-Stand der Ordner, in die hochgeladen werden soll (Android-Parität `ServerSnapshot`).
 #[derive(Default)]
 struct ServerSnapshot {
-    /// note_id → ETag auf dem Server
-    etags: HashMap<String, String>,
+    /// (Ordner, note_id) → ETag auf dem Server. Nach Ordner getrennt, weil eine verschobene
+    /// Notiz bis zum Move-Cleanup in beiden Ordnern liegt — es zählt nur die Kopie am Zielpfad.
+    etags: HashMap<(Option<String>, String), String>,
     /// Ordner, deren PROPFIND **erfolgreich** war (`None` = Root). Nur für diese darf aus
     /// „ID fehlt im Snapshot" auf „existiert serverseitig nicht" geschlossen werden.
     listed_folders: HashSet<Option<String>>,
+}
+
+impl ServerSnapshot {
+    /// Server-ETag der Datei am aktuellen Pfad der Notiz.
+    fn etag_of(&self, note: &Note) -> Option<&String> {
+        self.etags.get(&(note.folder_name.clone(), note.id.clone()))
+    }
+
+    /// Sicher bekannt, dass die Datei am aktuellen Pfad der Notiz fehlt (Ordner gelistet,
+    /// Datei nicht drin) — z.B. nach Verschieben oder Ordner-Umbenennung.
+    fn lacks(&self, note: &Note) -> bool {
+        self.listed_folders.contains(&note.folder_name) && self.etag_of(note).is_none()
+    }
 }
 
 /// Holt die aktuellen Server-ETags der Ordner, in denen etwas hochzuladen ist
@@ -371,7 +385,9 @@ async fn fetch_server_snapshot(
     for folder in folders {
         match client.list_note_etags(folder.as_deref()).await {
             Ok(m) => {
-                snapshot.etags.extend(m);
+                snapshot
+                    .etags
+                    .extend(m.into_iter().map(|(id, e)| ((folder.clone(), id), e)));
                 snapshot.listed_folders.insert(folder);
             }
             // Ein fehlgeschlagenes Listing darf niemals einen Upload blockieren: der Ordner
@@ -404,7 +420,7 @@ fn is_stale_against_server(
         return false;
     }
     // Datei serverseitig nicht vorhanden → es gibt nichts zu überschreiben.
-    let Some(server) = snapshot.etags.get(&note.id) else {
+    let Some(server) = snapshot.etag_of(note) else {
         return false;
     };
     !crate::webdav::etags_match(Some(server), Some(cached))
@@ -796,7 +812,10 @@ pub async fn run_sync(
             mark_upload_conflict(app, &n, &mut summary, "server_etag_changed");
             continue;
         }
-        match client.save_note(&n, write_markdown, cached_etag).await {
+        // Datei fehlt am Zielpfad (verschoben, Ordner umbenannt): den alten ETag als If-Match
+        // lehnen Apache und sabre/dav (Nextcloud) mit 412 ab (Android-Parität).
+        let if_match = cached_etag.filter(|_| !snapshot.lacks(&n));
+        match client.save_note(&n, write_markdown, if_match).await {
             Ok(put_etag) => {
                 local_store::mark_synced_if_unchanged(app, &n.id, n.updated_at);
                 // Kein ETag in der PUT-Antwort → keine belastbare Basis. Lieber vergessen als
@@ -998,7 +1017,8 @@ mod tests {
         let mut snap = ServerSnapshot::default();
         snap.listed_folders.insert(note.folder_name.clone());
         if let Some(e) = server_etag {
-            snap.etags.insert(note.id.clone(), e.to_string());
+            snap.etags
+                .insert((note.folder_name.clone(), note.id.clone()), e.to_string());
         }
         snap
     }
@@ -1041,6 +1061,25 @@ mod tests {
         let n = note_with(SyncStatus::Pending, Some("Work"));
         let snap = snapshot_with(&n, Some("\"new\""));
         assert!(is_stale_against_server(&n, Some("\"old\""), &snap));
+    }
+
+    #[test]
+    fn test_moved_note_lacks_file_at_new_path() {
+        // Alte Kopie noch in „Old" gelistet, Zielordner „New" ohne Datei → kein If-Match, kein
+        // Konflikt; die alte Kopie darf nicht als Datei am Zielpfad durchgehen.
+        let n = note_with(SyncStatus::Pending, Some("New"));
+        let mut snap = snapshot_with(&n, None);
+        snap.listed_folders.insert(Some("Old".to_string()));
+        snap.etags.insert(
+            (Some("Old".to_string()), n.id.clone()),
+            "\"old\"".to_string(),
+        );
+        assert!(snap.lacks(&n));
+        assert!(!is_stale_against_server(&n, Some("\"old\""), &snap));
+        // Unbekannter Zielordner → kein Urteil, If-Match bleibt.
+        assert!(!ServerSnapshot::default().lacks(&n));
+        // Datei am Zielpfad vorhanden → If-Match bleibt.
+        assert!(!snapshot_with(&n, Some("\"x\"")).lacks(&n));
     }
 
     #[test]
