@@ -301,6 +301,17 @@ describe('SettingsDialog', () => {
     });
   });
 
+  describe('_describeActivityEntry()', () => {
+    it('shows the reason next to the title', () => {
+      const dialog = new SettingsDialog();
+      expect(dialog._describeActivityEntry({ op: 'CONFLICT', title: 'Note', why: 'if_match_412' })).toBe(
+        'Conflict detected: Note (if_match_412)',
+      );
+      expect(dialog._describeActivityEntry({ op: 'CONFLICT', title: 'Note' })).toBe('Conflict detected: Note');
+      expect(dialog._describeActivityEntry({ op: 'CONFLICT', why: 'x' })).toBe('Conflict detected (x)');
+    });
+  });
+
   describe('handleSave()', () => {
     it('should save credentials whenever server fields are filled, even if offline', async () => {
       const dialog = new SettingsDialog();
