@@ -3,6 +3,8 @@ use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 
 use crate::folders::FolderMeta;
+use crate::local_store;
+use crate::models::SyncStatus;
 use crate::webdav::WebDavClient;
 
 const STORE_FILE: &str = "sync_state.json";
@@ -172,6 +174,39 @@ pub fn clear_all(app: &AppHandle) {
 
 // ── Drain ────────────────────────────────────────────────────────────────────
 
+/// Was mit einem Move-Cleanup passiert, solange die Notiz lokal noch existiert.
+#[derive(Debug, PartialEq, Eq)]
+enum MoveCleanup {
+    /// Notiz liegt wieder im alten Ordner (Zurückschieben): der alte Pfad ist der aktuelle,
+    /// Eintrag ohne Request verwerfen — sonst löschte er genau die gültige Datei.
+    Drop,
+    /// Neuer Pfad noch nicht hochgeladen (Fehler, Konflikt): alte Kopie behalten, sonst liegt
+    /// die Notiz nirgends mehr auf dem Server.
+    Wait,
+    /// Alten Pfad löschen.
+    Delete,
+}
+
+/// Android-Parität (`processPendingServerDeletions`). Ordnervergleich ohne Groß-/Kleinschreibung
+/// wie in `move_notes`. `awaiting_upload` = die Notiz soll noch zum neuen Pfad hoch.
+fn move_cleanup(
+    entry_folder: Option<&str>,
+    note_folder: Option<&str>,
+    awaiting_upload: bool,
+) -> MoveCleanup {
+    let same = match (entry_folder, note_folder) {
+        (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+        (a, b) => a == b,
+    };
+    if same {
+        MoveCleanup::Drop
+    } else if awaiting_upload {
+        MoveCleanup::Wait
+    } else {
+        MoveCleanup::Delete
+    }
+}
+
 /// Verarbeitet die Offline-Queue: führt ausstehende Löschungen und
 /// Ordner-Tombstones aus, schreibt erfolgreich gelöschte IDs ins Lösch-Ledger.
 /// Port von Android's `processPendingServerDeletions`.
@@ -189,6 +224,25 @@ pub async fn drain_sync_queue(
         let mut move_ids: Vec<String> = Vec::new(); // Move-Cleanup → kein Ledger
 
         for d in &deletions {
+            if d.is_move {
+                if let Some(local) = local_store::get_note(app, &d.id) {
+                    // Local-only-Ordner laden nie hoch — dort darf die alte Kopie sofort weg.
+                    let awaiting_upload = local.sync_status != SyncStatus::Synced
+                        && !local_store::is_local_only(app, local.folder_name.as_deref());
+                    match move_cleanup(
+                        d.folder.as_deref(),
+                        local.folder_name.as_deref(),
+                        awaiting_upload,
+                    ) {
+                        MoveCleanup::Drop => {
+                            move_ids.push(d.id.clone());
+                            continue;
+                        }
+                        MoveCleanup::Wait => continue,
+                        MoveCleanup::Delete => {}
+                    }
+                }
+            }
             match client
                 .delete_note_by_id_folder(&d.id, d.folder.as_deref())
                 .await
@@ -258,6 +312,24 @@ pub async fn drain_sync_queue(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_move_cleanup_decisions() {
+        // Zurück im alten Ordner (auch Root, auch andere Schreibweise) → verwerfen.
+        assert_eq!(
+            move_cleanup(Some("Work"), Some("work"), true),
+            MoveCleanup::Drop
+        );
+        assert_eq!(move_cleanup(None, None, false), MoveCleanup::Drop);
+        // Neuer Pfad noch nicht oben → warten.
+        assert_eq!(move_cleanup(Some("Work"), None, true), MoveCleanup::Wait);
+        assert_eq!(move_cleanup(None, Some("New"), true), MoveCleanup::Wait);
+        // Am neuen Pfad gesynct (oder local-only) → alten Pfad löschen.
+        assert_eq!(
+            move_cleanup(Some("Work"), Some("New"), false),
+            MoveCleanup::Delete
+        );
+    }
 
     #[test]
     fn test_pending_deletion_serde() {
